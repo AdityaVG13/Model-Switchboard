@@ -1,0 +1,87 @@
+name: ModelSwitchboard
+options:
+  minimumXcodeGenVersion: 2.45.4
+  bundleIdPrefix: io.modelswitchboard
+  deploymentTarget:
+    macOS: "14.0"
+  projectFormat: xcode16_3
+  createIntermediateGroups: true
+packages:
+  MenuBarExtraAccess:
+    path: Vendor/MenuBarExtraAccess
+  ModelSwitchboardPackage:
+    path: .
+settings:
+  base:
+    SWIFT_VERSION: 6.0
+    MARKETING_VERSION: 0.1.0
+    CURRENT_PROJECT_VERSION: 1
+    MACOSX_DEPLOYMENT_TARGET: 14.0
+targets:
+  ModelSwitchboard:
+    type: application
+    platform: macOS
+    sources:
+      - Sources/ModelSwitchboardApp
+    info:
+      path: Resources/App/Info.plist
+      properties:
+        CFBundleDisplayName: ModelSwitchboard
+        LSUIElement: true
+        NSHighResolutionCapable: true
+        CFBundleURLTypes:
+          - CFBundleURLName: io.modelswitchboard.app
+            CFBundleURLSchemes:
+              - modelswitchboard
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.modelswitchboard.app
+        PRODUCT_NAME: ModelSwitchboard
+        GENERATE_INFOPLIST_FILE: NO
+    dependencies:
+      - package: ModelSwitchboardPackage
+        product: ModelSwitchboardCore
+      - package: MenuBarExtraAccess
+        product: MenuBarExtraAccess
+      - target: ModelSwitchboardWidget
+        embed: true
+        codeSign: true
+        copy:
+          destination: plugins
+    scheme:
+      testTargets:
+        - ModelSwitchboardTests
+
+  ModelSwitchboardWidget:
+    type: app-extension
+    platform: macOS
+    sources:
+      - Sources/ModelSwitchboardWidget
+    info:
+      path: Resources/Widget/Info.plist
+      properties:
+        CFBundleDisplayName: ModelSwitchboard Widget
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.modelswitchboard.app.widget
+        PRODUCT_NAME: ModelSwitchboardWidget
+        GENERATE_INFOPLIST_FILE: NO
+        APPLICATION_EXTENSION_API_ONLY: YES
+    dependencies:
+      - package: ModelSwitchboardPackage
+        product: ModelSwitchboardCore
+
+  ModelSwitchboardTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - Tests/ModelSwitchboardCoreTests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.modelswitchboard.app.tests
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - package: ModelSwitchboardPackage
+        product: ModelSwitchboardCore

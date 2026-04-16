@@ -1,0 +1,11 @@
+{
+  "DISPLAY_NAME": "Example Custom OpenAI Server",
+  "RUNTIME": "custom",
+  "START_COMMAND": "/absolute/path/to/your-launch-script.sh",
+  "BASE_URL": "http://127.0.0.1:8099/v1",
+  "HEALTHCHECK_MODE": "http-200",
+  "HEALTHCHECK_URL": "http://127.0.0.1:8099/health",
+  "REQUEST_MODEL": "custom-local-model",
+  "SERVER_MODEL_ID": "custom-local-model",
+  "SYNC_TO_DROID": "0"
+}

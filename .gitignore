@@ -1,0 +1,7 @@
+.build/
+.xcodebuild/
+ModelSwitchboard.xcodeproj/
+dist/
+.DS_Store
+.swiftpm/
+Controller/bin/
