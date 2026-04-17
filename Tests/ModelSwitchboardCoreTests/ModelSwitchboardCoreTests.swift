@@ -340,3 +340,19 @@ import Testing
     #expect(pendingPolicy.mode == .pendingAction)
     #expect(pendingPolicy.interval == AutoRefreshPolicy.pendingActionInterval)
 }
+
+@Test func companionBundleIdentifierMapsBaseToPlus() {
+    #expect(
+        LoginItemBundleIdentifiers.companion(for: "io.modelswitchboard.app") == "io.modelswitchboard.plus"
+    )
+}
+
+@Test func companionBundleIdentifierMapsPlusToBase() {
+    #expect(
+        LoginItemBundleIdentifiers.companion(for: "io.modelswitchboard.plus") == "io.modelswitchboard.app"
+    )
+}
+
+@Test func companionBundleIdentifierReturnsNilForUnknownSuffix() {
+    #expect(LoginItemBundleIdentifiers.companion(for: "io.modelswitchboard.desktop") == nil)
+}

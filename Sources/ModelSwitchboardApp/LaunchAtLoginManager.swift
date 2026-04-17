@@ -1,5 +1,6 @@
 import Foundation
 import ServiceManagement
+import ModelSwitchboardCore
 
 @MainActor
 final class LaunchAtLoginManager: ObservableObject {
@@ -44,6 +45,7 @@ final class LaunchAtLoginManager: ObservableObject {
 
         do {
             if enabled {
+                try unregisterCompanionEditionLoginItem()
                 try SMAppService.mainApp.register()
             } else {
                 try SMAppService.mainApp.unregister()
@@ -54,5 +56,25 @@ final class LaunchAtLoginManager: ObservableObject {
         }
 
         refresh()
+    }
+
+    @available(macOS 13.0, *)
+    private func unregisterCompanionEditionLoginItem() throws {
+        guard
+            let currentBundleIdentifier = Bundle.main.bundleIdentifier,
+            let companionBundleIdentifier = LoginItemBundleIdentifiers.companion(for: currentBundleIdentifier)
+        else {
+            return
+        }
+
+        let companionService = SMAppService.loginItem(identifier: companionBundleIdentifier)
+        switch companionService.status {
+        case .enabled, .requiresApproval:
+            try companionService.unregister()
+        case .notFound, .notRegistered:
+            break
+        @unknown default:
+            break
+        }
     }
 }
