@@ -23,9 +23,13 @@ struct MenuBarContentView: View {
     let reconnect: () -> Void
     let updateMenuBarHelp: (String) -> Void
 
+    private let mainPanelWidth: CGFloat = 470
+    private let inspectorPanelWidth: CGFloat = 290
+    private let panelHeight: CGFloat = 620
+    private let panelGap: CGFloat = 10
+
     @State private var inspectorPanel: InspectorPanel?
     @State private var hostWindow: NSWindow?
-    @State private var inspectorWindowController = InspectorWindowController()
 
     private static let clockFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -36,37 +40,54 @@ struct MenuBarContentView: View {
     }()
 
     var body: some View {
-        mainPanel
-            .frame(width: 470, height: 620)
-            .background(.thickMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        HStack(spacing: inspectorPanel == nil ? 0 : panelGap) {
+            if let inspectorPanel {
+                inspectorCard(inspectorPanel)
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+            }
+
+            mainPanelCard
+        }
+            .frame(width: totalWidth, height: panelHeight, alignment: .trailing)
             .background(
                 WindowAccessor { window in
                     if hostWindow !== window {
                         hostWindow = window
                     }
-                    inspectorWindowController.repositionIfNeeded()
-                    syncInspectorWindow()
+                    stabilizeWindowFrame(window)
                 }
             )
         .task {
             store.startAutoRefresh()
             updateMenuBarHelp(store.menuBarHelp)
-            syncInspectorWindow()
+            stabilizeWindowFrame(hostWindow)
         }
         .onDisappear {
             store.stopAutoRefresh()
-            inspectorWindowController.dismiss()
         }
         .onChange(of: store.menuBarHelp) { _, newValue in
             updateMenuBarHelp(newValue)
         }
         .onChange(of: inspectorPanel) { _, _ in
-            syncInspectorWindow()
+            stabilizeWindowFrame(hostWindow)
         }
         .animation(.snappy(duration: 0.18), value: inspectorPanel)
         .animation(.snappy(duration: 0.18), value: store.pendingProfileActions)
         .animation(.snappy(duration: 0.18), value: store.pendingGlobalActions)
+    }
+
+    private var totalWidth: CGFloat {
+        if inspectorPanel == nil {
+            return mainPanelWidth
+        }
+        return mainPanelWidth + inspectorPanelWidth + panelGap
+    }
+
+    private var mainPanelCard: some View {
+        mainPanel
+            .frame(width: mainPanelWidth, height: panelHeight)
+            .background(.thickMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private var mainPanel: some View {
@@ -254,6 +275,36 @@ struct MenuBarContentView: View {
         }
     }
 
+    private func inspectorCard(_ panel: InspectorPanel) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text(panel.title)
+                    .font(.headline)
+                Spacer()
+                Button {
+                    inspectorPanel = nil
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("Close \(panel.title)")
+            }
+
+            inspectorView(panel)
+
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .frame(width: inspectorPanelWidth, height: panelHeight, alignment: .topLeading)
+        .background(.regularMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(.white.opacity(0.08), lineWidth: 1)
+        }
+    }
+
     @ViewBuilder
     private func inspectorView(_ panel: InspectorPanel) -> some View {
         switch panel {
@@ -282,17 +333,25 @@ struct MenuBarContentView: View {
         .accessibilityLabel(title)
     }
 
-    private func syncInspectorWindow() {
-        guard let panel = inspectorPanel, let hostWindow else {
-            inspectorWindowController.dismiss()
+    private func stabilizeWindowFrame(_ window: NSWindow?) {
+        guard let window else { return }
+
+        let desiredWidth = totalWidth
+        let desiredHeight = panelHeight
+        let currentFrame = window.frame
+
+        guard abs(currentFrame.width - desiredWidth) > 0.5 || abs(currentFrame.height - desiredHeight) > 0.5 else {
             return
         }
 
-        inspectorWindowController.present(title: panel.title, from: hostWindow, onClose: {
-            inspectorPanel = nil
-        }) {
-            inspectorView(panel)
-        }
+        let anchoredRightEdge = currentFrame.maxX
+        let nextFrame = NSRect(
+            x: anchoredRightEdge - desiredWidth,
+            y: currentFrame.minY,
+            width: desiredWidth,
+            height: desiredHeight
+        )
+        window.setFrame(nextFrame, display: true, animate: false)
     }
 
     private func actionButton(

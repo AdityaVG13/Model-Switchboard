@@ -151,18 +151,36 @@ fail() { echo "FAIL $1" >&2; exit 1; }
 
 status_json() {
   python3 - "$CONTROLLER_URL" <<'PY'
-import json, sys, urllib.request
+import http.client, json, sys, time, urllib.error, urllib.request
 base = sys.argv[1]
-obj = json.load(urllib.request.urlopen(base + "/api/status"))
+last = None
+for _ in range(20):
+    try:
+        obj = json.load(urllib.request.urlopen(base + "/api/status", timeout=5))
+        break
+    except (urllib.error.URLError, http.client.HTTPException, OSError) as exc:
+        last = exc
+        time.sleep(0.5)
+else:
+    raise last
 print(json.dumps(obj))
 PY
 }
 
 status_value() {
   python3 - "$CONTROLLER_URL" "$1" "$2" <<'PY'
-import json, sys, urllib.request
+import http.client, json, sys, time, urllib.error, urllib.request
 base, mode, arg = sys.argv[1], sys.argv[2], sys.argv[3]
-obj = json.load(urllib.request.urlopen(base + "/api/status"))
+last = None
+for _ in range(20):
+    try:
+        obj = json.load(urllib.request.urlopen(base + "/api/status", timeout=5))
+        break
+    except (urllib.error.URLError, http.client.HTTPException, OSError) as exc:
+        last = exc
+        time.sleep(0.5)
+else:
+    raise last
 if mode == "profile_running":
     row = next(x for x in obj["statuses"] if x["profile"] == arg)
     print("true" if row["running"] else "false")
@@ -173,6 +191,8 @@ elif mode == "benchmark_generated_at":
     print(((obj.get("benchmark") or {}).get("latest") or {}).get("generated_at") or "")
 elif mode == "benchmark_running":
     print("true" if (obj.get("benchmark") or {}).get("running") else "false")
+elif mode == "benchmark_markdown_path":
+    print(((obj.get("benchmark") or {}).get("latest") or {}).get("markdown_path") or "")
 elif mode == "profile_base_url":
     row = next(x for x in obj["statuses"] if x["profile"] == arg)
     print(row["base_url"])
@@ -188,9 +208,18 @@ PY
 
 first_profile() {
   python3 - "$CONTROLLER_URL" <<'PY'
-import json, sys, urllib.request
+import http.client, json, sys, time, urllib.error, urllib.request
 base = sys.argv[1]
-obj = json.load(urllib.request.urlopen(base + "/api/status"))
+last = None
+for _ in range(20):
+    try:
+        obj = json.load(urllib.request.urlopen(base + "/api/status", timeout=5))
+        break
+    except (urllib.error.URLError, http.client.HTTPException, OSError) as exc:
+        last = exc
+        time.sleep(0.5)
+else:
+    raise last
 rows = sorted(obj["statuses"], key=lambda row: row["display_name"].lower())
 print(rows[0]["profile"])
 PY
@@ -198,11 +227,20 @@ PY
 
 controller_post() {
   python3 - "$CONTROLLER_URL" "$1" "$2" <<'PY'
-import sys, urllib.request
+import http.client, sys, time, urllib.error, urllib.request
 base, path, payload = sys.argv[1], sys.argv[2], sys.argv[3]
 data = payload.encode() if payload else None
 req = urllib.request.Request(base + path, data=data, headers={"Content-Type": "application/json"}, method="POST")
-urllib.request.urlopen(req, timeout=20).read()
+last = None
+for _ in range(20):
+    try:
+        urllib.request.urlopen(req, timeout=20).read()
+        break
+    except (urllib.error.URLError, http.client.HTTPException, OSError) as exc:
+        last = exc
+        time.sleep(0.5)
+else:
+    raise last
 PY
 }
 
@@ -237,6 +275,10 @@ press_button() {
 
 window_bounds() {
   "$WORK_DIR/msw_window_bounds" "$1" | head -n 1
+}
+
+window_present() {
+  [[ -n "$(window_bounds "$1")" ]]
 }
 
 main_window_bounds() {
@@ -299,6 +341,47 @@ wait_for_benchmark_change() {
       return 0
     fi
     sleep 1
+  done
+  return 1
+}
+
+wait_for_window_absent() {
+  local title="$1"
+  for _ in {1..20}; do
+    if ! window_present "$title"; then
+      return 0
+    fi
+    sleep 0.25
+  done
+  return 1
+}
+
+wait_for_main_window_absent() {
+  for _ in {1..20}; do
+    if [[ -z "$(main_window_bounds)" ]]; then
+      return 0
+    fi
+    sleep 0.25
+  done
+  return 1
+}
+
+wait_for_main_window_width() {
+  local expected="$1"
+  for _ in {1..20}; do
+    local bounds width
+    bounds="$(main_window_bounds)"
+    if [[ -n "$bounds" ]]; then
+      width="$(echo "$bounds" | awk -F'|' '{print $4}')"
+      if python3 - <<PY
+import sys
+sys.exit(0 if abs(float("$width") - float("$expected")) < 0.5 else 1)
+PY
+      then
+        return 0
+      fi
+    fi
+    sleep 0.25
   done
   return 1
 }
@@ -446,22 +529,63 @@ pass "spotlight registration"
 launch_app
 open_menu
 MAIN_BEFORE="$(main_window_bounds)"
+MAIN_BEFORE_X="$(echo "$MAIN_BEFORE" | awk -F'|' '{print $2}')"
+MAIN_BEFORE_Y="$(echo "$MAIN_BEFORE" | awk -F'|' '{print $3}')"
+MAIN_BEFORE_W="$(echo "$MAIN_BEFORE" | awk -F'|' '{print $4}')"
+MAIN_BEFORE_RIGHT="$(python3 - <<PY
+print(float("$MAIN_BEFORE_X") + float("$MAIN_BEFORE_W"))
+PY
+)"
 press_button Settings
-sleep 1
-SETTINGS_BOUNDS="$(window_bounds Settings)"
+wait_for_main_window_width 770 || fail "settings width expansion"
 MAIN_AFTER_SETTINGS="$(main_window_bounds)"
-[[ -n "$SETTINGS_BOUNDS" ]] || fail "settings panel missing"
-[[ "$MAIN_BEFORE" == "$MAIN_AFTER_SETTINGS" ]] || fail "settings shifted main window"
-[[ "$(echo "$SETTINGS_BOUNDS" | awk -F'|' '{print $2}')" -lt "$(echo "$MAIN_BEFORE" | awk -F'|' '{print $2}')" ]] || fail "settings did not open to the side"
+[[ -n "$MAIN_AFTER_SETTINGS" ]] || fail "settings sidebar missing"
+MAIN_AFTER_SETTINGS_X="$(echo "$MAIN_AFTER_SETTINGS" | awk -F'|' '{print $2}')"
+MAIN_AFTER_SETTINGS_Y="$(echo "$MAIN_AFTER_SETTINGS" | awk -F'|' '{print $3}')"
+MAIN_AFTER_SETTINGS_W="$(echo "$MAIN_AFTER_SETTINGS" | awk -F'|' '{print $4}')"
+MAIN_AFTER_SETTINGS_RIGHT="$(python3 - <<PY
+print(float("$MAIN_AFTER_SETTINGS_X") + float("$MAIN_AFTER_SETTINGS_W"))
+PY
+)"
+python3 - <<PY || fail "settings vertical alignment"
+import sys
+sys.exit(0 if abs(float("$MAIN_AFTER_SETTINGS_Y") - float("$MAIN_BEFORE_Y")) < 0.5 else 1)
+PY
+python3 - <<PY || fail "settings did not open to the side"
+import sys
+sys.exit(0 if float("$MAIN_AFTER_SETTINGS_X") < float("$MAIN_BEFORE_X") - 1 else 1)
+PY
+python3 - <<PY || fail "settings moved main panel"
+import sys
+sys.exit(0 if abs(float("$MAIN_AFTER_SETTINGS_RIGHT") - float("$MAIN_BEFORE_RIGHT")) < 0.5 else 1)
+PY
+SETTINGS_SHOT="$WORK_DIR/settings-sidebar.png"
+take_window_shot "" "$SETTINGS_SHOT"
+ocr_expect "$SETTINGS_SHOT" "Controller Base URL" || fail "settings content missing"
 pass "settings side panel"
 
+press_button Settings
+wait_for_main_window_width 470 || fail "settings toggle close"
+MAIN_AFTER_SETTINGS_CLOSE="$(main_window_bounds)"
+pass "settings toggle close"
+
 press_button Help
-sleep 1
-HELP_BOUNDS="$(window_bounds Help)"
+wait_for_main_window_width 770 || fail "help width expansion"
 MAIN_AFTER_HELP="$(main_window_bounds)"
-[[ -n "$HELP_BOUNDS" ]] || fail "help panel missing"
-[[ "$MAIN_BEFORE" == "$MAIN_AFTER_HELP" ]] || fail "help shifted main window"
+[[ -n "$MAIN_AFTER_HELP" ]] || fail "help sidebar missing"
+MAIN_AFTER_HELP_Y="$(echo "$MAIN_AFTER_HELP" | awk -F'|' '{print $3}')"
+python3 - <<PY || fail "help vertical alignment"
+import sys
+sys.exit(0 if abs(float("$MAIN_AFTER_HELP_Y") - float("$MAIN_BEFORE_Y")) < 0.5 else 1)
+PY
+HELP_SHOT="$WORK_DIR/help-sidebar.png"
+take_window_shot "" "$HELP_SHOT"
+ocr_expect "$HELP_SHOT" "Quick Start" || fail "help content missing"
 pass "help side panel"
+
+"$WORK_DIR/msw_click" 80 200
+wait_for_main_window_absent || fail "help outside-click close"
+pass "help outside-click close"
 
 osascript -e 'tell application "ghostty" to activate'
 launch_app
@@ -482,9 +606,22 @@ pass "open endpoint button"
 osascript -e 'tell application "ghostty" to activate'
 launch_app
 open_menu
+BENCHMARK_MARKDOWN_PATH="$(status_value benchmark_markdown_path '-')"
 press_button "Latest Bench"
-sleep 2
-[[ "$(frontmost_app)" != "ghostty" ]] || fail "latest bench button"
+for _ in {1..20}; do
+  if [[ "$(frontmost_app)" != "ghostty" ]]; then
+    break
+  fi
+  if [[ -n "$BENCHMARK_MARKDOWN_PATH" ]] && lsof "$BENCHMARK_MARKDOWN_PATH" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.5
+done
+if [[ "$(frontmost_app)" == "ghostty" ]]; then
+  if [[ -z "$BENCHMARK_MARKDOWN_PATH" ]] || ! lsof "$BENCHMARK_MARKDOWN_PATH" >/dev/null 2>&1; then
+    fail "latest bench button"
+  fi
+fi
 pass "latest bench button"
 
 launch_app
