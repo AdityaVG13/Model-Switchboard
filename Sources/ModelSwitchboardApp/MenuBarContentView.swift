@@ -390,7 +390,12 @@ struct MenuBarContentView: View {
                     .font(.headline)
                 Spacer()
                 Button {
-                    setInspectorPanel(nil)
+                    // Defer inspector teardown by one run-loop tick so the close-click
+                    // is not interpreted as an outside click that dismisses the menu.
+                    DispatchQueue.main.async {
+                        setInspectorPanel(nil)
+                        hostWindow?.makeKeyAndOrderFront(nil)
+                    }
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                 }
