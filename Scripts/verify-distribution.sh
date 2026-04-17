@@ -32,7 +32,17 @@ fi
 
 if [ -f "$DMG_PATH" ]; then
   if grep -q "Authority=Developer ID Application" <<<"$SIGNATURE_INFO"; then
-    spctl -a -vv --type open "$DMG_PATH"
+    xcrun stapler validate "$DMG_PATH"
+    DMG_ASSESSMENT="$(spctl -a -vv --type open "$DMG_PATH" 2>&1 || true)"
+    if grep -q "source=Insufficient Context" <<<"$DMG_ASSESSMENT"; then
+      echo "note: Gatekeeper DMG assessment returned Insufficient Context; stapler validation succeeded"
+    else
+      echo "$DMG_ASSESSMENT"
+      if ! grep -q ": accepted" <<<"$DMG_ASSESSMENT"; then
+        echo "DMG Gatekeeper assessment failed" >&2
+        exit 1
+      fi
+    fi
   else
     echo "note: skipping Gatekeeper DMG assessment for local ad hoc build"
   fi
