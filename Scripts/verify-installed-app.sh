@@ -663,9 +663,28 @@ sys.exit(0 if abs(float("$MAIN_AFTER_HELP_Y") - float("$MAIN_BEFORE_Y")) < 0.5 e
 PY
 pass "help side panel"
 
-"$WORK_DIR/msw_click" 8 8
-wait_for_main_window_absent || fail "help outside-click close"
-pass "help outside-click close"
+MAIN_BOUNDS_NOW="$(main_window_bounds)"
+OUTSIDE_CLICK_POINT="$(python3 - <<PY
+import sys
+parts = "${MAIN_BOUNDS_NOW}".split("|")
+if len(parts) < 5:
+    print("400|400")
+    raise SystemExit(0)
+x = float(parts[1]); y = float(parts[2]); w = float(parts[3]); h = float(parts[4])
+target_x = int(x + w + 24)
+target_y = int(y + (h / 2))
+if target_x < 120:
+    target_x = int(max(120, x - 24))
+if target_y < 120:
+    target_y = int(max(120, y + h - 24))
+print(f"{target_x}|{target_y}")
+PY
+)"
+OUTSIDE_CLICK_X="$(echo "$OUTSIDE_CLICK_POINT" | awk -F'|' '{print $1}')"
+OUTSIDE_CLICK_Y="$(echo "$OUTSIDE_CLICK_POINT" | awk -F'|' '{print $2}')"
+"$WORK_DIR/msw_click" "$OUTSIDE_CLICK_X" "$OUTSIDE_CLICK_Y"
+wait_for_main_window_absent || fail "help dismiss close"
+pass "help dismiss close"
 
 activate_anchor_app
 launch_app
