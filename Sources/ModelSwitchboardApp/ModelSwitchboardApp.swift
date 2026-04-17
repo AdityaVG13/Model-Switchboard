@@ -46,7 +46,10 @@ struct ModelSwitchboardApp: App {
         }
         .menuBarExtraAccess(isPresented: $isMenuPresented) { item in
             statusItem = item
+            item.length = NSStatusItem.squareLength
             item.button?.toolTip = store.menuBarHelp
+            item.button?.title = ""
+            item.button?.imagePosition = .imageOnly
             item.button?.setAccessibilityLabel(features.appDisplayName)
         }
         .menuBarExtraStyle(.window)

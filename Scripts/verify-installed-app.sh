@@ -696,10 +696,14 @@ BENCHMARK_MARKDOWN_PATH="$(status_value benchmark_markdown_path '-')"
 if [[ "$HAS_ADVANCED" == "1" ]]; then
   press_button Settings
   sleep 0.4
-  if ! press_button "Latest Bench" 2>/dev/null; then
-    LATEST_BENCH_SHOT="$WORK_DIR/latest-bench.png"
-    take_shot "$LATEST_BENCH_SHOT"
-    ocr_click "$LATEST_BENCH_SHOT" "Latest Bench"
+  if ! press_button "Open Latest Benchmark" 2>/dev/null; then
+    if ! press_button "Latest Bench" 2>/dev/null; then
+      LATEST_BENCH_SHOT="$WORK_DIR/latest-bench.png"
+      take_shot "$LATEST_BENCH_SHOT"
+      if ! ocr_click "$LATEST_BENCH_SHOT" "Open Latest Benchmark"; then
+        ocr_click "$LATEST_BENCH_SHOT" "Latest Bench"
+      fi
+    fi
   fi
   for _ in {1..20}; do
     if [[ -n "$ANCHOR_APP_NAME" && "$(frontmost_app)" != "$ANCHOR_APP_NAME" ]]; then
@@ -723,11 +727,15 @@ open_menu
 if [[ "$HAS_ADVANCED" == "1" ]]; then
   press_button Settings
   sleep 0.4
-  if ! press_button "Quick Benchmark" 2>/dev/null; then
-    QUICK_BENCH_SHOT="$WORK_DIR/quick-bench-all.png"
-    take_shot "$QUICK_BENCH_SHOT"
-    if ! ocr_click "$QUICK_BENCH_SHOT" "Quick Benchmark"; then
-      ocr_click "$QUICK_BENCH_SHOT" "Run Quick Benchmark All"
+  if ! press_button "Run Quick Benchmark" 2>/dev/null; then
+    if ! press_button "Quick Benchmark" 2>/dev/null; then
+      QUICK_BENCH_SHOT="$WORK_DIR/quick-bench-all.png"
+      take_shot "$QUICK_BENCH_SHOT"
+      if ! ocr_click "$QUICK_BENCH_SHOT" "Run Quick Benchmark"; then
+        if ! ocr_click "$QUICK_BENCH_SHOT" "Quick Benchmark"; then
+          ocr_click "$QUICK_BENCH_SHOT" "Run Quick Benchmark All"
+        fi
+      fi
     fi
   fi
   wait_for_benchmark_change "$(status_value benchmark_generated_at '-')" || fail "quick bench all"

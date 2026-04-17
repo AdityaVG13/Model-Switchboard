@@ -124,7 +124,6 @@ struct MenuBarContentView: View {
     @AppStorage("menuPanelWidth")
     private var storedMainPanelWidth: Double = 470
 
-    private let defaultMainPanelWidth: Double = 470
     private let minMainPanelWidth: Double = 390
     private let maxMainPanelWidth: Double = 620
     private let inspectorPanelWidth: CGFloat = 290
@@ -135,6 +134,8 @@ struct MenuBarContentView: View {
     @State private var inspectorPanel: InspectorPanel?
     @State private var hostWindow: NSWindow?
     @State private var inspectorController = InspectorPanelController()
+    @State private var resizeDragStartWidth: Double?
+    @State private var resizeCursorVisible = false
 
     private static let clockFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -158,10 +159,6 @@ struct MenuBarContentView: View {
                         hostWindow = window
                     }
                     configureHostWindow(window)
-                    let detectedWidth = clampPanelWidth(Double(window.frame.width))
-                    if abs(detectedWidth - storedMainPanelWidth) > 0.5 {
-                        storedMainPanelWidth = detectedWidth
-                    }
                     synchronizeInspectorWindow()
                 }
             )
@@ -174,6 +171,7 @@ struct MenuBarContentView: View {
             store.stopAutoRefresh()
             inspectorController.hide()
             inspectorPanel = nil
+            setResizeCursorVisible(false)
         }
         .onChange(of: store.menuBarHelp) { _, newValue in
             updateMenuBarHelp(newValue)
@@ -373,10 +371,37 @@ struct MenuBarContentView: View {
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.secondary)
             }
+            resizeHandle
             Button("Quit") {
                 NSApplication.shared.terminate(nil)
             }
         }
+    }
+
+    private var resizeHandle: some View {
+        Label("Resize", systemImage: "arrow.left.and.right")
+            .font(.caption2)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(.quaternary.opacity(0.28), in: Capsule())
+            .contentShape(Rectangle())
+            .onHover { isHovered in
+                setResizeCursorVisible(isHovered)
+            }
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        if resizeDragStartWidth == nil {
+                            resizeDragStartWidth = storedMainPanelWidth
+                        }
+                        let start = resizeDragStartWidth ?? storedMainPanelWidth
+                        storedMainPanelWidth = clampPanelWidth(start - Double(value.translation.width))
+                    }
+                    .onEnded { _ in
+                        resizeDragStartWidth = nil
+                    }
+            )
+            .help("Drag left or right to resize the switchboard width")
     }
 
     private func inspectorCard(_ panel: InspectorPanel) -> some View {
@@ -424,12 +449,6 @@ struct MenuBarContentView: View {
                 benchmark: store.benchmark,
                 openDashboard: store.openDashboard,
                 openLatestBenchmark: store.openLatestBenchmark,
-                menuPanelWidth: Binding(
-                    get: { clampPanelWidth(storedMainPanelWidth) },
-                    set: { storedMainPanelWidth = clampPanelWidth($0) }
-                ),
-                menuPanelWidthRange: minMainPanelWidth...maxMainPanelWidth,
-                defaultMenuPanelWidth: defaultMainPanelWidth,
                 runQuickBenchmarkAll: {
                     Task { await store.quickBenchmark() }
                 }
@@ -529,10 +548,19 @@ struct MenuBarContentView: View {
     }
 
     private func configureHostWindow(_ window: NSWindow) {
-        window.styleMask.insert(.resizable)
-        window.showsResizeIndicator = true
+        window.styleMask.remove(.resizable)
+        window.showsResizeIndicator = false
         window.minSize = NSSize(width: minMainPanelWidth, height: panelHeight)
         window.maxSize = NSSize(width: maxMainPanelWidth, height: panelHeight)
-        window.resizeIncrements = NSSize(width: 10, height: 1)
+    }
+
+    private func setResizeCursorVisible(_ visible: Bool) {
+        if visible, !resizeCursorVisible {
+            NSCursor.resizeLeftRight.push()
+            resizeCursorVisible = true
+        } else if !visible, resizeCursorVisible {
+            NSCursor.pop()
+            resizeCursorVisible = false
+        }
     }
 }

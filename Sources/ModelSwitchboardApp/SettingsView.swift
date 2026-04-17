@@ -13,16 +13,13 @@ struct SettingsView: View {
     let benchmark: BenchmarkStatus?
     let openDashboard: () -> Void
     let openLatestBenchmark: () -> Void
-    @Binding var menuPanelWidth: Double
-    let menuPanelWidthRange: ClosedRange<Double>
-    let defaultMenuPanelWidth: Double
     let runQuickBenchmarkAll: () -> Void
     private let defaultControllerBaseURL = "http://127.0.0.1:8877"
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: 14) {
-                Text("Tune the connection without leaving the menu bar. This stays attached to ModelSwitchboard instead of opening a detached desktop window.")
+                Text("These preferences only control app connectivity. Model paths and launch commands stay in controller profile files.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -43,7 +40,7 @@ struct SettingsView: View {
                     Text("Model Profile Source Of Truth")
                         .font(.caption.bold())
 
-                    Text("Users set model locations in the controller's profile manifests, not in app preferences. Each `.env` or `.json` file in `model-profiles` defines the runtime, model path, port, and launch behavior for one local model.")
+                    Text("Model Switchboard does not store model locations. It reads profile metadata from the running controller so the app stays user-agnostic.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -51,15 +48,16 @@ struct SettingsView: View {
                     if let profilesDirectory, !profilesDirectory.isEmpty {
                         pathBlock(title: "Profiles Folder", value: profilesDirectory)
 
-                        HStack {
+                        VStack(alignment: .leading, spacing: 8) {
                             Button("Open Profiles Folder", action: openProfilesDirectory)
-
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             if let controllerRoot, !controllerRoot.isEmpty {
                                 Button("Open Controller Root", action: openControllerRoot)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
                     } else {
-                        Text("Connect to a running controller once and Model Switchboard will surface the live `model-profiles` path here.")
+                        Text("No profile folder reported yet. Start the controller and reconnect to load its configured `model-profiles` path.")
                             .font(.footnote)
                             .foregroundStyle(.orange)
                             .fixedSize(horizontal: false, vertical: true)
@@ -88,18 +86,18 @@ struct SettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
 
-                        HStack(spacing: 8) {
+                        VStack(alignment: .leading, spacing: 8) {
                             if features.supportsDashboard {
                                 Button("Open Dashboard", action: openDashboard)
-                                    .frame(maxWidth: .infinity)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                             }
                             if features.supportsBenchmarks {
-                                Button("Latest Bench", action: openLatestBenchmark)
+                                Button("Open Latest Benchmark", action: openLatestBenchmark)
                                     .disabled(benchmark?.latest?.markdownPath == nil)
-                                    .frame(maxWidth: .infinity)
-                                Button("Quick Benchmark", action: runQuickBenchmarkAll)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                Button("Run Quick Benchmark", action: runQuickBenchmarkAll)
                                     .disabled(benchmark?.running == true)
-                                    .frame(maxWidth: .infinity)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
                     }
@@ -144,41 +142,6 @@ struct SettingsView: View {
                             .font(.footnote)
                             .foregroundStyle(.red)
                             .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-
-                Divider()
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Menu Width")
-                        .font(.caption.bold())
-
-                    Text("Resize the main switchboard surface to match your preferred density. Layout and controls adapt automatically.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    HStack(alignment: .center, spacing: 10) {
-                        Slider(value: $menuPanelWidth, in: menuPanelWidthRange, step: 10)
-                        Text("\(Int(menuPanelWidth.rounded())) px")
-                            .font(.footnote.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                            .frame(width: 56, alignment: .trailing)
-                    }
-
-                    HStack(spacing: 8) {
-                        Button("Narrow") {
-                            menuPanelWidth = max(menuPanelWidthRange.lowerBound, defaultMenuPanelWidth - 70)
-                        }
-                        .frame(maxWidth: .infinity)
-                        Button("Default") {
-                            menuPanelWidth = defaultMenuPanelWidth
-                        }
-                        .frame(maxWidth: .infinity)
-                        Button("Wide") {
-                            menuPanelWidth = min(menuPanelWidthRange.upperBound, defaultMenuPanelWidth + 70)
-                        }
-                        .frame(maxWidth: .infinity)
                     }
                 }
 
