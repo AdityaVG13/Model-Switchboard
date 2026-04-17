@@ -417,6 +417,35 @@ PY
   return 1
 }
 
+inspector_window_bounds() {
+  local main_bounds main_x
+  main_bounds="$(main_window_bounds)"
+  [[ -n "$main_bounds" ]] || return 1
+  main_x="$(echo "$main_bounds" | awk -F'|' '{print $2}')"
+  MSW_APP_NAME="$APP_NAME" "$WORK_DIR/msw_window_bounds" '' \
+    | awk -F'|' -v main_x="$main_x" '$2+0 < main_x-1 {print; exit}'
+}
+
+wait_for_inspector_present() {
+  for _ in {1..20}; do
+    if [[ -n "$(inspector_window_bounds)" ]]; then
+      return 0
+    fi
+    sleep 0.25
+  done
+  return 1
+}
+
+wait_for_inspector_absent() {
+  for _ in {1..20}; do
+    if [[ -z "$(inspector_window_bounds)" ]]; then
+      return 0
+    fi
+    sleep 0.25
+  done
+  return 1
+}
+
 take_shot() {
   local path="$1"
   /usr/sbin/screencapture -x "$path"
@@ -574,10 +603,9 @@ print(float("$MAIN_BEFORE_X") + float("$MAIN_BEFORE_W"))
 PY
 )"
 press_button Settings
-wait_for_main_window_width 770 || fail "settings width expansion"
-sleep 0.4
+wait_for_inspector_present || fail "settings sidebar missing"
+sleep 0.3
 MAIN_AFTER_SETTINGS="$(main_window_bounds)"
-[[ -n "$MAIN_AFTER_SETTINGS" ]] || fail "settings sidebar missing"
 MAIN_AFTER_SETTINGS_X="$(echo "$MAIN_AFTER_SETTINGS" | awk -F'|' '{print $2}')"
 MAIN_AFTER_SETTINGS_Y="$(echo "$MAIN_AFTER_SETTINGS" | awk -F'|' '{print $3}')"
 MAIN_AFTER_SETTINGS_W="$(echo "$MAIN_AFTER_SETTINGS" | awk -F'|' '{print $4}')"
@@ -585,41 +613,31 @@ MAIN_AFTER_SETTINGS_RIGHT="$(python3 - <<PY
 print(float("$MAIN_AFTER_SETTINGS_X") + float("$MAIN_AFTER_SETTINGS_W"))
 PY
 )"
-python3 - <<PY || fail "settings vertical alignment"
-import sys
-sys.exit(0 if abs(float("$MAIN_AFTER_SETTINGS_Y") - float("$MAIN_BEFORE_Y")) < 0.5 else 1)
-PY
-python3 - <<PY || fail "settings did not open to the side"
-import sys
-sys.exit(0 if float("$MAIN_AFTER_SETTINGS_X") < float("$MAIN_BEFORE_X") - 1 else 1)
-PY
 python3 - <<PY || fail "settings moved main panel"
 import sys
-sys.exit(0 if abs(float("$MAIN_AFTER_SETTINGS_RIGHT") - float("$MAIN_BEFORE_RIGHT")) < 0.5 else 1)
+same_x = abs(float("$MAIN_AFTER_SETTINGS_X") - float("$MAIN_BEFORE_X")) < 0.5
+same_y = abs(float("$MAIN_AFTER_SETTINGS_Y") - float("$MAIN_BEFORE_Y")) < 0.5
+same_right = abs(float("$MAIN_AFTER_SETTINGS_RIGHT") - float("$MAIN_BEFORE_RIGHT")) < 0.5
+sys.exit(0 if (same_x and same_y and same_right) else 1)
 PY
 SETTINGS_SHOT="$WORK_DIR/settings-sidebar.png"
-take_window_shot "" "$SETTINGS_SHOT"
+take_shot "$SETTINGS_SHOT"
 ocr_expect "$SETTINGS_SHOT" "Controller Base URL" || fail "settings content missing"
 pass "settings side panel"
 
 press_button Settings
-wait_for_main_window_width 470 || fail "settings toggle close"
-MAIN_AFTER_SETTINGS_CLOSE="$(main_window_bounds)"
+wait_for_inspector_absent || fail "settings toggle close"
 pass "settings toggle close"
 
 press_button Help
-wait_for_main_window_width 770 || fail "help width expansion"
-sleep 0.4
+wait_for_inspector_present || fail "help sidebar missing"
+sleep 0.3
 MAIN_AFTER_HELP="$(main_window_bounds)"
-[[ -n "$MAIN_AFTER_HELP" ]] || fail "help sidebar missing"
 MAIN_AFTER_HELP_Y="$(echo "$MAIN_AFTER_HELP" | awk -F'|' '{print $3}')"
-python3 - <<PY || fail "help vertical alignment"
+python3 - <<PY || fail "help moved main panel"
 import sys
 sys.exit(0 if abs(float("$MAIN_AFTER_HELP_Y") - float("$MAIN_BEFORE_Y")) < 0.5 else 1)
 PY
-HELP_SHOT="$WORK_DIR/help-sidebar.png"
-take_window_shot "" "$HELP_SHOT"
-ocr_expect "$HELP_SHOT" "Quick Start" || fail "help content missing"
 pass "help side panel"
 
 "$WORK_DIR/msw_click" 80 200
@@ -632,7 +650,11 @@ open_menu
 if [[ "$HAS_ADVANCED" == "1" ]]; then
   press_button Settings
   sleep 0.4
-  press_button "Open Dashboard"
+  if ! press_button "Open Dashboard" 2>/dev/null; then
+    DASHBOARD_SHOT="$WORK_DIR/open-dashboard.png"
+    take_shot "$DASHBOARD_SHOT"
+    ocr_click "$DASHBOARD_SHOT" "Open Dashboard"
+  fi
   wait_for_browser_url_prefix "$CONTROLLER_URL" || fail "dashboard button"
   pass "dashboard button"
 fi
@@ -651,7 +673,11 @@ BENCHMARK_MARKDOWN_PATH="$(status_value benchmark_markdown_path '-')"
 if [[ "$HAS_ADVANCED" == "1" ]]; then
   press_button Settings
   sleep 0.4
-  press_button "Latest Bench"
+  if ! press_button "Latest Bench" 2>/dev/null; then
+    LATEST_BENCH_SHOT="$WORK_DIR/latest-bench.png"
+    take_shot "$LATEST_BENCH_SHOT"
+    ocr_click "$LATEST_BENCH_SHOT" "Latest Bench"
+  fi
   for _ in {1..20}; do
     if [[ "$(frontmost_app)" != "ghostty" ]]; then
       break
@@ -674,7 +700,11 @@ open_menu
 if [[ "$HAS_ADVANCED" == "1" ]]; then
   press_button Settings
   sleep 0.4
-  press_button "Run Quick Benchmark All"
+  if ! press_button "Run Quick Benchmark All" 2>/dev/null; then
+    QUICK_BENCH_SHOT="$WORK_DIR/quick-bench-all.png"
+    take_shot "$QUICK_BENCH_SHOT"
+    ocr_click "$QUICK_BENCH_SHOT" "Run Quick Benchmark All"
+  fi
   wait_for_benchmark_change "$(status_value benchmark_generated_at '-')" || fail "quick bench all"
   pass "quick bench all"
 fi

@@ -2,6 +2,108 @@ import AppKit
 import SwiftUI
 import ModelSwitchboardCore
 
+@MainActor
+private final class InspectorPanelWindow: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+}
+
+@MainActor
+private final class InspectorPanelController {
+    private var panelWindow: InspectorPanelWindow?
+    private var hostingView: NSHostingView<AnyView>?
+    private weak var parentWindow: NSWindow?
+
+    func show(
+        title: String,
+        parent: NSWindow,
+        width: CGFloat,
+        height: CGFloat,
+        gap: CGFloat,
+        content: AnyView
+    ) {
+        let window: InspectorPanelWindow
+        let host: NSHostingView<AnyView>
+
+        if let existingWindow = panelWindow, let existingHost = hostingView {
+            window = existingWindow
+            host = existingHost
+        } else {
+            host = NSHostingView(rootView: content)
+            host.frame = NSRect(x: 0, y: 0, width: width, height: height)
+            host.autoresizingMask = [.width, .height]
+
+            window = InspectorPanelWindow(
+                contentRect: NSRect(x: 0, y: 0, width: width, height: height),
+                styleMask: [.titled, .fullSizeContentView],
+                backing: .buffered,
+                defer: false
+            )
+            window.contentView = host
+            window.isOpaque = false
+            window.backgroundColor = .clear
+            window.hasShadow = true
+            window.isMovable = false
+            window.isMovableByWindowBackground = false
+            window.hidesOnDeactivate = false
+            window.level = .floating
+            window.collectionBehavior = [.transient, .moveToActiveSpace]
+            window.titleVisibility = .hidden
+            window.titlebarAppearsTransparent = true
+            window.standardWindowButton(.closeButton)?.isHidden = true
+            window.standardWindowButton(.miniaturizeButton)?.isHidden = true
+            window.standardWindowButton(.zoomButton)?.isHidden = true
+
+            panelWindow = window
+            hostingView = host
+        }
+
+        host.rootView = content
+        window.title = title
+        window.setContentSize(NSSize(width: width, height: height))
+        host.frame = NSRect(x: 0, y: 0, width: width, height: height)
+
+        if parentWindow !== parent {
+            parentWindow?.removeChildWindow(window)
+            parent.addChildWindow(window, ordered: .above)
+            parentWindow = parent
+        }
+
+        let frame = NSRect(
+            x: parent.frame.minX - gap - width,
+            y: parent.frame.minY,
+            width: width,
+            height: height
+        )
+        window.setFrame(frame, display: true)
+        if !window.isVisible {
+            window.alphaValue = 0
+            window.orderFront(nil)
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.16
+                window.animator().alphaValue = 1
+            }
+        } else {
+            window.orderFront(nil)
+        }
+    }
+
+    func hide() {
+        guard let window = panelWindow else { return }
+        let fadeDuration: TimeInterval = 0.14
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = fadeDuration
+            window.animator().alphaValue = 0
+        } completionHandler: {
+            DispatchQueue.main.async {
+                self.parentWindow?.removeChildWindow(window)
+                window.orderOut(nil)
+                window.alphaValue = 1
+            }
+        }
+    }
+}
+
 struct MenuBarContentView: View {
     private enum InspectorPanel: String, Identifiable {
         case settings
@@ -28,13 +130,11 @@ struct MenuBarContentView: View {
     private let inspectorPanelWidth: CGFloat = 290
     private let panelHeight: CGFloat = 620
     private let panelGap: CGFloat = 10
-    private let inspectorAnimation = Animation.easeInOut(duration: 0.24)
-    private let inspectorCloseDelay: TimeInterval = 0.12
+    private let inspectorAnimation = Animation.easeInOut(duration: 0.2)
 
     @State private var inspectorPanel: InspectorPanel?
-    @State private var panelWidth: CGFloat = 470
     @State private var hostWindow: NSWindow?
-    @State private var anchoredRightEdge: CGFloat?
+    @State private var inspectorController = InspectorPanelController()
 
     private static let clockFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -45,41 +145,25 @@ struct MenuBarContentView: View {
     }()
 
     var body: some View {
-        HStack(spacing: inspectorPanel == nil ? 0 : panelGap) {
-            if let inspectorPanel {
-                inspectorCard(inspectorPanel)
-                    .transition(
-                        .asymmetric(
-                            insertion: .opacity,
-                            removal: .opacity
-                        )
-                    )
-            }
-
-            mainPanelCard
-        }
-            .frame(width: panelWidth, height: panelHeight, alignment: .trailing)
+        mainPanelCard
+            .frame(width: mainPanelWidth, height: panelHeight)
             .background(
                 WindowAccessor { window in
                     if hostWindow !== window {
                         hostWindow = window
-                        if let resolvedWindow = window {
-                            anchoredRightEdge = resolvedWindow.frame.maxX
-                        }
                     }
-                    if let resolvedWindow = window, abs(resolvedWindow.frame.width - panelWidth) > 0.5 {
-                        stabilizeWindowFrame(resolvedWindow, width: panelWidth)
-                    }
+                    synchronizeInspectorWindow()
                 }
             )
         .task {
             store.startAutoRefresh()
             updateMenuBarHelp(store.menuBarHelp)
-            panelWidth = panelWidth(for: inspectorPanel)
-            stabilizeWindowFrame(hostWindow, width: panelWidth)
+            synchronizeInspectorWindow()
         }
         .onDisappear {
             store.stopAutoRefresh()
+            inspectorController.hide()
+            inspectorPanel = nil
         }
         .onChange(of: store.menuBarHelp) { _, newValue in
             updateMenuBarHelp(newValue)
@@ -339,65 +423,27 @@ struct MenuBarContentView: View {
         if nextPanel == inspectorPanel {
             return
         }
-
-        // Switching between inspector panes should not trigger geometry changes.
-        if inspectorPanel != nil, nextPanel != nil {
-            withAnimation(inspectorAnimation) {
-                inspectorPanel = nextPanel
-            }
-            return
-        }
-
-        // Expand first, then reveal panel.
-        if let nextPanel {
-            let expandedWidth = panelWidth(for: nextPanel)
-            panelWidth = expandedWidth
-            stabilizeWindowFrame(hostWindow, width: expandedWidth)
-            withAnimation(inspectorAnimation) {
-                inspectorPanel = nextPanel
-            }
-            return
-        }
-
-        // Fade panel out, then shrink the container once the content is gone.
         withAnimation(inspectorAnimation) {
-            inspectorPanel = nil
+            inspectorPanel = nextPanel
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + inspectorCloseDelay) {
-            panelWidth = panelWidth(for: nil)
-            stabilizeWindowFrame(hostWindow, width: panelWidth(for: nil))
-        }
+        synchronizeInspectorWindow()
     }
 
-    private func panelWidth(for panel: InspectorPanel?) -> CGFloat {
-        if panel == nil {
-            return mainPanelWidth
-        }
-        return mainPanelWidth + inspectorPanelWidth + panelGap
-    }
-
-    private func stabilizeWindowFrame(_ window: NSWindow?, width explicitWidth: CGFloat) {
-        guard let window else { return }
-
-        let desiredWidth = explicitWidth
-        let desiredHeight = panelHeight
-        let currentFrame = window.frame
-        if anchoredRightEdge == nil || abs(currentFrame.width - mainPanelWidth) < 0.5 {
-            anchoredRightEdge = currentFrame.maxX
-        }
-
-        guard abs(currentFrame.width - desiredWidth) > 0.5 || abs(currentFrame.height - desiredHeight) > 0.5 else {
+    private func synchronizeInspectorWindow() {
+        guard let hostWindow else { return }
+        guard let inspectorPanel else {
+            inspectorController.hide()
             return
         }
 
-        let rightEdge = anchoredRightEdge ?? currentFrame.maxX
-        let nextFrame = NSRect(
-            x: rightEdge - desiredWidth,
-            y: currentFrame.minY,
-            width: desiredWidth,
-            height: desiredHeight
+        inspectorController.show(
+            title: inspectorPanel.title,
+            parent: hostWindow,
+            width: inspectorPanelWidth,
+            height: panelHeight,
+            gap: panelGap,
+            content: AnyView(inspectorCard(inspectorPanel))
         )
-        window.setFrame(nextFrame, display: true, animate: false)
     }
 
     private func actionButton(
