@@ -16,6 +16,12 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Select latest Xcode
+        run: |
+          latest_xcode="$(ls -d /Applications/Xcode*.app | sort -V | tail -n 1)"
+          sudo xcode-select -s "$latest_xcode/Contents/Developer"
+          xcodebuild -version
+
       - name: Install xcodegen
         run: brew install xcodegen
 
