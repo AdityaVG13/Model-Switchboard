@@ -55,7 +55,7 @@ jobs:
           echo "$APPLE_NOTARY_API_KEY_P8_BASE64" | base64 --decode > "$API_KEY_PATH"
           echo "APPLE_NOTARY_API_KEY_PATH=$API_KEY_PATH" >> "$GITHUB_ENV"
 
-      - name: Build, sign, and notarize DMG
+      - name: Build, sign, and notarize DMGs
         env:
           APPLE_DEVELOPER_IDENTITY: ${{ secrets.APPLE_DEVELOPER_IDENTITY }}
           APPLE_NOTARY_API_KEY_PATH: ${{ env.APPLE_NOTARY_API_KEY_PATH }}
@@ -63,9 +63,12 @@ jobs:
           APPLE_NOTARY_API_ISSUER_ID: ${{ secrets.APPLE_NOTARY_API_ISSUER_ID }}
         run: |
           chmod +x Scripts/*.sh
-          ./Scripts/sign-and-notarize-dmg.sh
-          ./Scripts/verify-distribution.sh
+          for variant in base plus; do
+            APP_VARIANT="$variant" ./Scripts/sign-and-notarize-dmg.sh
+            APP_VARIANT="$variant" ./Scripts/verify-distribution.sh
+          done
           shasum -a 256 "dist/Model-Switchboard-$(tr -d '[:space:]' < VERSION).dmg" > "dist/Model-Switchboard-$(tr -d '[:space:]' < VERSION).dmg.sha256"
+          shasum -a 256 "dist/Model-Switchboard-Plus-$(tr -d '[:space:]' < VERSION).dmg" > "dist/Model-Switchboard-Plus-$(tr -d '[:space:]' < VERSION).dmg.sha256"
 
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
