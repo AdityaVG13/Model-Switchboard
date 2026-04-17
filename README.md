@@ -1,49 +1,50 @@
 <div align="center">
 
+<img src="Resources/Brand/logo.png" alt="Model Switchboard" width="128">
+
 # Model Switchboard
 
-**Flip between local LLM runtimes from your menu bar. One click to activate. One click to stop everything.**
+***Flip between local LLM runtimes from your menu bar.***
+**One click to activate. One click to stop everything.**
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue?style=flat-square)](VERSION)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-macOS%2014%2B-lightgrey?style=flat-square)](#requirements)
-[![Swift](https://img.shields.io/badge/swift-6.0-orange?style=flat-square)](Package.swift)
+[![Version](https://img.shields.io/badge/version-1.0.0-blue?style=for-the-badge)](VERSION)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
+[![Platform](https://img.shields.io/badge/macOS-14%2B-lightgrey?style=for-the-badge&logo=apple&logoColor=white)](#requirements)
+[![Swift](https://img.shields.io/badge/swift-6.0-orange?style=for-the-badge&logo=swift&logoColor=white)](Package.swift)
 
-<br>
-
-<img src="Resources/Brand/screenshot-base.jpg" alt="Model Switchboard menu bar panel" width="520">
+`Native SwiftUI`  `WidgetKit`  `llama.cpp`  `MLX`  `Ollama`  `vLLM`  `Custom`
 
 </div>
 
-<br>
+---
 
-Running local models on an Apple Silicon Mac usually means a sprawl of terminal windows, half-remembered launch scripts, and no clean way to see what's actually running. Model Switchboard puts `llama.cpp`, MLX, Ollama, vLLM, or any custom launcher behind one menu bar panel. Click **Activate** on a profile, every other model stops, the one you picked comes up at an OpenAI-compatible endpoint. No terminals.
+Running local models on an Apple Silicon Mac usually means a sprawl of terminal windows, half-remembered launch scripts, and no clean way to see **what's actually running.** Model Switchboard puts every runtime you have — `llama.cpp`, MLX, Ollama, vLLM, or anything you can script — behind **one menu bar panel.** Click **Activate**, every other model stops, the one you picked comes up at an OpenAI-compatible endpoint.
 
-It's runtime-agnostic. It ships with a reference controller, but talks to any backend that implements the documented HTTP contract.
+*No terminals. No orphan processes. No "green dot" lies.*
 
 ---
 
 <img align="right" width="420" src="Resources/Brand/screenshot-base.jpg" alt="Base edition panel">
 
-### One click to switch models
+### One click. One model running.
 
-`Activate` stops every other running profile and brings the chosen one up — no more forgetting to `kill -9` a 24 GB process before starting the next one.
+**`Activate` stops every other profile and brings the chosen one up.** No more forgetting to `kill -9` a 24 GB process before starting the next one.
 
-Profiles are marked *ready* only after a real health check passes. `/v1/models` by default, or a custom HTTP probe. No "green dot" lies.
+Profiles are marked **ready** *only* after a real health check passes — `/v1/models` by default, or a custom HTTP probe. If it says green, it means green.
 
-Native SwiftUI and `MenuBarExtra`. No Electron, no bundled inference engine, no resident background worker pegging your CPU.
+Built with **SwiftUI** and `MenuBarExtra`. No Electron, no bundled inference engine, no resident background worker pegging your CPU.
 
 <br clear="right">
 
 ---
 
-<img align="left" width="420" src="Resources/Brand/screenshot-plus.jpg" alt="Plus edition with header utilization and Sync Droid">
+<img align="left" width="420" src="Resources/Brand/screenshot-plus.jpg" alt="Plus edition with utilization and Sync Droid">
 
-### Plus edition adds the numbers
+### Plus adds the numbers.
 
-**CPU and GPU utilization** live in the header so you know what your machine is doing without dropping into Activity Monitor.
+**CPU and GPU utilization** live in the header, so you know what your machine is doing *without* dropping into Activity Monitor.
 
-**Benchmark All** runs the whole fleet, **Reopen Last** jumps back to what you had up, and **optional integrations** like `Sync Droid` keep your external tooling in sync with whatever's currently loaded — without cluttering the base surface if you don't need it.
+**`Benchmark All`** runs the fleet. **`Reopen Last`** jumps straight back to what you had up. **Optional integrations** like `Sync Droid` keep external tooling aligned with whatever's currently loaded — *without cluttering the base surface if you don't need them.*
 
 <br clear="left">
 
@@ -51,11 +52,11 @@ Native SwiftUI and `MenuBarExtra`. No Electron, no bundled inference engine, no 
 
 <img align="right" width="420" src="Resources/Brand/screenshot-benchmark.jpg" alt="In-app Benchmarks panel">
 
-### Benchmarks in the app, not a spreadsheet
+### Benchmarks in the app, not a spreadsheet.
 
-The in-app panel reads the latest run and shows **TTFT, Decode, E2E, RSS** per profile in one place.
+The inline panel reads the latest run and shows **TTFT**, **Decode**, **E2E**, and **RSS** per profile in one place.
 
-Tap **Export CSV** and you have a portable report. Results land as both JSON and Markdown under `Controller/benchmark-results/` so they're easy to diff, commit, or feed to another tool.
+Tap **`Export CSV`** and you have a portable report. Every run lands as both JSON and Markdown under `Controller/benchmark-results/` — easy to diff, commit, or feed into another tool.
 
 <br clear="right">
 
@@ -63,33 +64,38 @@ Tap **Export CSV** and you have a portable report. Results land as both JSON and
 
 ## Base vs Plus
 
-Same codebase, two apps. Pick at install time. They live side by side as **Model Switchboard.app** and **Model Switchboard Plus.app** under `~/Applications/`.
+*Same codebase, two apps.* Pick at install time. They live side by side as **Model Switchboard.app** and **Model Switchboard Plus.app** under `~/Applications/`.
 
 | | Base | Plus |
 |---|:---:|:---:|
-| Profile list with live status | Yes | Yes |
-| `Activate` / `Start` / `Stop` / `Restart` | Yes | Yes |
-| `Refresh` / `Stop All` | Yes | Yes |
-| `Launch At Login` + attached Settings / Help | Yes | Yes |
-| CPU / GPU utilization badges | — | Yes |
-| `Benchmark All` + per-profile `Benchmark` | — | Yes |
-| In-app Benchmarks panel + CSV export | — | Yes |
-| `Reopen Last` | — | Yes |
-| Optional integrations (`Sync Droid`, …) | — | Yes |
+| Profile list with live status | ✓ | ✓ |
+| `Activate` / `Start` / `Stop` / `Restart` | ✓ | ✓ |
+| `Refresh` / `Stop All` | ✓ | ✓ |
+| `Launch At Login` + attached Settings / Help | ✓ | ✓ |
+| CPU / GPU utilization badges | — | ✓ |
+| `Benchmark All` + per-profile `Benchmark` | — | ✓ |
+| In-app Benchmarks panel + CSV export | — | ✓ |
+| `Reopen Last` | — | ✓ |
+| Optional integrations (`Sync Droid`, …) | — | ✓ |
 
 ---
 
 ## Requirements
 
-- macOS 14 (Sonoma) or later
-- Apple Silicon recommended — Intel Macs run the app fine, but MLX models require Apple Silicon
-- A running **controller**. This repo ships a reference controller under `Controller/`; any HTTP server implementing the [controller contract](SETUP.md#controller-api-contract) works
+- **macOS 14** (Sonoma) or later
+- **Apple Silicon recommended** — Intel Macs run the app fine, but *MLX models require Apple Silicon*
+- A running **controller** that exposes the [controller contract](SETUP.md#controller-api-contract). This repo ships a reference controller under `Controller/`
 
 ---
 
 ## Install
 
-**Signed DMG (recommended).** From the [latest release](https://github.com/AdityaVG13/Model-Switchboard/releases/latest), grab `Model-Switchboard-<version>.dmg` or `Model-Switchboard-Plus-<version>.dmg`. Open, drag to `Applications`, launch.
+**Signed DMG (recommended).** Grab the latest from **[Releases](https://github.com/AdityaVG13/Model-Switchboard/releases/latest)**:
+
+- `Model-Switchboard-<version>.dmg` (Base)
+- `Model-Switchboard-Plus-<version>.dmg` (Plus)
+
+Open, drag to `Applications`, launch.
 
 **From source.**
 
@@ -106,53 +112,61 @@ The installer places a fresh build under `~/Applications/`, registers it with La
 
 ## First run
 
-Model Switchboard is the control surface — it doesn't run models itself. You need a controller that knows how to launch and health-check them.
+*Model Switchboard is the control surface — it doesn't run models itself.* You need a controller that knows how to launch and health-check them.
 
-1. **Install the reference controller:**
-   ```bash
-   ./Controller/install-model-switchboard-controller.sh
-   ```
-2. **Drop a profile manifest** into `~/.model-switchboard/model-profiles/` (the exact path is shown in `Settings`). A minimal `llama.cpp` example:
-   ```env
-   DISPLAY_NAME=Qwen 3.5 35B Local
-   RUNTIME=llama.cpp
-   MODEL_PATH=/path/to/model.gguf
-   PORT=8080
-   REQUEST_MODEL=qwen35-local
-   SERVER_MODEL_ID=qwen35-local
-   ```
-3. **Open the menu bar icon** — your profile appears. Click **Activate**.
+**1. Install the reference controller:**
 
-Using your own runtime or launcher? Any backend that honors the controller HTTP contract works. MLX, Ollama, vLLM, and custom-command examples live in [SETUP.md](SETUP.md).
+```bash
+./Controller/install-model-switchboard-controller.sh
+```
+
+**2. Drop a profile manifest** into `~/.model-switchboard/model-profiles/` *(the exact path is shown in `Settings`).* A minimal `llama.cpp` example:
+
+```env
+DISPLAY_NAME=Qwen 3.5 35B Local
+RUNTIME=llama.cpp
+MODEL_PATH=/path/to/model.gguf
+PORT=8080
+REQUEST_MODEL=qwen35-local
+SERVER_MODEL_ID=qwen35-local
+```
+
+**3. Open the menu bar icon.** Your profile appears. Click **`Activate`**.
+
+> Using your own runtime or launcher? Any backend that honors the [controller contract](SETUP.md#controller-api-contract) works. MLX, Ollama, vLLM, and custom-command examples live in [SETUP.md](SETUP.md).
 
 ---
 
 ## Documentation
 
-All of the deeper material is in one place so this README stays skimmable:
+All the deeper material lives in one place so this README stays skimmable:
 
-- **[SETUP.md](SETUP.md)** — profile formats, supported runtimes, health checks, controller API contract, build-from-source flow, release pipeline, Raycast power-user notes, troubleshooting.
+> **[SETUP.md](SETUP.md)** — profile formats, supported runtimes, health checks, controller API contract, build-from-source flow, release pipeline, Raycast power-user notes, troubleshooting, known limitations.
 
-The app's **Help** button opens the same doc.
+*The app's **Help** button opens the same doc.*
 
 ---
 
 ## Contributing
 
-PRs, issues, and profile recipes are welcome. Ground rules that keep the project reusable:
+PRs, issues, and profile recipes are welcome. A few ground rules that keep the project reusable:
 
-- Keep the app generic. Runtime-specific behavior belongs in the controller or a profile manifest.
-- The controller HTTP contract is the stability boundary — additive changes only.
+- **Keep the app generic.** Runtime-specific behavior belongs in the controller or a profile manifest.
+- **The controller HTTP contract is the stability boundary** — additive changes only.
 - External tools (e.g. Factory Droid) stay **optional integrations**, never required features.
 - Ship a runnable example with any new adapter.
 
-Before opening a PR: `swift test && ./Scripts/check-cycles.py && ./Scripts/build-app.sh`.
+Before opening a PR:
+
+```bash
+swift test && ./Scripts/check-cycles.py && ./Scripts/build-app.sh
+```
 
 ---
 
 ## License
 
-[MIT](LICENSE) © 2026 AdityaVG13
+**[MIT](LICENSE)** © 2026 AdityaVG13
 
 ---
 
@@ -160,7 +174,8 @@ Before opening a PR: `swift test && ./Scripts/check-cycles.py && ./Scripts/build
 
 ### Support the project
 
-Model Switchboard is a solo side project, open-sourced for free. If it saves you time flipping between local models, a small tip helps cover the API and tooling bills that keep it moving forward.
+*Model Switchboard is a solo side project, open-sourced for free.*
+If it saves you time flipping between local models, a small tip helps cover the API and tooling bills that keep it moving forward.
 
 <a href="https://ko-fi.com/AdityaVG13">
   <img src="https://img.shields.io/badge/Ko--fi-Buy%20me%20a%20coffee-FF5E5B?logo=ko-fi&logoColor=white&style=for-the-badge" alt="Support on Ko-fi">
