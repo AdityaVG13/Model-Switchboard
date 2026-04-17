@@ -73,7 +73,7 @@ struct SettingsView: View {
                         )
                     )
 
-                    Text("The app is idle when closed in the menu bar. It does not keep the heavy model refresh loop running unless the menu is open.")
+                    Text("The app is idle when closed in the menu bar. When the menu is open, it refreshes every 10 minutes while idle, every 30 seconds while a model is live, and faster only during active actions or benchmarks.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

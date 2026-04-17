@@ -29,6 +29,7 @@ struct HelpView: View {
                     title: "Good Operating Discipline",
                     bullets: [
                         "Run only the models you actually need. Unified memory pressure on Apple silicon compounds fast once multiple 30B-class profiles and large KV caches are live.",
+                        "The menu bar stays lightweight by default. It refreshes immediately after your actions, polls every 30 seconds only while a model is live, and falls back to a 10-minute idle cadence when nothing is running.",
                         "If a model is starting but not healthy yet, the badge stays amber while the endpoint comes up. That is expected.",
                         "If the controller is temporarily unavailable, the app can fall back to cached status instead of showing an empty board."
                     ]
@@ -40,6 +41,15 @@ struct HelpView: View {
                         "If the board shows stale data, hit `Refresh` or `Reconnect` after confirming the controller service is listening on the expected port.",
                         "If buttons do nothing, inspect the controller log first. The menu bar app only reflects controller success or failure.",
                         "If a profile keeps flapping between running and not running, the launch command is unstable. Fix the launcher instead of repeatedly forcing restart from the UI."
+                    ]
+                )
+
+                section(
+                    title: "Power User Extras",
+                    bullets: [
+                        "Raycast users can add the repo's `Integrations/Raycast/Script Commands` folder directly in Raycast for keyboard-first actions.",
+                        "The bundled `Scripts/model-switchboardctl` CLI exposes controller actions like `status`, `activate`, `stop-all`, and `open-profiles` without touching the menu bar.",
+                        "The browser dashboard is intentionally compact now. Use it when you want a larger surface than the menu bar, not a second product."
                     ]
                 )
             }

@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#10284A"/>
+      <stop offset="100%" stop-color="#1A1F2E"/>
+    </linearGradient>
+    <linearGradient id="chip" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#F4F0E7"/>
+      <stop offset="100%" stop-color="#DAD3C4"/>
+    </linearGradient>
+    <linearGradient id="trace" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#85C6FF"/>
+      <stop offset="100%" stop-color="#5A94EF"/>
+    </linearGradient>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="210" fill="url(#bg)"/>
+  <rect x="210" y="210" width="604" height="604" rx="108" fill="#132033" stroke="#29405F" stroke-width="16"/>
+  <rect x="316" y="316" width="392" height="392" rx="54" fill="url(#chip)"/>
+  <rect x="364" y="364" width="296" height="296" rx="22" fill="#102846" stroke="#29405F" stroke-width="14"/>
+  <g stroke="url(#trace)" stroke-width="18" stroke-linecap="round" fill="none">
+    <path d="M 120 290 L 210 290"/>
+    <path d="M 120 380 L 210 380"/>
+    <path d="M 120 470 L 210 470"/>
+    <path d="M 120 560 L 210 560"/>
+    <path d="M 120 650 L 210 650"/>
+    <path d="M 120 740 L 210 740"/>
+    <path d="M 814 290 L 904 290"/>
+    <path d="M 814 380 L 904 380"/>
+    <path d="M 814 470 L 904 470"/>
+    <path d="M 814 560 L 904 560"/>
+    <path d="M 814 650 L 904 650"/>
+    <path d="M 814 740 L 904 740"/>
+    <path d="M 290 120 L 290 210"/>
+    <path d="M 380 120 L 380 210"/>
+    <path d="M 470 120 L 470 210"/>
+    <path d="M 560 120 L 560 210"/>
+    <path d="M 650 120 L 650 210"/>
+    <path d="M 740 120 L 740 210"/>
+    <path d="M 290 814 L 290 904"/>
+    <path d="M 380 814 L 380 904"/>
+    <path d="M 470 814 L 470 904"/>
+    <path d="M 560 814 L 560 904"/>
+    <path d="M 650 814 L 650 904"/>
+    <path d="M 740 814 L 740 904"/>
+  </g>
+  <g stroke="url(#trace)" stroke-width="20" stroke-linecap="round" fill="none" opacity="0.94">
+    <path d="M 420 512 L 512 512"/>
+    <path d="M 512 512 L 512 416"/>
+    <path d="M 512 512 L 604 512"/>
+    <path d="M 512 512 L 512 608"/>
+    <circle cx="512" cy="512" r="36" fill="#7FC3FF" stroke="none"/>
+    <circle cx="420" cy="512" r="18" fill="#7FC3FF" stroke="none"/>
+    <circle cx="512" cy="416" r="18" fill="#7FC3FF" stroke="none"/>
+    <circle cx="604" cy="512" r="18" fill="#7FC3FF" stroke="none"/>
+    <circle cx="512" cy="608" r="18" fill="#7FC3FF" stroke="none"/>
+  </g>
+</svg>

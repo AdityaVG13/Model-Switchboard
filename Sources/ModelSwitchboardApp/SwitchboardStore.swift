@@ -54,13 +54,15 @@ final class SwitchboardStore {
         return "Running: " + running.map(\.displayName).joined(separator: ", ")
     }
 
-    func startAutoRefresh(seconds: TimeInterval = 15) {
+    func startAutoRefresh() {
         refreshTask?.cancel()
         refreshTask = Task { [weak self] in
             guard let self else { return }
             await self.refresh()
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(seconds))
+                let interval = autoRefreshPolicy.interval
+                try? await Task.sleep(for: .seconds(interval))
+                if Task.isCancelled { break }
                 await self.refresh()
             }
         }
@@ -179,6 +181,21 @@ final class SwitchboardStore {
         return URL(fileURLWithPath: profilesDirectory)
             .deletingLastPathComponent()
             .path
+    }
+
+    var autoRefreshPolicy: AutoRefreshPolicy {
+        AutoRefreshPolicy(
+            payload: ControllerStatusPayload(
+                statuses: statuses,
+                benchmark: benchmark,
+                integrations: integrations,
+                profilesDirectory: profilesDirectory,
+                controllerRoot: controllerRoot
+            ),
+            hasPendingActions: !pendingProfileActions.isEmpty ||
+                !pendingGlobalActions.isEmpty ||
+                !pendingIntegrationActions.isEmpty
+        )
     }
 
     private var client: ControllerClient {

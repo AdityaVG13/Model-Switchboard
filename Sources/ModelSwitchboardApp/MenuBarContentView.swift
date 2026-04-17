@@ -24,6 +24,8 @@ struct MenuBarContentView: View {
     let updateMenuBarHelp: (String) -> Void
 
     @State private var inspectorPanel: InspectorPanel?
+    @State private var hostWindow: NSWindow?
+    @State private var inspectorWindowController = InspectorWindowController()
 
     private static let clockFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -34,30 +36,33 @@ struct MenuBarContentView: View {
     }()
 
     var body: some View {
-        HStack(spacing: 0) {
-            if let inspectorPanel {
-                inspectorView(inspectorPanel)
-                    .frame(width: 280, height: 620)
-                    .background(.regularMaterial)
-                    .transition(.move(edge: .leading).combined(with: .opacity))
-
-                Divider()
-            }
-
-            mainPanel
-                .frame(width: inspectorPanel == nil ? 470 : 500, height: 620)
-        }
-        .background(.thickMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        mainPanel
+            .frame(width: 470, height: 620)
+            .background(.thickMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .background(
+                WindowAccessor { window in
+                    if hostWindow !== window {
+                        hostWindow = window
+                    }
+                    inspectorWindowController.repositionIfNeeded()
+                    syncInspectorWindow()
+                }
+            )
         .task {
             store.startAutoRefresh()
             updateMenuBarHelp(store.menuBarHelp)
+            syncInspectorWindow()
         }
         .onDisappear {
             store.stopAutoRefresh()
+            inspectorWindowController.dismiss()
         }
         .onChange(of: store.menuBarHelp) { _, newValue in
             updateMenuBarHelp(newValue)
+        }
+        .onChange(of: inspectorPanel) { _, _ in
+            syncInspectorWindow()
         }
         .animation(.snappy(duration: 0.18), value: inspectorPanel)
         .animation(.snappy(duration: 0.18), value: store.pendingProfileActions)
@@ -251,39 +256,20 @@ struct MenuBarContentView: View {
 
     @ViewBuilder
     private func inspectorView(_ panel: InspectorPanel) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Text(panel.title)
-                    .font(.headline)
-                Spacer()
-                Button {
-                    inspectorPanel = nil
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .accessibilityLabel("Close \(panel.title)")
-            }
-
-            switch panel {
-            case .settings:
-                SettingsView(
-                    controllerBaseURL: $controllerBaseURL,
-                    profilesDirectory: store.profilesDirectory,
-                    controllerRoot: store.resolvedControllerRoot,
-                    launchAtLoginManager: launchAtLoginManager,
-                    openProfilesDirectory: store.openProfilesDirectory,
-                    openControllerRoot: store.openControllerRoot,
-                    reconnect: reconnect
-                )
-            case .help:
-                HelpView()
-            }
-
-            Spacer(minLength: 0)
+        switch panel {
+        case .settings:
+            SettingsView(
+                controllerBaseURL: $controllerBaseURL,
+                profilesDirectory: store.profilesDirectory,
+                controllerRoot: store.resolvedControllerRoot,
+                launchAtLoginManager: launchAtLoginManager,
+                openProfilesDirectory: store.openProfilesDirectory,
+                openControllerRoot: store.openControllerRoot,
+                reconnect: reconnect
+            )
+        case .help:
+            HelpView()
         }
-        .padding(16)
     }
 
     private func footerToggleButton(_ title: String, panel: InspectorPanel, icon: String) -> some View {
@@ -294,6 +280,19 @@ struct MenuBarContentView: View {
         }
         .buttonStyle(.borderless)
         .accessibilityLabel(title)
+    }
+
+    private func syncInspectorWindow() {
+        guard let panel = inspectorPanel, let hostWindow else {
+            inspectorWindowController.dismiss()
+            return
+        }
+
+        inspectorWindowController.present(title: panel.title, from: hostWindow, onClose: {
+            inspectorPanel = nil
+        }) {
+            inspectorView(panel)
+        }
     }
 
     private func actionButton(

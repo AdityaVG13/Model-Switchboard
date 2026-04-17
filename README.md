@@ -56,6 +56,21 @@ Per-profile actions:
 
 That matters because model locations are defined in controller profile manifests, not in the app itself.
 
+## Raycast
+
+Raycast users should have two clean paths:
+
+1. the app should appear as a normal macOS application after install
+2. keyboard-first operators should also get direct scriptable actions without opening the menu
+
+This repo now supports both:
+
+- `Scripts/install.sh` explicitly registers the app with Launch Services and forces a Spotlight import so Raycast can discover it faster
+- `Scripts/model-switchboardctl` provides a tiny controller CLI
+- `Integrations/Raycast/Script Commands/` contains lightweight Script Commands for status, opening the profiles folder, stopping all models, and running quick benchmarks
+
+If Finder still shows `.app` on your machine, that is a global Finder preference issue, not an app bundle naming issue. When `AppleShowAllExtensions` is enabled, Finder will keep showing bundle extensions.
+
 ## Controller API contract
 
 The app expects a controller base URL, defaulting to:

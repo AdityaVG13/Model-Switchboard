@@ -6,6 +6,7 @@ APP_NAME="Model Switchboard.app"
 LEGACY_APP_NAME="ModelSwitchboard.app"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/Applications}"
 SYSTEM_APPLICATIONS_DIR="/Applications"
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 CONFIGURATION="${CONFIGURATION:-Release}"
 DERIVED_APP="$ROOT_DIR/.xcodebuild/Build/Products/$CONFIGURATION/ModelSwitchboard.app"
 DIST_APP="$ROOT_DIR/dist/$APP_NAME"
@@ -46,6 +47,14 @@ tell application "Finder"
   set extension hidden of (POSIX file "$INSTALL_APP" as alias) to true
 end tell
 APPLESCRIPT
+fi
+
+if [ -x "$LSREGISTER" ]; then
+  "$LSREGISTER" -f "$INSTALL_APP" >/dev/null 2>&1 || true
+fi
+
+if command -v mdimport >/dev/null 2>&1; then
+  mdimport -f "$INSTALL_APP" >/dev/null 2>&1 || true
 fi
 
 open -a "$INSTALL_APP"

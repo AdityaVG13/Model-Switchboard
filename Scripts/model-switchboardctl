@@ -1,0 +1,153 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONTROLLER_URL="${MODEL_SWITCHBOARD_URL:-http://127.0.0.1:8877}"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+APP_PATH="${MODEL_SWITCHBOARD_APP_PATH:-$HOME/Applications/Model Switchboard.app}"
+
+usage() {
+  cat <<USAGE
+Usage: model-switchboardctl <command> [args]
+
+Commands:
+  status                Print raw controller status JSON
+  summary               Print one-line status summary
+  profiles-dir          Print the controller's model-profiles directory
+  controller-root       Print the controller root directory
+  open-app              Launch the menu bar app
+  open-dashboard        Open the local dashboard in a browser
+  open-profiles         Open the live model-profiles directory in Finder
+  start <profile>       Start a profile
+  stop <profile>        Stop a profile
+  restart <profile>     Restart a profile
+  activate <profile>    Activate a profile and stop other running profiles
+  bench-all             Start the quick benchmark suite across all profiles
+  bench <profile>       Start the quick benchmark suite for one profile
+  stop-all              Stop all running profiles
+USAGE
+}
+
+api() {
+  curl -fsS "$@"
+}
+
+json_field() {
+  local field="$1"
+  local input
+  input="$(cat)"
+  "$PYTHON_BIN" - "$field" "$input" <<'PY'
+import json
+import sys
+field = sys.argv[1]
+payload = json.loads(sys.argv[2])
+value = payload
+for key in field.split("."):
+    if isinstance(value, dict):
+        value = value.get(key)
+    else:
+        value = None
+        break
+if value is None:
+    sys.exit(1)
+if isinstance(value, (dict, list)):
+    print(json.dumps(value))
+else:
+    print(value)
+PY
+}
+
+post_json() {
+  local path="$1"
+  local payload="$2"
+  api -X POST "$CONTROLLER_URL$path" -H 'Content-Type: application/json' -d "$payload"
+}
+
+require_profile() {
+  if [ "$#" -lt 1 ] || [ -z "${1:-}" ]; then
+    printf 'error: missing profile\n' >&2
+    usage >&2
+    exit 1
+  fi
+}
+
+command="${1:-}"
+case "$command" in
+  status)
+    api "$CONTROLLER_URL/api/status"
+    ;;
+  summary)
+    summary_json="$(api "$CONTROLLER_URL/api/status")"
+    "$PYTHON_BIN" - "$summary_json" <<'PY'
+import json
+import sys
+payload = json.loads(sys.argv[1])
+statuses = payload.get("statuses", [])
+running = [item["display_name"] for item in statuses if item.get("running")]
+ready = sum(1 for item in statuses if item.get("ready"))
+bench = payload.get("benchmark") or {}
+bench_state = "benchmarking" if bench.get("running") else ((bench.get("latest") or {}).get("suite") or "idle")
+print(f"{ready}/{len(statuses)} ready | {len(running)} running | {bench_state}")
+if running:
+    print("Running: " + ", ".join(running))
+PY
+    ;;
+  profiles-dir)
+    api "$CONTROLLER_URL/api/status" | json_field profiles_dir
+    ;;
+  controller-root)
+    api "$CONTROLLER_URL/api/status" | json_field controller_root
+    ;;
+  open-app)
+    if [ -d "$APP_PATH" ]; then
+      open -a "$APP_PATH"
+    else
+      open -a "Model Switchboard"
+    fi
+    ;;
+  open-dashboard)
+    open "$CONTROLLER_URL"
+    ;;
+  open-profiles)
+    profile_dir="$(api "$CONTROLLER_URL/api/status" | json_field profiles_dir)"
+    open "$profile_dir"
+    ;;
+  start)
+    shift
+    require_profile "$@"
+    post_json /api/start "{\"profile\":\"$1\"}"
+    ;;
+  stop)
+    shift
+    require_profile "$@"
+    post_json /api/stop "{\"profile\":\"$1\"}"
+    ;;
+  restart)
+    shift
+    require_profile "$@"
+    post_json /api/restart "{\"profile\":\"$1\"}"
+    ;;
+  activate)
+    shift
+    require_profile "$@"
+    post_json /api/switch "{\"profile\":\"$1\"}"
+    ;;
+  bench-all)
+    post_json /api/benchmark/start '{"suite":"quick"}'
+    ;;
+  bench)
+    shift
+    require_profile "$@"
+    post_json /api/benchmark/start "{\"suite\":\"quick\",\"profiles\":[\"$1\"]}"
+    ;;
+  stop-all)
+    post_json /api/stop-all '{}'
+    ;;
+  ""|-h|--help|help)
+    usage
+    ;;
+  *)
+    printf 'error: unknown command %s\n' "$command" >&2
+    usage >&2
+    exit 1
+    ;;
+esac

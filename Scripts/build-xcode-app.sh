@@ -8,6 +8,8 @@ VERSION="$(tr -d '[:space:]' < "$ROOT_DIR/VERSION")"
 BUILD_NUMBER="${BUILD_NUMBER:-$VERSION}"
 cd "$ROOT_DIR"
 
+"$ROOT_DIR/Scripts/generate-app-icon.sh" >/dev/null
+
 # Keep the Xcode project in sync with the source tree. New Swift files do not
 # automatically appear in an existing .xcodeproj unless we regenerate it.
 if [ "${SKIP_XCODEGEN:-0}" != "1" ]; then

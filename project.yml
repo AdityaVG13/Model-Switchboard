@@ -23,10 +23,13 @@ targets:
     platform: macOS
     sources:
       - Sources/ModelSwitchboardApp
+      - path: Resources/App/ModelSwitchboard.icns
+        buildPhase: resources
     info:
       path: Resources/App/Info.plist
       properties:
         CFBundleDisplayName: Model Switchboard
+        CFBundleIconFile: ModelSwitchboard.icns
         CFBundleName: Model Switchboard
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)

@@ -218,3 +218,99 @@ import Testing
     #expect(updated.rssMB == 2048)
     #expect(updated.command == status.command)
 }
+
+@Test func autoRefreshPolicyUsesIdleCadenceWhenNothingIsLive() {
+    let payload = ControllerStatusPayload(
+        statuses: [
+            ModelProfileStatus(
+                profile: "idle",
+                displayName: "Idle",
+                runtime: "llama.cpp",
+                host: "127.0.0.1",
+                port: "8080",
+                baseURL: "http://127.0.0.1:8080/v1",
+                requestModel: "idle",
+                serverModelID: "idle",
+                pid: nil,
+                running: false,
+                ready: false,
+                serverIDs: [],
+                rssMB: nil,
+                command: nil,
+                logPath: "/tmp/idle.log"
+            )
+        ],
+        benchmark: BenchmarkStatus(running: false, pid: nil, logPath: nil, latest: nil),
+        integrations: []
+    )
+
+    let policy = AutoRefreshPolicy(payload: payload)
+
+    #expect(policy.mode == .idle)
+    #expect(policy.interval == AutoRefreshPolicy.idleInterval)
+}
+
+@Test func autoRefreshPolicyUsesActiveCadenceForLiveEndpoints() {
+    let payload = ControllerStatusPayload(
+        statuses: [
+            ModelProfileStatus(
+                profile: "active",
+                displayName: "Active",
+                runtime: "llama.cpp",
+                host: "127.0.0.1",
+                port: "8081",
+                baseURL: "http://127.0.0.1:8081/v1",
+                requestModel: "active",
+                serverModelID: "active",
+                pid: 123,
+                running: true,
+                ready: true,
+                serverIDs: ["active"],
+                rssMB: 4096,
+                command: nil,
+                logPath: "/tmp/active.log"
+            )
+        ],
+        benchmark: BenchmarkStatus(running: false, pid: nil, logPath: nil, latest: nil),
+        integrations: []
+    )
+
+    let policy = AutoRefreshPolicy(payload: payload)
+
+    #expect(policy.mode == .activeRuntime)
+    #expect(policy.interval == AutoRefreshPolicy.activeRuntimeInterval)
+}
+
+@Test func autoRefreshPolicyPrioritizesBenchmarksAndPendingActions() {
+    let payload = ControllerStatusPayload(
+        statuses: [
+            ModelProfileStatus(
+                profile: "bench",
+                displayName: "Bench",
+                runtime: "llama.cpp",
+                host: "127.0.0.1",
+                port: "8082",
+                baseURL: "http://127.0.0.1:8082/v1",
+                requestModel: "bench",
+                serverModelID: "bench",
+                pid: 456,
+                running: true,
+                ready: false,
+                serverIDs: [],
+                rssMB: nil,
+                command: nil,
+                logPath: "/tmp/bench.log"
+            )
+        ],
+        benchmark: BenchmarkStatus(running: true, pid: 99, logPath: "/tmp/bench-run.log", latest: nil),
+        integrations: []
+    )
+
+    let benchmarkingPolicy = AutoRefreshPolicy(payload: payload)
+    let pendingPolicy = AutoRefreshPolicy(payload: payload, hasPendingActions: true)
+
+    #expect(benchmarkingPolicy.mode == .benchmarking)
+    #expect(benchmarkingPolicy.interval == AutoRefreshPolicy.benchmarkingInterval)
+    #expect(pendingPolicy.mode == .pendingAction)
+    #expect(pendingPolicy.interval == AutoRefreshPolicy.pendingActionInterval)
+}
