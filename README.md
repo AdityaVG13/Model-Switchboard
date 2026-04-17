@@ -1,292 +1,169 @@
+<div align="center">
+
 # Model Switchboard
 
-A native macOS menu bar app for operating local model runtimes.
+**Flip between local LLM runtimes from your menu bar. One click to activate. One click to stop everything.**
 
-`Model Switchboard` is model-agnostic. It talks to a controller API; the controller can launch `llama.cpp`, MLX, Ollama, vLLM, or any other compatible runtime.
+[![Version](https://img.shields.io/badge/version-1.0.0-blue?style=flat-square)](VERSION)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-macOS%2014%2B-lightgrey?style=flat-square)](#requirements)
+[![Swift](https://img.shields.io/badge/swift-6.0-orange?style=flat-square)](Package.swift)
 
-## Editions
+<br>
 
-This repo ships two editions from one codebase:
+<img src="Resources/Brand/screenshot-base.jpg" alt="Model Switchboard menu bar panel" width="520">
 
-- `Model Switchboard` -- the lightweight base edition
-- `Model Switchboard Plus` -- the expanded edition with advanced operations
+</div>
 
-Profiles stay in the base edition. They are the source of truth for model launches, so they are not treated as an optional power-user feature.
+<br>
 
-Feature split:
+Running local models on an Apple Silicon Mac usually means a sprawl of terminal windows, half-remembered launch scripts, and no clean way to see what's actually running. Model Switchboard puts `llama.cpp`, MLX, Ollama, vLLM, or any custom launcher behind one menu bar panel. Click **Activate** on a profile, every other model stops, the one you picked comes up at an OpenAI-compatible endpoint. No terminals.
 
-- Base
-  - profile list
-  - `Activate`, `Start`, `Stop`, `Restart`
-  - `Refresh`, `Stop All`
-  - attached `Settings` and `Help`
-  - launch-at-login toggle
-  - live `model-profiles` and controller-root discovery
-  - widget
-- Plus
-  - everything in Base
-  - `Benchmark All` and `Reopen Last`
-  - per-profile `Benchmark`
-  - in-app benchmark panel with CSV export
-  - CPU and GPU utilization badges in the header
-  - optional controller integrations such as `Sync Droid`
-  - plus widget branding
+It's runtime-agnostic. It ships with a reference controller, but talks to any backend that implements the documented HTTP contract.
 
-## Purpose
+---
 
-The app provides a fast operations surface that can:
+<img align="right" width="420" src="Resources/Brand/screenshot-base.jpg" alt="Base edition panel">
 
-- show which profiles are actually ready
-- switch the machine to a target model with one click
-- start and stop heavy runtimes cleanly
-- open the backing endpoint when you need details
+### One click to switch models
 
-The Plus edition adds benchmark and integration controls without increasing base-edition surface area.
+`Activate` stops every other running profile and brings the chosen one up — no more forgetting to `kill -9` a 24 GB process before starting the next one.
 
-## Buttons in the menu bar app
+Profiles are marked *ready* only after a real health check passes. `/v1/models` by default, or a custom HTTP probe. No "green dot" lies.
 
-Global actions:
+Native SwiftUI and `MenuBarExtra`. No Electron, no bundled inference engine, no resident background worker pegging your CPU.
 
-- `Refresh`
-- `Stop All`
-- `Benchmark All` (Plus)
-- `Reopen Last` (Plus)
-- `Settings`
-- `Help`
-- `Quit`
+<br clear="right">
 
-Per-profile actions:
+---
 
-- `Activate` -- stop other running profiles and start this one
-- `Start`
-- `Stop`
-- `Restart`
-- `Benchmark` (Plus)
+<img align="left" width="420" src="Resources/Brand/screenshot-plus.jpg" alt="Plus edition with header utilization and Sync Droid">
 
-`Activate` is the primary laptop workflow: switch to one model and stop the rest.
+### Plus edition adds the numbers
 
-`Settings` and `Help` open as attached inspector panels, not detached desktop windows.
+**CPU and GPU utilization** live in the header so you know what your machine is doing without dropping into Activity Monitor.
 
-`Settings` also includes:
+**Benchmark All** runs the whole fleet, **Reopen Last** jumps back to what you had up, and **optional integrations** like `Sync Droid` keep your external tooling in sync with whatever's currently loaded — without cluttering the base surface if you don't need it.
 
-- a `Launch At Login` toggle backed by macOS `ServiceManagement`
-- the live `model-profiles` path reported by the controller
-- one-click actions to open the profiles folder or controller root in Finder
+<br clear="left">
 
-Model locations are defined in controller profile manifests, not in app preferences.
+---
 
-In `Model Switchboard Plus`, benchmark controls and integration actions stay in the main surface; benchmark results are viewable in-app and exportable to CSV.
+<img align="right" width="420" src="Resources/Brand/screenshot-benchmark.jpg" alt="In-app Benchmarks panel">
 
-## Raycast
+### Benchmarks in the app, not a spreadsheet
 
-Raycast users have two paths:
+The in-app panel reads the latest run and shows **TTFT, Decode, E2E, RSS** per profile in one place.
 
-1. the app should appear as a normal macOS application after install
-2. keyboard-first operators should also get direct scriptable actions without opening the menu
+Tap **Export CSV** and you have a portable report. Results land as both JSON and Markdown under `Controller/benchmark-results/` so they're easy to diff, commit, or feed to another tool.
 
-This repo supports both:
+<br clear="right">
 
-- `Scripts/install.sh` explicitly registers the app with Launch Services and forces a Spotlight import so Raycast can discover it faster
-- `Scripts/model-switchboardctl` provides a tiny controller CLI and supports `MODEL_SWITCHBOARD_VARIANT=base|plus`
-- `Integrations/Raycast/Script Commands/` contains lightweight Script Commands for status, opening the profiles folder, stopping all models, and running quick benchmarks
+---
 
-If Finder shows `.app`, that is a Finder preference (`AppleShowAllExtensions`), not a bundle naming issue.
+## Base vs Plus
 
-## Controller API contract
+Same codebase, two apps. Pick at install time. They live side by side as **Model Switchboard.app** and **Model Switchboard Plus.app** under `~/Applications/`.
 
-The app expects a controller base URL, defaulting to:
+| | Base | Plus |
+|---|:---:|:---:|
+| Profile list with live status | Yes | Yes |
+| `Activate` / `Start` / `Stop` / `Restart` | Yes | Yes |
+| `Refresh` / `Stop All` | Yes | Yes |
+| `Launch At Login` + attached Settings / Help | Yes | Yes |
+| CPU / GPU utilization badges | — | Yes |
+| `Benchmark All` + per-profile `Benchmark` | — | Yes |
+| In-app Benchmarks panel + CSV export | — | Yes |
+| `Reopen Last` | — | Yes |
+| Optional integrations (`Sync Droid`, …) | — | Yes |
 
-- `http://127.0.0.1:8877`
+---
 
-Endpoints used today:
+## Requirements
 
-- `GET /api/status`
-- `GET /api/integrations`
-- `GET /api/benchmark/status`
-- `POST /api/start`
-- `POST /api/stop`
-- `POST /api/restart`
-- `POST /api/switch`
-- `POST /api/stop-all`
-- `POST /api/integrations/run`
-- `POST /api/benchmark/start`
+- macOS 14 (Sonoma) or later
+- Apple Silicon recommended — Intel Macs run the app fine, but MLX models require Apple Silicon
+- A running **controller**. This repo ships a reference controller under `Controller/`; any HTTP server implementing the [controller contract](SETUP.md#controller-api-contract) works
 
-A backend is compatible if it returns the same profile-status JSON shape, exposes optional `integrations`, and supports the lifecycle actions above.
-
-## Benchmark outputs
-
-The bundled controller benchmark harness always writes both machine-readable and human-readable outputs under:
-
-- `Controller/benchmark-results/`
-
-Each completed run produces:
-
-- `benchmark-YYYYMMDD-HHMMSS.json`
-- `benchmark-YYYYMMDD-HHMMSS.md`
-- `latest.json`
-- `latest.md`
-
-The Plus benchmark panel reads `latest.json` and renders the latest run in-app. `Export CSV` writes a portable report from the current latest run.
-
-## Version
-
-- `1.0.0`
-
-The current release version lives in:
-
-- `VERSION`
+---
 
 ## Install
 
-Base edition:
+**Signed DMG (recommended).** From the [latest release](https://github.com/AdityaVG13/Model-Switchboard/releases/latest), grab `Model-Switchboard-<version>.dmg` or `Model-Switchboard-Plus-<version>.dmg`. Open, drag to `Applications`, launch.
+
+**From source.**
 
 ```bash
-./Scripts/install.sh
+git clone https://github.com/AdityaVG13/Model-Switchboard.git
+cd Model-Switchboard
+./Scripts/install.sh                   # Base
+APP_VARIANT=plus ./Scripts/install.sh  # Plus
 ```
 
-or explicitly:
+The installer places a fresh build under `~/Applications/`, registers it with Launch Services, and forces a Spotlight import so Raycast and Alfred pick it up immediately.
 
-```bash
-APP_VARIANT=base ./Scripts/install.sh
-```
+---
 
-Plus edition:
+## First run
 
-```bash
-APP_VARIANT=plus ./Scripts/install.sh
-```
+Model Switchboard is the control surface — it doesn't run models itself. You need a controller that knows how to launch and health-check them.
 
-That installs fresh copies at:
+1. **Install the reference controller:**
+   ```bash
+   ./Controller/install-model-switchboard-controller.sh
+   ```
+2. **Drop a profile manifest** into `~/.model-switchboard/model-profiles/` (the exact path is shown in `Settings`). A minimal `llama.cpp` example:
+   ```env
+   DISPLAY_NAME=Qwen 3.5 35B Local
+   RUNTIME=llama.cpp
+   MODEL_PATH=/path/to/model.gguf
+   PORT=8080
+   REQUEST_MODEL=qwen35-local
+   SERVER_MODEL_ID=qwen35-local
+   ```
+3. **Open the menu bar icon** — your profile appears. Click **Activate**.
 
-- `~/Applications/Model Switchboard.app`
-- `~/Applications/Model Switchboard Plus.app`
+Using your own runtime or launcher? Any backend that honors the controller HTTP contract works. MLX, Ollama, vLLM, and custom-command examples live in [SETUP.md](SETUP.md).
 
-The installer also removes the old `ModelSwitchboard.app` bundle name to avoid stale launches.
+---
 
-## Uninstall
+## Documentation
 
-```bash
-./Scripts/uninstall.sh
-```
+All of the deeper material is in one place so this README stays skimmable:
 
-That removes the app from:
+- **[SETUP.md](SETUP.md)** — profile formats, supported runtimes, health checks, controller API contract, build-from-source flow, release pipeline, Raycast power-user notes, troubleshooting.
 
-- `~/Applications`
-- `dist/`
+The app's **Help** button opens the same doc.
 
-and clears the most obvious app-side preference and widget container files.
+---
 
-## Build
+## Contributing
 
-```bash
-swift test
-./Scripts/build-app.sh
-```
+PRs, issues, and profile recipes are welcome. Ground rules that keep the project reusable:
 
-That builds the base release app bundle at:
+- Keep the app generic. Runtime-specific behavior belongs in the controller or a profile manifest.
+- The controller HTTP contract is the stability boundary — additive changes only.
+- External tools (e.g. Factory Droid) stay **optional integrations**, never required features.
+- Ship a runnable example with any new adapter.
 
-- `dist/Model Switchboard.app`
+Before opening a PR: `swift test && ./Scripts/check-cycles.py && ./Scripts/build-app.sh`.
 
-Plus edition:
+---
 
-```bash
-APP_VARIANT=plus ./Scripts/build-app.sh
-```
+## License
 
-That builds:
+[MIT](LICENSE) © 2026 AdityaVG13
 
-- `dist/Model Switchboard Plus.app`
+---
 
-The Xcode build script regenerates `.xcodeproj` from `project.yml` before building.
+<div align="center">
 
-## DMG
+### Support the project
 
-```bash
-./Scripts/build-dmg.sh
-```
+Model Switchboard is a solo side project, open-sourced for free. If it saves you time flipping between local models, a small tip helps cover the API and tooling bills that keep it moving forward.
 
-That produces the base DMG:
+<a href="https://ko-fi.com/AdityaVG13">
+  <img src="https://img.shields.io/badge/Ko--fi-Buy%20me%20a%20coffee-FF5E5B?logo=ko-fi&logoColor=white&style=for-the-badge" alt="Support on Ko-fi">
+</a>
 
-- `dist/Model-Switchboard-1.0.0.dmg`
-
-Plus edition:
-
-```bash
-APP_VARIANT=plus ./Scripts/build-dmg.sh
-```
-
-That produces:
-
-- `dist/Model-Switchboard-Plus-1.0.0.dmg`
-
-For local verification:
-
-```bash
-./Scripts/verify-distribution.sh
-```
-
-Plus verification:
-
-```bash
-APP_VARIANT=plus ./Scripts/verify-distribution.sh
-```
-
-This verifies app bundle structure and code signature. Gatekeeper checks are skipped for local ad hoc builds.
-
-## Release stance
-
-For GitHub distribution:
-
-1. a Developer ID-signed app
-2. a notarized `.dmg`
-3. a GitHub Release that points users to the DMG
-
-This repo builds DMGs locally; public releases should be signed and notarized.
-
-This repo now includes:
-
-- `Scripts/sign-and-notarize-dmg.sh`
-- `.github/workflows/release.yml`
-
-The release workflow signs, notarizes, verifies, and uploads both editions.
-
-The GitHub release workflow expects these secrets:
-
-- `APPLE_CERTIFICATE_P12_BASE64`
-- `APPLE_CERTIFICATE_PASSWORD`
-- `APPLE_DEVELOPER_IDENTITY`
-- `APPLE_NOTARY_API_KEY_P8_BASE64`
-- `APPLE_NOTARY_API_KEY_ID`
-- `APPLE_NOTARY_API_ISSUER_ID`
-
-## Iterative development
-
-```bash
-./Scripts/run-dev.sh
-```
-
-## Included example controller
-
-This repo also ships a generic reference controller under `Controller/`.
-
-It includes:
-
-- a Python control plane
-- a branded Swift launcher for `launchd`
-- a local benchmark harness
-- a SwiftBar companion script
-- an example custom-command profile
-
-## Widget note
-
-WidgetKit distribution follows the host app: users install and launch the containing app once before the widget appears in the gallery.
-
-## Open source posture
-
-To keep this reusable:
-
-- keep the app generic
-- document the controller contract
-- treat external tools like Droid as optional integrations, not required features
-- ship one backend adapter as an example
-- let other people plug in their own runtime stack
+</div>

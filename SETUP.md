@@ -1,4 +1,26 @@
-# Setup ModelSwitchboard
+# Model Switchboard — Setup & Reference
+
+Everything you need beyond the README's quickstart. This is also what the app's **Help** button opens.
+
+## Table of contents
+
+- [The operating model](#the-operating-model)
+- [One central folder](#one-central-folder)
+- [Accepted profile formats](#accepted-profile-formats)
+- [Supported runtime styles](#supported-runtime-styles)
+- [How detection works](#how-detection-works)
+- [What is standard on a Mac](#what-is-standard-on-a-mac)
+- [Why JSON is the right next step](#why-json-is-the-right-next-step)
+- [Resource profile](#resource-profile)
+- [Controller API contract](#controller-api-contract)
+- [Benchmark artifacts](#benchmark-artifacts)
+- [Build from source](#build-from-source)
+- [Release pipeline](#release-pipeline)
+- [Raycast and power users](#raycast-and-power-users)
+- [Troubleshooting](#troubleshooting)
+- [Known limitations](#known-limitations)
+
+---
 
 ## The operating model
 
@@ -166,3 +188,166 @@ Design choices that keep the app light:
 - the widget refreshes on a simple timeline instead of running its own always-on helper
 
 Most memory/thermal load should remain in runtimes, not the operator UI.
+
+---
+
+## Controller API contract
+
+The app expects a controller base URL, defaulting to `http://127.0.0.1:8877`.
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/status` | Profile + readiness snapshot |
+| `GET` | `/api/integrations` | Optional integration manifest (Plus) |
+| `GET` | `/api/benchmark/status` | Current benchmark run state (Plus) |
+| `POST` | `/api/start` | Start a profile |
+| `POST` | `/api/stop` | Stop a profile |
+| `POST` | `/api/restart` | Restart a profile |
+| `POST` | `/api/switch` | Stop others, start target (the `Activate` path) |
+| `POST` | `/api/stop-all` | Stop every managed profile |
+| `POST` | `/api/integrations/run` | Trigger an optional integration (Plus) |
+| `POST` | `/api/benchmark/start` | Run benchmark(s) (Plus) |
+
+Any backend that returns the same profile-status JSON shape and supports these lifecycle actions is compatible. See `Controller/contracts.py` for the exact response shapes.
+
+## Benchmark artifacts
+
+The reference benchmark harness writes both machine-readable and human-readable outputs to:
+
+- `Controller/benchmark-results/`
+
+Each completed run produces:
+
+- `benchmark-YYYYMMDD-HHMMSS.json`
+- `benchmark-YYYYMMDD-HHMMSS.md`
+- `latest.json`
+- `latest.md`
+
+The Plus panel reads `latest.json`. **Export CSV** writes a portable report from the current latest run.
+
+---
+
+## Build from source
+
+```bash
+# Run tests
+swift test
+
+# Iterative dev (launches a debug build)
+./Scripts/run-dev.sh
+
+# Release build — produces dist/Model Switchboard.app
+./Scripts/build-app.sh
+APP_VARIANT=plus ./Scripts/build-app.sh   # Plus edition
+
+# DMG — produces dist/Model-Switchboard-<version>.dmg
+./Scripts/build-dmg.sh
+APP_VARIANT=plus ./Scripts/build-dmg.sh   # Plus DMG
+
+# Verify an installed copy
+./Scripts/verify-installed-app.sh
+```
+
+Or via `make`:
+
+```bash
+make test       # swift test
+make app        # build-app.sh
+make dmg        # build-dmg.sh
+make install    # install.sh
+make uninstall  # uninstall.sh
+```
+
+The Xcode build path regenerates `ModelSwitchboard.xcodeproj` from `project.yml` via XcodeGen before building, so you never hand-edit the project file.
+
+## Release pipeline
+
+For GitHub distribution:
+
+1. a Developer ID-signed app
+2. a notarized `.dmg`
+3. a GitHub Release that points users to the DMG
+
+This repo builds DMGs locally; public releases should be signed and notarized.
+
+Included:
+
+- `Scripts/sign-and-notarize-dmg.sh`
+- `.github/workflows/release.yml`
+
+The release workflow signs, notarizes, verifies, and uploads both editions on tag push. Required repo secrets:
+
+- `APPLE_CERTIFICATE_P12_BASE64`
+- `APPLE_CERTIFICATE_PASSWORD`
+- `APPLE_DEVELOPER_IDENTITY`
+- `APPLE_NOTARY_API_KEY_P8_BASE64`
+- `APPLE_NOTARY_API_KEY_ID`
+- `APPLE_NOTARY_API_ISSUER_ID`
+
+---
+
+## Raycast and power users
+
+Raycast users have two paths:
+
+1. The app appears as a normal macOS application after install.
+2. Keyboard-first operators can also call scriptable actions without opening the menu.
+
+This repo supports both:
+
+- `Scripts/install.sh` explicitly registers the app with Launch Services and forces a Spotlight import so Raycast can discover it faster.
+- `Scripts/model-switchboardctl` provides a tiny controller CLI, selectable per edition via `MODEL_SWITCHBOARD_VARIANT=base|plus`.
+- `Integrations/Raycast/Script Commands/` contains Script Commands for status, opening the profiles folder, stopping all models, and running quick benchmarks.
+
+If Finder shows `.app` extensions, that is the macOS `AppleShowAllExtensions` Finder preference, not a bundle naming issue.
+
+---
+
+## Troubleshooting
+
+**The app doesn't appear in Spotlight or Raycast.**
+Run `./Scripts/install.sh` — it registers the bundle with Launch Services and forces a Spotlight import. If the old `ModelSwitchboard.app` name is still cached, the installer removes it automatically.
+
+**A profile shows "Not Running" even though I can `curl` the endpoint.**
+The default health check for `llama.cpp` and `mlx` profiles probes `/v1/models` and verifies the expected model ID is present. If your server returns a different id, set `SERVER_MODEL_ID` in the profile to match, or switch the profile to `HEALTHCHECK_MODE=http-200` for a looser check.
+
+**`Activate` doesn't kill the previously running model.**
+Each runtime is tracked by a managed PID file. If you started the process outside Model Switchboard (e.g. a terminal `llama-server` invocation), the controller doesn't own that PID. Stop the outside process manually, then use `Activate`.
+
+**The widget doesn't show up in the widget gallery.**
+See [Known limitations](#known-limitations) — the widget extension is bundled correctly but only registers reliably with a Developer-ID-signed build.
+
+**Benchmarks panel is empty or cooldown won't clear.**
+The Plus panel reads `Controller/benchmark-results/latest.json`. Delete it to reset the panel, or run `Benchmark All` once to regenerate.
+
+**Controller port `8877` is already in use.**
+The default can be overridden when the controller starts. If you changed it, also update the controller URL in the app's `Settings` panel.
+
+---
+
+## Known limitations
+
+**Desktop / Notification Center widget requires a Developer-ID-signed build.**
+The widget target (`ModelSwitchboardWidget`) is real, embedded into the app bundle at `Contents/PlugIns/ModelSwitchboardWidget.appex`, and wired through `project.yml`. However, local installs from `./Scripts/install.sh` ad-hoc sign the bundle (`codesign --sign -`), and ad-hoc-signed widget extensions are not reliably registered by WidgetKit's gallery. The widget begins to register once the app is installed from a Developer ID-signed, notarized DMG (i.e. the GitHub Release build). If you want to verify on a local build, try:
+
+```bash
+pluginkit -a "$HOME/Applications/Model Switchboard.app/Contents/PlugIns/ModelSwitchboardWidget.appex"
+killall chronod cfprefsd 2>/dev/null || true
+open -a "Model Switchboard"
+```
+
+Then wait ~60 seconds and check the Widget gallery. Results vary across macOS versions.
+
+**Widget note.** WidgetKit distribution follows the host app: users install and launch the containing app once before the widget appears in the gallery — once registration actually succeeds.
+
+---
+
+## Open source posture
+
+To keep this reusable:
+
+- keep the app generic
+- document the controller contract
+- treat external tools like Droid as optional integrations, not required features
+- ship one backend adapter as an example
+- let other people plug in their own runtime stack
