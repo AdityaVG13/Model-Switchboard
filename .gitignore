@@ -1,9 +1,48 @@
+# Swift / Xcode build artifacts
 .build/
 .xcodebuild/
-ModelSwitchboard.xcodeproj/
-dist/
-.DS_Store
 .swiftpm/
+DerivedData/
+ModelSwitchboard.xcodeproj/
+*.xcuserstate
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+
+# Release/build outputs
+dist/
+*.dmg
+*.app/
+
+# Controller runtime state (machine-local)
+Controller/run/
+Controller/benchmark-results/
+Controller/runtime/
 Controller/bin/
+
+# Local model profiles (keep only examples in git)
+Controller/model-profiles/*
+!Controller/model-profiles/examples/
+!Controller/model-profiles/examples/**
+
+# Python caches and virtual envs
 __pycache__/
 *.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Logs / temp files
+*.log
+*.pid
+*.tmp
+*.swp
+*.swo
+*.orig
+*.bak
+
+# macOS noise
+.DS_Store
+**/.DS_Store
