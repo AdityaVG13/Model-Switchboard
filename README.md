@@ -75,9 +75,14 @@ A backend can be considered compatible if it returns the same basic JSON shape f
 
 ```bash
 swift test
-./Scripts/build-app.sh
-open dist/ModelSwitchboard.app
+./Scripts/clean-install.sh
 ```
+
+That installs a fresh copy at:
+
+- `~/Applications/Model Switchboard.app`
+
+and removes the old legacy `ModelSwitchboard.app` bundle name so you do not keep launching a stale app by accident.
 
 For iterative development:
 
