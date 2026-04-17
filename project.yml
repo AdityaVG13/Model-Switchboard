@@ -1,6 +1,6 @@
 name: ModelSwitchboard
 options:
-  minimumXcodeGenVersion: 2.45.4
+  minimumXcodeGenVersion: 2.45.3
   bundleIdPrefix: io.modelswitchboard
   deploymentTarget:
     macOS: "14.0"
