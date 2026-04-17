@@ -1407,7 +1407,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     bench_cmd = sub.add_parser("benchmark", help="Run the benchmark harness")
     bench_cmd.add_argument("profiles", nargs="*", default=["all"], help="Profile names or 'all'")
-    bench_cmd.add_argument("--suite", choices=["quick", "coding"], default="quick")
+    bench_cmd.add_argument("--suite", choices=["quick", "local", "context", "coding"], default="quick")
     bench_cmd.add_argument("--allow-concurrent", action="store_true")
     bench_cmd.add_argument("--keep-running", action="store_true")
     bench_cmd.add_argument("--background", action="store_true")

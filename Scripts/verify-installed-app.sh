@@ -538,6 +538,7 @@ PY
 )"
 press_button Settings
 wait_for_main_window_width 770 || fail "settings width expansion"
+sleep 0.4
 MAIN_AFTER_SETTINGS="$(main_window_bounds)"
 [[ -n "$MAIN_AFTER_SETTINGS" ]] || fail "settings sidebar missing"
 MAIN_AFTER_SETTINGS_X="$(echo "$MAIN_AFTER_SETTINGS" | awk -F'|' '{print $2}')"
@@ -571,6 +572,7 @@ pass "settings toggle close"
 
 press_button Help
 wait_for_main_window_width 770 || fail "help width expansion"
+sleep 0.4
 MAIN_AFTER_HELP="$(main_window_bounds)"
 [[ -n "$MAIN_AFTER_HELP" ]] || fail "help sidebar missing"
 MAIN_AFTER_HELP_Y="$(echo "$MAIN_AFTER_HELP" | awk -F'|' '{print $3}')"

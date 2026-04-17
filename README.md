@@ -94,6 +94,21 @@ Endpoints used today:
 
 A backend can be considered compatible if it returns the same basic JSON shape for profile status, exposes an `integrations` array when optional external actions are available, and supports the lifecycle actions above.
 
+## Benchmark outputs
+
+The bundled controller benchmark harness always writes both machine-readable and human-readable outputs under:
+
+- `Controller/benchmark-results/`
+
+Each completed run produces:
+
+- `benchmark-YYYYMMDD-HHMMSS.json`
+- `benchmark-YYYYMMDD-HHMMSS.md`
+- `latest.json`
+- `latest.md`
+
+`Latest Bench` in the menu bar app opens `latest.md`, which is simply the most recent completed benchmark run. The quick menu action stays intentionally lightweight. If you want a more representative comparison, run the controller harness with `--suite local` or `--suite context`.
+
 ## Version
 
 - `1.0.0`

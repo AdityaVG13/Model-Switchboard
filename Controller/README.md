@@ -31,6 +31,24 @@ If you want to keep profiles elsewhere, either:
 1. Run the controller from a working directory that contains your profile set.
 2. Adapt the controller to accept an external profile directory override.
 
+## Benchmark harness
+
+The benchmark harness is intentionally split into multiple workload shapes instead of one blended score:
+
+- `quick` for a fast interactive spot check from the UI
+- `local` for short-latency, sustained decode, long-prompt prefill, and coding-oriented runs
+- `context` for prompt-scaling checks that stress prefill separately from decode
+- `coding` for practical coding-agent style prompts
+
+Every completed run writes:
+
+- a timestamped JSON report
+- a timestamped Markdown report
+- `latest.json`
+- `latest.md`
+
+All outputs live in `Controller/benchmark-results/`. The menu bar app opens `latest.md`.
+
 ## Install
 
 ```bash

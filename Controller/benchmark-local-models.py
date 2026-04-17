@@ -22,37 +22,134 @@ from modelctl import (
 BASE = pathlib.Path(__file__).resolve().parent
 OUTPUT_DIR = BASE / "benchmark-results"
 
+def estimated_tokens(text: str) -> int:
+    return max(1, round(len(text.encode("utf-8")) / 4))
+
+
+LONG_CONTEXT_BLOCK = """
+The local-model operator notebook includes practical guidance gathered from real inference sessions:
+- TTFT is dominated by prefill, not decode, on long prompts.
+- Decode speed is usually bounded by memory bandwidth once the model is resident.
+- KV cache growth changes whether a run stays fully on the fast path or spills into a slower memory tier.
+- Thermal throttling can make the third and fourth run materially slower than the first if cooling is ignored.
+- Small prompt tests can hide serious regressions that only appear after 4K+ prompt tokens.
+- Steady-state decode needs a longer output target than short chat replies, otherwise the number is mostly noise.
+- Real users care about short interactive latency, coding quality, and long-context summaries at the same time.
+""".strip()
+
+
+def build_long_context_prompt(target_tokens: int, *, instruction: str, topic: str) -> str:
+    sections = [
+        f"You are evaluating a local model for {topic}.",
+        "Read the operator notes below. Use them as the only source of truth.",
+    ]
+    chunk = 0
+    while estimated_tokens("\n\n".join(sections)) < target_tokens:
+        chunk += 1
+        sections.append(f"Section {chunk}\n{LONG_CONTEXT_BLOCK}")
+    sections.append(instruction)
+    return "\n\n".join(sections)
+
+
 PROMPT_SUITES: dict[str, list[dict[str, Any]]] = {
     "quick": [
         {
-            "name": "ready",
-            "prompt": "Reply with READY only.",
-            "max_tokens": 24,
+            "name": "interactive-chat",
+            "category": "interactive",
+            "prompt": "Answer in one sentence: what matters more for a responsive local coding assistant, TTFT or peak decode tokens per second, and why?",
+            "max_tokens": 80,
         },
         {
             "name": "code-edit",
+            "category": "coding",
             "prompt": "Write a Python function that groups file paths by extension and returns a stable dict ordered alphabetically by extension. Keep it concise.",
             "max_tokens": 220,
         },
         {
-            "name": "analysis",
+            "name": "kv-analysis",
+            "category": "analysis",
             "prompt": "In 5 bullet points, explain how KV cache size and prompt length affect throughput on a local inference server.",
             "max_tokens": 220,
+        },
+    ],
+    "local": [
+        {
+            "name": "interactive-latency",
+            "category": "interactive",
+            "prompt": "Reply in exactly one sentence: why does TTFT dominate perceived snappiness for a local model?",
+            "max_tokens": 48,
+        },
+        {
+            "name": "sustained-decode",
+            "category": "decode",
+            "prompt": "Write a compact operator checklist for keeping a laptop-hosted local model stable during a 30 minute coding session. Use 10 numbered items.",
+            "max_tokens": 384,
+        },
+        {
+            "name": "prefill-4k",
+            "category": "prefill",
+            "prompt": build_long_context_prompt(
+                4096,
+                instruction="Summarize the three main performance bottlenecks in 6 bullets and finish with one sentence recommending the safest optimization order.",
+                topic="Mac-hosted local LLM operations",
+            ),
+            "max_tokens": 96,
+        },
+        {
+            "name": "code-review",
+            "category": "coding",
+            "prompt": "Review a local-model launch script that mixes `--ctx-size 32768`, `--threads 14`, `--flash-attn`, and aggressive speculative decode. List the top five risks and the first two fixes you would make.",
+            "max_tokens": 220,
+        },
+    ],
+    "context": [
+        {
+            "name": "prefill-1k",
+            "category": "prefill",
+            "prompt": build_long_context_prompt(
+                1024,
+                instruction="Return 4 bullets about why context growth changes latency much more than short-chat benchmarks reveal.",
+                topic="local long-context inference",
+            ),
+            "max_tokens": 64,
+        },
+        {
+            "name": "prefill-4k",
+            "category": "prefill",
+            "prompt": build_long_context_prompt(
+                4096,
+                instruction="Return 5 bullets on how long-context prompts expose memory bandwidth limits and cache policy mistakes.",
+                topic="local long-context inference",
+            ),
+            "max_tokens": 64,
+        },
+        {
+            "name": "prefill-8k",
+            "category": "prefill",
+            "prompt": build_long_context_prompt(
+                8192,
+                instruction="Return 6 bullets explaining why prefill must be measured separately from decode when comparing local runtimes.",
+                topic="local long-context inference",
+            ),
+            "max_tokens": 72,
         },
     ],
     "coding": [
         {
             "name": "refactor-plan",
+            "category": "coding",
             "prompt": "You are reviewing a Python CLI tool that mixes HTTP requests, process control, and UI rendering in one file. Give a direct refactor plan with modules, responsibilities, and test priorities.",
             "max_tokens": 260,
         },
         {
             "name": "implementation",
+            "category": "coding",
             "prompt": "Implement a Python function `atomic_write_json(path, payload)` that writes JSON atomically on macOS. Include type hints and basic error handling.",
             "max_tokens": 260,
         },
         {
             "name": "debugging",
+            "category": "analysis",
             "prompt": "A local OpenAI-compatible endpoint returns blank `content` but fills `reasoning_content`. Explain the likely client/server mismatch and the safest mitigation for a coding-agent workflow.",
             "max_tokens": 260,
         },
@@ -62,11 +159,6 @@ PROMPT_SUITES: dict[str, list[dict[str, Any]]] = {
 
 class StreamResult(dict):
     pass
-
-
-
-def estimated_tokens(text: str) -> int:
-    return max(1, round(len(text.encode("utf-8")) / 4))
 
 
 
@@ -180,6 +272,18 @@ def mean_or_none(values: list[float | None], digits: int) -> float | None:
     return round(sum(usable) / len(usable), digits)
 
 
+def summarize_category(results: list[dict[str, Any]], category: str) -> dict[str, Any]:
+    scoped = [item for item in results if item.get("category") == category]
+    return {
+        "category": category,
+        "cases": [item["benchmark"] for item in scoped],
+        "ttft_ms": mean_or_none([item["ttft_ms"] for item in scoped], 1),
+        "total_ms": mean_or_none([item["total_ms"] for item in scoped], 1),
+        "decode_tokens_per_sec": mean_or_none([item["decode_tokens_per_sec"] for item in scoped], 2),
+        "e2e_tokens_per_sec": mean_or_none([item["e2e_tokens_per_sec"] for item in scoped], 2),
+    }
+
+
 
 def stop_other_profiles(target_profile: str) -> None:
     for item in status_snapshot():
@@ -223,6 +327,7 @@ def benchmark_profile(
         )
 
         for spec in prompts:
+            prompt_tokens_estimate = estimated_tokens(spec["prompt"])
             result = run_case(
                 base,
                 model,
@@ -233,12 +338,16 @@ def benchmark_profile(
             )
             result.update(
                 benchmark=spec["name"],
+                category=spec.get("category", "general"),
                 prompt=spec["prompt"],
+                prompt_est_tokens=prompt_tokens_estimate,
+                max_tokens=spec["max_tokens"],
                 output_preview=result["content"][:220].replace("\n", " ").strip(),
             )
             results.append(result)
 
         final_status = status_for_profile(profile_name, env)
+        categories = sorted({item["category"] for item in results})
         return {
             "profile": profile_name,
             "display_name": env["DISPLAY_NAME"],
@@ -255,6 +364,7 @@ def benchmark_profile(
                 "decode_tokens_per_sec": mean_or_none([item["decode_tokens_per_sec"] for item in results], 2),
                 "e2e_tokens_per_sec": mean_or_none([item["e2e_tokens_per_sec"] for item in results], 2),
             },
+            "category_averages": [summarize_category(results, category) for category in categories],
         }
     finally:
         if not keep_running:
@@ -279,6 +389,7 @@ def write_outputs(report: dict[str, Any]) -> tuple[pathlib.Path, pathlib.Path]:
         f"- Temperature: `{report['temperature']}`",
         f"- Profiles: {', '.join(report['profiles'])}",
         f"- Isolation mode: `{'exclusive' if report['isolate'] else 'concurrent'}`",
+        "- Output files: timestamped JSON and Markdown plus `latest.json` / `latest.md` in `Controller/benchmark-results/`",
         "",
         "## Summary",
         "",
@@ -308,15 +419,26 @@ def write_outputs(report: dict[str, Any]) -> tuple[pathlib.Path, pathlib.Path]:
                 f"- Warmup decode tok/s: `{item['warmup']['decode_tokens_per_sec'] or 'n/a'}`",
                 f"- Warmup state: `{item['warmup'].get('error', 'ok')}`",
                 "",
-                "| Benchmark | TTFT ms | Total ms | Decode tok/s | E2E tok/s | Token source | Preview | Error |",
-                "| --- | ---: | ---: | ---: | ---: | --- | --- | --- |",
+                "| Category | Cases | Avg TTFT ms | Avg Decode tok/s | Avg E2E tok/s |",
+                "| --- | --- | ---: | ---: | ---: |",
+            ]
+        )
+        for category in item.get("category_averages", []):
+            lines.append(
+                f"| {category['category']} | {', '.join(category['cases'])} | {category['ttft_ms'] or 'n/a'} | {category['decode_tokens_per_sec'] or 'n/a'} | {category['e2e_tokens_per_sec'] or 'n/a'} |"
+            )
+        lines.extend(
+            [
+                "",
+                "| Benchmark | Category | Prompt est tokens | Max output | TTFT ms | Total ms | Decode tok/s | E2E tok/s | Token source | Preview | Error |",
+                "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- |",
             ]
         )
         for result in item["results"]:
             preview = result.get("output_preview", "").replace("|", "\\|")
             error = (result.get("error") or "").replace("|", "\\|")
             lines.append(
-                f"| {result['benchmark']} | {result['ttft_ms'] or 'n/a'} | {result['total_ms'] or 'n/a'} | {result['decode_tokens_per_sec'] or 'n/a'} | {result['e2e_tokens_per_sec'] or 'n/a'} | {result['usage_source']} | {preview} | {error} |"
+                f"| {result['benchmark']} | {result['category']} | {result['prompt_est_tokens']} | {result['max_tokens']} | {result['ttft_ms'] or 'n/a'} | {result['total_ms'] or 'n/a'} | {result['decode_tokens_per_sec'] or 'n/a'} | {result['e2e_tokens_per_sec'] or 'n/a'} | {result['usage_source']} | {preview} | {error} |"
             )
 
     md_path.write_text("\n".join(lines) + "\n")

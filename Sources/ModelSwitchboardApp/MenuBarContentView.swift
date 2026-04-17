@@ -27,9 +27,15 @@ struct MenuBarContentView: View {
     private let inspectorPanelWidth: CGFloat = 290
     private let panelHeight: CGFloat = 620
     private let panelGap: CGFloat = 10
+    private let inspectorAnimation = Animation.interactiveSpring(
+        response: 0.32,
+        dampingFraction: 0.9,
+        blendDuration: 0.12
+    )
 
     @State private var inspectorPanel: InspectorPanel?
     @State private var hostWindow: NSWindow?
+    @State private var anchoredRightEdge: CGFloat?
 
     private static let clockFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -43,7 +49,12 @@ struct MenuBarContentView: View {
         HStack(spacing: inspectorPanel == nil ? 0 : panelGap) {
             if let inspectorPanel {
                 inspectorCard(inspectorPanel)
-                    .transition(.move(edge: .leading).combined(with: .opacity))
+                    .transition(
+                        .asymmetric(
+                            insertion: .move(edge: .leading).combined(with: .opacity),
+                            removal: .move(edge: .leading).combined(with: .opacity)
+                        )
+                    )
             }
 
             mainPanelCard
@@ -53,6 +64,9 @@ struct MenuBarContentView: View {
                 WindowAccessor { window in
                     if hostWindow !== window {
                         hostWindow = window
+                        if let resolvedWindow = window {
+                            anchoredRightEdge = resolvedWindow.frame.maxX
+                        }
                     }
                     stabilizeWindowFrame(window)
                 }
@@ -71,7 +85,7 @@ struct MenuBarContentView: View {
         .onChange(of: inspectorPanel) { _, _ in
             stabilizeWindowFrame(hostWindow)
         }
-        .animation(.snappy(duration: 0.18), value: inspectorPanel)
+        .animation(inspectorAnimation, value: inspectorPanel)
         .animation(.snappy(duration: 0.18), value: store.pendingProfileActions)
         .animation(.snappy(duration: 0.18), value: store.pendingGlobalActions)
     }
@@ -282,7 +296,9 @@ struct MenuBarContentView: View {
                     .font(.headline)
                 Spacer()
                 Button {
-                    inspectorPanel = nil
+                    withAnimation(inspectorAnimation) {
+                        inspectorPanel = nil
+                    }
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                 }
@@ -325,7 +341,9 @@ struct MenuBarContentView: View {
 
     private func footerToggleButton(_ title: String, panel: InspectorPanel, icon: String) -> some View {
         Button {
-            inspectorPanel = inspectorPanel == panel ? nil : panel
+            withAnimation(inspectorAnimation) {
+                inspectorPanel = inspectorPanel == panel ? nil : panel
+            }
         } label: {
             Label(title, systemImage: icon)
         }
@@ -333,25 +351,28 @@ struct MenuBarContentView: View {
         .accessibilityLabel(title)
     }
 
-    private func stabilizeWindowFrame(_ window: NSWindow?) {
+    private func stabilizeWindowFrame(_ window: NSWindow?, animate: Bool = false) {
         guard let window else { return }
 
         let desiredWidth = totalWidth
         let desiredHeight = panelHeight
         let currentFrame = window.frame
+        if anchoredRightEdge == nil || abs(currentFrame.width - mainPanelWidth) < 0.5 {
+            anchoredRightEdge = currentFrame.maxX
+        }
 
         guard abs(currentFrame.width - desiredWidth) > 0.5 || abs(currentFrame.height - desiredHeight) > 0.5 else {
             return
         }
 
-        let anchoredRightEdge = currentFrame.maxX
+        let rightEdge = anchoredRightEdge ?? currentFrame.maxX
         let nextFrame = NSRect(
-            x: anchoredRightEdge - desiredWidth,
+            x: rightEdge - desiredWidth,
             y: currentFrame.minY,
             width: desiredWidth,
             height: desiredHeight
         )
-        window.setFrame(nextFrame, display: true, animate: false)
+        window.setFrame(nextFrame, display: true, animate: animate)
     }
 
     private func actionButton(
