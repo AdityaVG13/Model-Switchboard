@@ -272,6 +272,7 @@ This repo builds DMGs locally; public releases should be signed and notarized.
 
 Included:
 
+- `Scripts/release-preflight.sh`
 - `Scripts/sign-and-notarize-dmg.sh`
 - `.github/workflows/release.yml`
 
@@ -283,6 +284,19 @@ The release workflow signs, notarizes, verifies, and uploads both editions on ta
 - `APPLE_NOTARY_API_KEY_P8_BASE64`
 - `APPLE_NOTARY_API_KEY_ID`
 - `APPLE_NOTARY_API_ISSUER_ID`
+
+Recommended local preflight before push/tag:
+
+```bash
+./Scripts/release-preflight.sh
+```
+
+Manual release checklist:
+
+- install the built Base and Plus apps side by side
+- toggle `Launch At Login` in one edition and confirm only that edition remains in macOS Login Items
+- run `APP_VARIANT=base ./Scripts/verify-installed-app.sh`
+- run `APP_VARIANT=plus ./Scripts/verify-installed-app.sh`
 
 ---
 
@@ -322,6 +336,9 @@ The Plus panel reads `Controller/benchmark-results/latest.json`. Delete it to re
 
 **Controller port `8877` is already in use.**
 The default can be overridden when the controller starts. If you changed it, also update the controller URL in the app's `Settings` panel.
+
+**Installed-app verification fails in headless or restricted Apple Events environments.**
+Run `MSW_VERIFY_UI=0 ./Scripts/verify-installed-app.sh` to execute lifecycle/API checks without UI automation.
 
 ---
 

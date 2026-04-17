@@ -14,7 +14,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Select latest Xcode
         run: |
@@ -24,6 +24,13 @@ jobs:
 
       - name: Install xcodegen
         run: brew install xcodegen
+
+      - name: Run release preflight
+        env:
+          MSW_PREFLIGHT_SKIP_BUILDS: "1"
+        run: |
+          chmod +x Scripts/*.sh
+          ./Scripts/release-preflight.sh
 
       - name: Prepare temporary keychain
         env:
@@ -76,9 +83,26 @@ jobs:
           shasum -a 256 "dist/Model-Switchboard-$(tr -d '[:space:]' < VERSION).dmg" > "dist/Model-Switchboard-$(tr -d '[:space:]' < VERSION).dmg.sha256"
           shasum -a 256 "dist/Model-Switchboard-Plus-$(tr -d '[:space:]' < VERSION).dmg" > "dist/Model-Switchboard-Plus-$(tr -d '[:space:]' < VERSION).dmg.sha256"
 
-      - name: Upload release asset
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist/Model-Switchboard-*.dmg
-            dist/Model-Switchboard-*.dmg.sha256
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="$(tr -d '[:space:]' < VERSION)"
+          TAG="v$VERSION"
+          FILES=(
+            "dist/Model-Switchboard-$VERSION.dmg"
+            "dist/Model-Switchboard-Plus-$VERSION.dmg"
+            "dist/Model-Switchboard-$VERSION.dmg.sha256"
+            "dist/Model-Switchboard-Plus-$VERSION.dmg.sha256"
+          )
+          for file in "${FILES[@]}"; do
+            if [ ! -f "$file" ]; then
+              echo "missing release artifact: $file" >&2
+              exit 1
+            fi
+          done
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "${FILES[@]}" --clobber
+          else
+            gh release create "$TAG" "${FILES[@]}" --title "$TAG" --generate-notes
+          fi

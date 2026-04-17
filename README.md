@@ -8,7 +8,7 @@
 ***Flip between local LLM runtimes from your menu bar.***
 **One click to activate. One click to stop everything.**
 
-[![Version](https://img.shields.io/badge/version-1.0.1-blue?style=for-the-badge)](VERSION)
+[![Version](https://img.shields.io/badge/version-1.0.2-blue?style=for-the-badge)](VERSION)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/macOS-14%2B-lightgrey?style=for-the-badge&logo=apple&logoColor=white)](#requirements)
 [![Swift](https://img.shields.io/badge/swift-6.0-orange?style=for-the-badge&logo=swift&logoColor=white)](Package.swift)
@@ -141,6 +141,8 @@ SERVER_MODEL_ID=qwen35-local
 All the deeper material lives in one place so this README stays skimmable:
 
 > **[SETUP.md](SETUP.md)** — profile formats, supported runtimes, health checks, controller API contract, build-from-source flow, release pipeline, Raycast power-user notes, troubleshooting, known limitations.
+
+> **[CHANGELOG.md](CHANGELOG.md)** — release-by-release changes and distribution hardening notes.
 
 *The app's **Help** button opens the same doc.*
 

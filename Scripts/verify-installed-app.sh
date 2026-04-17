@@ -35,6 +35,7 @@ fi
 CONTROLLER_URL="${MSW_CONTROLLER_URL:-http://127.0.0.1:8877}"
 DEFAULT_CONTROLLER_URL="http://127.0.0.1:8877"
 DROID_SETTINGS="$HOME/.factory/settings.json"
+MSW_VERIFY_UI="${MSW_VERIFY_UI:-1}"
 
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
@@ -167,6 +168,31 @@ SCREEN_SCALE="$(swift -e 'import AppKit; print(NSScreen.main?.backingScaleFactor
 pass() { echo "PASS $1"; }
 fail() { echo "FAIL $1" >&2; exit 1; }
 
+if [[ "$MSW_VERIFY_UI" == "0" || "$MSW_VERIFY_UI" == "false" ]]; then
+  RUN_UI_CHECKS=0
+elif [[ "$MSW_VERIFY_UI" == "1" || "$MSW_VERIFY_UI" == "true" ]]; then
+  RUN_UI_CHECKS=1
+else
+  fail "MSW_VERIFY_UI must be 0/1/false/true"
+fi
+
+run_osascript() {
+  local script="$1"
+  local attempts="${2:-5}"
+  local delay="${3:-0.3}"
+  local output=""
+  local attempt=1
+  while (( attempt <= attempts )); do
+    if output="$(osascript -e "$script" 2>/dev/null)"; then
+      printf '%s\n' "$output"
+      return 0
+    fi
+    sleep "$delay"
+    attempt=$((attempt + 1))
+  done
+  return 1
+}
+
 status_json() {
   python3 - "$CONTROLLER_URL" <<'PY'
 import http.client, json, sys, time, urllib.error, urllib.request
@@ -260,24 +286,44 @@ PY
 }
 
 app_pid() {
-  pgrep -f "$APP_PATH/Contents/MacOS/$APP_BINARY_NAME" | head -n 1
+  local pid=""
+  for _ in {1..20}; do
+    pid="$(pgrep -f "$APP_PATH/Contents/MacOS/$APP_BINARY_NAME" | head -n 1 || true)"
+    if [[ -n "$pid" ]]; then
+      echo "$pid"
+      return 0
+    fi
+    sleep 0.25
+  done
+  return 1
 }
 
 launch_app() {
   pkill -f "$APP_PATH/Contents/MacOS/$APP_BINARY_NAME" || true
   sleep 1
-  open -a "$APP_PATH"
-  sleep 1.5
+  for _ in {1..5}; do
+    if open -a "$APP_PATH" >/dev/null 2>&1; then
+      if app_pid >/dev/null 2>&1; then
+        sleep 0.8
+        return 0
+      fi
+    fi
+    sleep 0.5
+  done
+  fail "failed to launch app bundle"
 }
 
 open_menu() {
-  osascript -e "tell application \"System Events\" to tell process \"$APP_BINARY_NAME\" to click menu bar item 1 of menu bar 2" >/dev/null
-  for _ in {1..20}; do
-    if [[ -n "$(MSW_APP_NAME="$APP_NAME" "$WORK_DIR/msw_window_bounds" '' | awk -F'|' '$1=="" {print $0}' | head -n 1)" ]]; then
-      sleep 0.5
-      return 0
-    fi
-    sleep 0.25
+  for _ in {1..8}; do
+    run_osascript "tell application \"$APP_BINARY_NAME\" to activate" 2 0.2 >/dev/null || true
+    run_osascript "tell application \"System Events\" to tell process \"$APP_BINARY_NAME\" to click menu bar item 1 of menu bar 2" 2 0.2 >/dev/null || true
+    for _ in {1..20}; do
+      if [[ -n "$(MSW_APP_NAME="$APP_NAME" "$WORK_DIR/msw_window_bounds" '' | awk -F'|' '$1=="" {print $0}' | head -n 1)" ]]; then
+        sleep 0.35
+        return 0
+      fi
+      sleep 0.2
+    done
   done
   fail "menu window did not open"
 }
@@ -301,7 +347,7 @@ main_window_bounds() {
 }
 
 frontmost_app() {
-  osascript -e 'tell application "System Events" to get name of first process whose frontmost is true'
+  run_osascript 'tell application "System Events" to get name of first process whose frontmost is true' 3 0.2
 }
 
 ANCHOR_APP_NAME=""
@@ -309,7 +355,7 @@ ANCHOR_APP_NAME=""
 activate_anchor_app() {
   local candidate
   for candidate in "${MSW_ANCHOR_APP:-ghostty}" ghostty Terminal iTerm2 Finder; do
-    if osascript -e "tell application \"$candidate\" to activate" >/dev/null 2>&1; then
+    if run_osascript "tell application \"$candidate\" to activate" 2 0.2 >/dev/null; then
       ANCHOR_APP_NAME="$candidate"
       return 0
     fi
@@ -319,11 +365,11 @@ activate_anchor_app() {
 
 frontmost_browser_url() {
   local app
-  app="$(frontmost_app)"
+  app="$(frontmost_app 2>/dev/null || true)"
   if [[ "$app" == "Google Chrome" ]]; then
-    osascript -e 'tell application "Google Chrome" to if (count of windows) > 0 then get URL of active tab of front window'
+    run_osascript 'tell application "Google Chrome" to if (count of windows) > 0 then get URL of active tab of front window' 2 0.2
   elif [[ "$app" == "Safari" ]]; then
-    osascript -e 'tell application "Safari" to if (count of windows) > 0 then get URL of current tab of front window'
+    run_osascript 'tell application "Safari" to if (count of windows) > 0 then get URL of current tab of front window' 2 0.2
   else
     echo ""
   fi
@@ -343,7 +389,7 @@ wait_for_browser_url_prefix() {
 }
 
 finder_front_path() {
-  osascript -e 'tell application "Finder" to if (count of windows) > 0 then get POSIX path of (target of front window as alias)'
+  run_osascript 'tell application "Finder" to if (count of windows) > 0 then get POSIX path of (target of front window as alias)' 2 0.2
 }
 
 wait_for_profile_running() {
@@ -374,7 +420,9 @@ wait_for_pid_change() {
 
 wait_for_benchmark_change() {
   local before="$1"
-  for _ in {1..40}; do
+  local attempts="${MSW_BENCHMARK_CHANGE_ATTEMPTS:-80}"
+  local i=0
+  while (( i < attempts )); do
     local running generated
     running="$(status_value benchmark_running '-')"
     generated="$(status_value benchmark_generated_at '-')"
@@ -382,16 +430,20 @@ wait_for_benchmark_change() {
       return 0
     fi
     sleep 1
+    i=$((i + 1))
   done
   return 1
 }
 
 wait_for_benchmark_idle() {
-  for _ in {1..90}; do
+  local attempts="${MSW_BENCHMARK_IDLE_ATTEMPTS:-240}"
+  local i=0
+  while (( i < attempts )); do
     if [[ "$(status_value benchmark_running '-')" == "false" ]]; then
       return 0
     fi
     sleep 1
+    i=$((i + 1))
   done
   return 1
 }
@@ -525,7 +577,7 @@ click_settings_action_until_path() {
   local attempt screenshot current
 
   for attempt in {1..4}; do
-    osascript -e 'tell application "Finder" to close every window'
+    run_osascript 'tell application "Finder" to close every window' 2 0.2 >/dev/null || true
     launch_app
     open_menu
     press_button Settings
@@ -611,6 +663,7 @@ pass "spotlight registration"
 
 defaults write "$APP_BUNDLE_ID" controllerBaseURL "$DEFAULT_CONTROLLER_URL"
 
+if [[ "$RUN_UI_CHECKS" == "1" ]]; then
 launch_app
 open_menu
 MAIN_BEFORE="$(main_window_bounds)"
@@ -800,6 +853,55 @@ if pgrep -f "$APP_PATH/Contents/MacOS/$APP_BINARY_NAME" >/dev/null; then
   fail "quit button"
 fi
 pass "quit button"
+else
+echo "note: skipping UI automation checks (MSW_VERIFY_UI=$MSW_VERIFY_UI)"
+
+launch_app
+if ! app_pid >/dev/null 2>&1; then
+  fail "app launch"
+fi
+pass "app launch"
+
+controller_post /api/stop-all ""
+wait_for_benchmark_idle || fail "headless benchmark settle"
+
+controller_post /api/start "{\"profile\":\"$FIRST_PROFILE\"}"
+wait_for_profile_running "$FIRST_PROFILE" true || fail "api start"
+pass "api start"
+
+PID_BEFORE_RESTART="$(status_value profile_pid "$FIRST_PROFILE")"
+controller_post /api/restart "{\"profile\":\"$FIRST_PROFILE\"}"
+wait_for_pid_change "$FIRST_PROFILE" "$PID_BEFORE_RESTART" || fail "api restart"
+pass "api restart"
+
+controller_post /api/stop "{\"profile\":\"$FIRST_PROFILE\"}"
+wait_for_profile_running "$FIRST_PROFILE" false || fail "api stop"
+pass "api stop"
+
+controller_post /api/switch "{\"profile\":\"$FIRST_PROFILE\"}"
+wait_for_profile_running "$FIRST_PROFILE" true || fail "api switch"
+pass "api switch"
+
+if [[ "$HAS_ADVANCED" == "1" ]]; then
+  BENCH_BEFORE="$(status_value benchmark_generated_at '-')"
+  controller_post /api/benchmark/start '{"suite":"quick"}'
+  wait_for_benchmark_change "$BENCH_BEFORE" || fail "api quick bench all"
+  wait_for_benchmark_idle || fail "api quick bench settle"
+  pass "api quick bench all"
+fi
+
+controller_post /api/stop-all ""
+wait_for_profile_running "$FIRST_PROFILE" false || fail "api stop all"
+wait_for_benchmark_idle || fail "api stop all benchmark settle"
+pass "api stop all"
+
+pkill -f "$APP_PATH/Contents/MacOS/$APP_BINARY_NAME" || true
+sleep 1
+if pgrep -f "$APP_PATH/Contents/MacOS/$APP_BINARY_NAME" >/dev/null; then
+  fail "app quit"
+fi
+pass "app quit"
+fi
 
 defaults write "$APP_BUNDLE_ID" controllerBaseURL "$DEFAULT_CONTROLLER_URL"
 controller_post /api/stop-all ""
