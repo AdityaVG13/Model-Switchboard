@@ -45,10 +45,10 @@ CURRENT_PROJECT_VERSION="$(awk '/CURRENT_PROJECT_VERSION:/ {print $2; exit}' pro
 [[ "$CURRENT_PROJECT_VERSION" == "$VERSION" ]] || fail "project CURRENT_PROJECT_VERSION ($CURRENT_PROJECT_VERSION) does not match VERSION ($VERSION)"
 pass "project versions match VERSION"
 
-rg -F "version-$VERSION-blue" README.md >/dev/null || fail "README version badge does not match VERSION"
+grep -Fq "version-$VERSION-blue" README.md || fail "README version badge does not match VERSION"
 pass "README version badge"
 
-rg -F "## [$VERSION]" CHANGELOG.md >/dev/null || fail "CHANGELOG.md missing entry for VERSION"
+grep -Fq "## [$VERSION]" CHANGELOG.md || fail "CHANGELOG.md missing entry for VERSION"
 pass "CHANGELOG entry"
 
 required_secrets=(
@@ -60,7 +60,7 @@ required_secrets=(
   APPLE_NOTARY_API_ISSUER_ID
 )
 for secret in "${required_secrets[@]}"; do
-  rg -F "secrets.$secret" .github/workflows/release.yml >/dev/null || fail "release workflow missing secret reference: $secret"
+  grep -Fq "secrets.$secret" .github/workflows/release.yml || fail "release workflow missing secret reference: $secret"
 done
 pass "release workflow secret wiring"
 
