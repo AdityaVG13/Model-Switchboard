@@ -1,15 +1,9 @@
 <div align="center">
 
-<pre>
- __  __  ___  ___  ___ _
-|  \/  |/ _ \|   \| __| |
-| |\/| | (_) | |) | _|| |__
-|_|  |_|\___/|___/|___|____|
- _____      _____ _____ ___ _  _ ___  ___   _   ___ ___
-/ __\ \    / /_ _|_   _/ __| || | _ )/ _ \ /_\ | _ \   \
-\__ \\ \/\/ / | |  | || (__| __ | _ \ (_) / _ \|   / |) |
-|___/ \_/\_/ |___| |_| \___|_||_|___/\___/_/ \_\_|_\___/
-</pre>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="Resources/Brand/title-dark.svg">
+  <img src="Resources/Brand/title-light.svg" alt="Model Switchboard" width="560">
+</picture>
 
 ***Flip between local LLM runtimes from your menu bar.***
 **One click to activate. One click to stop everything.**
