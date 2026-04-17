@@ -71,11 +71,20 @@ Endpoints used today:
 
 A backend can be considered compatible if it returns the same basic JSON shape for profile status, exposes an `integrations` array when optional external actions are available, and supports the lifecycle actions above.
 
-## Build
+## Version
+
+- `1.0.0`
+
+The current release version lives in:
+
+- `VERSION`
+
+## Install
+
+For local development or direct install:
 
 ```bash
-swift test
-./Scripts/clean-install.sh
+./Scripts/install.sh
 ```
 
 That installs a fresh copy at:
@@ -84,7 +93,63 @@ That installs a fresh copy at:
 
 and removes the old legacy `ModelSwitchboard.app` bundle name so you do not keep launching a stale app by accident.
 
-For iterative development:
+Compatibility alias:
+
+```bash
+./Scripts/clean-install.sh
+```
+
+## Uninstall
+
+```bash
+./Scripts/uninstall.sh
+```
+
+That removes the app from:
+
+- `~/Applications`
+- `dist/`
+
+and clears the most obvious app-side preference and widget container files.
+
+## Build
+
+```bash
+swift test
+./Scripts/build-app.sh
+```
+
+That builds a release app bundle at:
+
+- `dist/Model Switchboard.app`
+
+## DMG
+
+```bash
+./Scripts/build-dmg.sh
+```
+
+That produces:
+
+- `dist/Model-Switchboard-1.0.0.dmg`
+
+## Release stance
+
+For GitHub distribution, the right default is:
+
+1. a Developer ID-signed app
+2. a notarized `.dmg`
+3. a GitHub Release that points users to the DMG
+
+Why:
+
+- Apple recommends distributing outside the Mac App Store using a signed distribution container and notarizing that container
+- menu bar apps on GitHub commonly ship as DMGs
+- the widget is part of the containing app, not a separate download
+
+The current repo now builds the DMG locally. For a public release, the next step is signing and notarization.
+
+## Iterative development
 
 ```bash
 ./Scripts/run-dev.sh
@@ -105,6 +170,12 @@ It includes:
 ## Why not WidgetKit first?
 
 WidgetKit is still useful if you want a desktop widget or Notification Center glance view, but it is not the best starting point for a fast model-switching UX. For top-of-screen interaction, `MenuBarExtra` is the correct foundation. The menu bar app can later share state and actions with a WidgetKit extension if a desktop widget becomes worth building.
+
+Also, WidgetKit distribution follows the host app. Apple requires people to install the containing app and launch it at least once before the widget appears in the gallery.
+
+## Future updates
+
+Once GitHub release packaging is stable, the natural next step is `Sparkle` for in-app updates. That is the standard open-source macOS path for apps distributed outside the App Store.
 
 ## Open source posture
 

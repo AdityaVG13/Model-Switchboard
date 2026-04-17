@@ -14,7 +14,7 @@ packages:
 settings:
   base:
     SWIFT_VERSION: 6.0
-    MARKETING_VERSION: 0.1.0
+    MARKETING_VERSION: 1.0.0
     CURRENT_PROJECT_VERSION: 1
     MACOSX_DEPLOYMENT_TARGET: 14.0
 targets:
@@ -26,7 +26,7 @@ targets:
     info:
       path: Resources/App/Info.plist
       properties:
-        CFBundleDisplayName: ModelSwitchboard
+        CFBundleDisplayName: Model Switchboard
         LSUIElement: true
         NSHighResolutionCapable: true
         CFBundleURLTypes:
@@ -60,7 +60,7 @@ targets:
     info:
       path: Resources/Widget/Info.plist
       properties:
-        CFBundleDisplayName: ModelSwitchboard Widget
+        CFBundleDisplayName: Model Switchboard Widget
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:
