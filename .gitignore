@@ -43,6 +43,16 @@ venv/
 *.orig
 *.bak
 
+# Sensitive material (certs, keys, local secrets)
+*.p8
+*.p12
+*.pem
+*.key
+*.cer
+*.crt
+.env
+.env.*
+
 # macOS noise
 .DS_Store
 **/.DS_Store
