@@ -32,6 +32,7 @@ struct MenuBarContentView: View {
     private let inspectorCloseDelay: TimeInterval = 0.12
 
     @State private var inspectorPanel: InspectorPanel?
+    @State private var panelWidth: CGFloat = 470
     @State private var hostWindow: NSWindow?
     @State private var anchoredRightEdge: CGFloat?
 
@@ -57,7 +58,7 @@ struct MenuBarContentView: View {
 
             mainPanelCard
         }
-            .frame(width: totalWidth, height: panelHeight, alignment: .trailing)
+            .frame(width: panelWidth, height: panelHeight, alignment: .trailing)
             .background(
                 WindowAccessor { window in
                     if hostWindow !== window {
@@ -66,13 +67,16 @@ struct MenuBarContentView: View {
                             anchoredRightEdge = resolvedWindow.frame.maxX
                         }
                     }
-                    stabilizeWindowFrame(window)
+                    if let resolvedWindow = window, abs(resolvedWindow.frame.width - panelWidth) > 0.5 {
+                        stabilizeWindowFrame(resolvedWindow, width: panelWidth)
+                    }
                 }
             )
         .task {
             store.startAutoRefresh()
             updateMenuBarHelp(store.menuBarHelp)
-            stabilizeWindowFrame(hostWindow)
+            panelWidth = panelWidth(for: inspectorPanel)
+            stabilizeWindowFrame(hostWindow, width: panelWidth)
         }
         .onDisappear {
             store.stopAutoRefresh()
@@ -83,13 +87,6 @@ struct MenuBarContentView: View {
         .animation(inspectorAnimation, value: inspectorPanel)
         .animation(.snappy(duration: 0.18), value: store.pendingProfileActions)
         .animation(.snappy(duration: 0.18), value: store.pendingGlobalActions)
-    }
-
-    private var totalWidth: CGFloat {
-        if inspectorPanel == nil {
-            return mainPanelWidth
-        }
-        return mainPanelWidth + inspectorPanelWidth + panelGap
     }
 
     private var mainPanelCard: some View {
@@ -353,7 +350,9 @@ struct MenuBarContentView: View {
 
         // Expand first, then reveal panel.
         if let nextPanel {
-            stabilizeWindowFrame(hostWindow, targetPanel: nextPanel, animate: true)
+            let expandedWidth = panelWidth(for: nextPanel)
+            panelWidth = expandedWidth
+            stabilizeWindowFrame(hostWindow, width: expandedWidth)
             withAnimation(inspectorAnimation) {
                 inspectorPanel = nextPanel
             }
@@ -365,7 +364,8 @@ struct MenuBarContentView: View {
             inspectorPanel = nil
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + inspectorCloseDelay) {
-            stabilizeWindowFrame(hostWindow, targetPanel: nil, animate: true)
+            panelWidth = panelWidth(for: nil)
+            stabilizeWindowFrame(hostWindow, width: panelWidth(for: nil))
         }
     }
 
@@ -376,10 +376,10 @@ struct MenuBarContentView: View {
         return mainPanelWidth + inspectorPanelWidth + panelGap
     }
 
-    private func stabilizeWindowFrame(_ window: NSWindow?, targetPanel: InspectorPanel? = nil, animate: Bool = false) {
+    private func stabilizeWindowFrame(_ window: NSWindow?, width explicitWidth: CGFloat) {
         guard let window else { return }
 
-        let desiredWidth = panelWidth(for: targetPanel ?? inspectorPanel)
+        let desiredWidth = explicitWidth
         let desiredHeight = panelHeight
         let currentFrame = window.frame
         if anchoredRightEdge == nil || abs(currentFrame.width - mainPanelWidth) < 0.5 {
