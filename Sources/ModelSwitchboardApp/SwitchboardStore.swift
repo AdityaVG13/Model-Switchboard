@@ -173,11 +173,6 @@ final class SwitchboardStore {
         NSWorkspace.shared.open(URL(fileURLWithPath: target))
     }
 
-    func openEndpoint(_ profile: ModelProfileStatus) {
-        guard let url = URL(string: profile.baseURL + "/models") else { return }
-        NSWorkspace.shared.open(url)
-    }
-
     var resolvedControllerRoot: String? {
         if let controllerRoot, !controllerRoot.isEmpty {
             return controllerRoot

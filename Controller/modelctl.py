@@ -492,7 +492,6 @@ HTML_PAGE = r"""<!doctype html>
 
       cardsEl.innerHTML = statuses.map(item => {
         const tone = statusTone(item);
-        const openUrl = item.base_url ? `${item.base_url.replace(/\/$/, '')}/models` : '';
         const runtime = item.runtime || 'unknown';
         const pid = item.pid || 'none';
         return `
@@ -512,7 +511,6 @@ HTML_PAGE = r"""<!doctype html>
               <button class="warn" data-action="stop" data-profile="${escapeHTML(item.profile)}">Stop</button>
               <button data-action="restart" data-profile="${escapeHTML(item.profile)}">Restart</button>
               <button data-action="bench" data-profile="${escapeHTML(item.profile)}">Bench</button>
-              <button ${openUrl ? `data-action="open" data-url="${escapeHTML(openUrl)}"` : 'disabled'}>Open /v1/models</button>
             </div>
           </article>
         `;
@@ -564,12 +562,6 @@ HTML_PAGE = r"""<!doctype html>
       if (!button) return;
       const action = button.dataset.action;
       const profile = button.dataset.profile;
-      const url = button.dataset.url;
-
-      if (action === 'open' && url) {
-        window.open(url, '_blank', 'noopener,noreferrer');
-        return;
-      }
       if (action === 'start') await postAction('/api/start', { profile });
       if (action === 'stop') await postAction('/api/stop', { profile });
       if (action === 'restart') await postAction('/api/restart', { profile });
@@ -1171,7 +1163,7 @@ def diagnose_profile(name: str, env: dict[str, str]) -> dict[str, Any]:
         warnings.append(f"runtime '{runtime}' has no adapter-specific validation yet")
 
     if not base_url(env):
-        warnings.append("base_url is empty; endpoint open action will be disabled")
+        warnings.append("base_url is empty; endpoint health checks may fail")
     if healthcheck_mode(env) == "disabled":
         warnings.append("healthcheck disabled; ready state cannot be verified")
 

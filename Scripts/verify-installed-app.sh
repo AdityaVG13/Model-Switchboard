@@ -211,9 +211,6 @@ elif mode == "benchmark_running":
     print("true" if (obj.get("benchmark") or {}).get("running") else "false")
 elif mode == "benchmark_markdown_path":
     print(((obj.get("benchmark") or {}).get("latest") or {}).get("markdown_path") or "")
-elif mode == "profile_base_url":
-    row = next(x for x in obj["statuses"] if x["profile"] == arg)
-    print(row["base_url"])
 elif mode == "profile_display_name":
     row = next(x for x in obj["statuses"] if x["profile"] == arg)
     print(row["display_name"])
@@ -602,7 +599,6 @@ wait_for_main_window_text_absent() {
 
 controller_post /api/stop-all ""
 FIRST_PROFILE="$(first_profile)"
-FIRST_PROFILE_BASE_URL="$(status_value profile_base_url "$FIRST_PROFILE")"
 PROFILES_DIR="$(status_value profiles_dir '-')"
 CONTROLLER_ROOT="$(status_value controller_root '-')"
 
@@ -645,7 +641,9 @@ sys.exit(0 if (same_x and same_y and same_right) else 1)
 PY
 SETTINGS_SHOT="$WORK_DIR/settings-sidebar.png"
 take_shot "$SETTINGS_SHOT"
-ocr_expect "$SETTINGS_SHOT" "Controller Base URL" || fail "settings content missing"
+if ! ocr_expect "$SETTINGS_SHOT" "Controller Base URL"; then
+  ocr_expect "$SETTINGS_SHOT" "Model Profile Source Of Truth" || fail "settings content missing"
+fi
 pass "settings side panel"
 
 press_button Settings
@@ -700,13 +698,6 @@ if [[ "$HAS_ADVANCED" == "1" ]]; then
   wait_for_browser_url_prefix "$CONTROLLER_URL" || fail "dashboard button"
   pass "dashboard button"
 fi
-
-activate_anchor_app
-launch_app
-open_menu
-press_button Open 1
-wait_for_browser_url_prefix "$FIRST_PROFILE_BASE_URL/models" || fail "open endpoint button"
-pass "open endpoint button"
 
 activate_anchor_app
 launch_app

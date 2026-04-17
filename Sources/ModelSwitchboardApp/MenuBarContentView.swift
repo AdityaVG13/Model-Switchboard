@@ -333,7 +333,6 @@ struct MenuBarContentView: View {
                 actionButton("Restart", icon: "arrow.clockwise", isBusy: store.pendingLabel(for: profile.profile) == "RESTARTING", isDisabled: store.isBusy(profile: profile.profile)) {
                     Task { await store.restart(profile.profile) }
                 }
-                actionButton("Open", icon: "link") { store.openEndpoint(profile) }
             }
         }
         .padding(12)
