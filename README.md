@@ -1,8 +1,15 @@
 <div align="center">
 
-<img src="Resources/Brand/logo.png" alt="Model Switchboard" width="128">
-
-# Model Switchboard
+<pre>
+ __  __  ___  ___  ___ _
+|  \/  |/ _ \|   \| __| |
+| |\/| | (_) | |) | _|| |__
+|_|  |_|\___/|___/|___|____|
+ _____      _____ _____ ___ _  _ ___  ___   _   ___ ___
+/ __\ \    / /_ _|_   _/ __| || | _ )/ _ \ /_\ | _ \   \
+\__ \\ \/\/ / | |  | || (__| __ | _ \ (_) / _ \|   / |) |
+|___/ \_/\_/ |___| |_| \___|_||_|___/\___/_/ \_\_|_\___/
+</pre>
 
 ***Flip between local LLM runtimes from your menu bar.***
 **One click to activate. One click to stop everything.**
@@ -11,8 +18,6 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/macOS-14%2B-lightgrey?style=for-the-badge&logo=apple&logoColor=white)](#requirements)
 [![Swift](https://img.shields.io/badge/swift-6.0-orange?style=for-the-badge&logo=swift&logoColor=white)](Package.swift)
-
-`Native SwiftUI`  `WidgetKit`  `llama.cpp`  `MLX`  `Ollama`  `vLLM`  `Custom`
 
 </div>
 
@@ -44,7 +49,7 @@ Built with **SwiftUI** and `MenuBarExtra`. No Electron, no bundled inference eng
 
 **CPU and GPU utilization** live in the header, so you know what your machine is doing *without* dropping into Activity Monitor.
 
-**`Benchmark All`** runs the fleet. **`Reopen Last`** jumps straight back to what you had up. **Optional integrations** like `Sync Droid` keep external tooling aligned with whatever's currently loaded — *without cluttering the base surface if you don't need them.*
+**`Benchmark All`** runs the fleet. **`Reopen Last`** jumps straight back to what you had up. **`Sync Droid`** pushes your managed profiles into Factory Droid's custom-model settings, so the model you just activated is the one Droid uses — *the first of several planned sync adapters ([see contributing](#contributing)).*
 
 <br clear="left">
 
@@ -76,7 +81,7 @@ Tap **`Export CSV`** and you have a portable report. Every run lands as both JSO
 | `Benchmark All` + per-profile `Benchmark` | — | ✓ |
 | In-app Benchmarks panel + CSV export | — | ✓ |
 | `Reopen Last` | — | ✓ |
-| Optional integrations (`Sync Droid`, …) | — | ✓ |
+| `Sync Droid` and future integration adapters | — | ✓ |
 
 ---
 
@@ -153,8 +158,21 @@ PRs, issues, and profile recipes are welcome. A few ground rules that keep the p
 
 - **Keep the app generic.** Runtime-specific behavior belongs in the controller or a profile manifest.
 - **The controller HTTP contract is the stability boundary** — additive changes only.
-- External tools (e.g. Factory Droid) stay **optional integrations**, never required features.
+- External tools stay **optional integrations**, never required features.
 - Ship a runnable example with any new adapter.
+
+### Especially wanted: more sync adapters
+
+**`Sync Droid` is currently Factory-Droid-specific** because that's the agent I run. The integration slot is generic — the adapter is not. **PRs that add sync adapters for other local-model terminals or agentic tools are very welcome**, including but not limited to:
+
+- **Cursor** / **Windsurf** — push the active profile into the OpenAI-compatible provider settings
+- **OpenAI Codex CLI** — update `~/.codex/config.toml` model entry
+- **Zed** — update `~/.config/zed/settings.json` assistant provider
+- **Continue** (`~/.continue/config.json`)
+- **Aider** — point at the active endpoint
+- **LM Studio** / **Ollama chat frontends** / any **OpenAI-compatible consumer**
+
+If you build one, follow the shape of `Controller/sync-droid-local-models.py` and register it under `Controller/integrations/` so it shows up in the Plus menu automatically.
 
 Before opening a PR:
 
