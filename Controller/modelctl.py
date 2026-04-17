@@ -16,7 +16,25 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
+from typing import TypedDict
+
+from contracts import (
+    BenchmarkLatestReportPayload,
+    BenchmarkLatestRowPayload,
+    BenchmarkStatusPayload,
+    ControllerActionResponsePayload,
+    ControllerHeartbeatPayload,
+    ControllerIntegrationPayload,
+    ControllerStatusPayload,
+    DoctorReportPayload,
+    LaunchAgentStatusPayload,
+    ModelProfileStatusPayload,
+    ProfileEnv,
+    ProfileDiagnosticPayload,
+    make_action_response_payload,
+    make_cached_status_payload,
+    make_controller_status_payload,
+)
 
 BASE = pathlib.Path(__file__).resolve().parent
 PROFILE_DIR = BASE / "model-profiles"
@@ -32,6 +50,15 @@ FACTORY_SETTINGS_PATH = pathlib.Path.home() / ".factory" / "settings.json"
 LAUNCH_AGENT_LABEL = "io.modelswitchboard.controller"
 LAUNCH_AGENT_PLIST = pathlib.Path.home() / "Library/LaunchAgents" / f"{LAUNCH_AGENT_LABEL}.plist"
 STATUS_CACHE_PATH = pathlib.Path.home() / "Library/Caches/io.modelswitchboard/controller-status.json"
+
+class ControllerRequest(TypedDict, total=False):
+    profile: str
+    profiles: list[str]
+    integration: str
+    action: str
+    suite: str
+    allow_concurrent: bool
+    keep_running: bool
 
 
 HTML_PAGE = r"""<!doctype html>
@@ -583,7 +610,7 @@ HTML_PAGE = r"""<!doctype html>
 """
 
 
-def run(cmd: list[str], *, check: bool = True, capture: bool = True, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+def run(cmd: list[str], *, check: bool = True, capture: bool = True, env: ProfileEnv | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         cmd,
         check=check,
@@ -593,12 +620,12 @@ def run(cmd: list[str], *, check: bool = True, capture: bool = True, env: dict[s
     )
 
 
-def load_env_profile(path: pathlib.Path) -> dict[str, str]:
+def load_env_profile(path: pathlib.Path) -> ProfileEnv:
     data = subprocess.check_output(
         ["bash", "-lc", f"set -a; source {shlex.quote(str(path))}; env -0"],
         text=False,
     )
-    env: dict[str, str] = {}
+    env: ProfileEnv = {}
     for item in data.decode().split("\0"):
         if not item or "=" not in item:
             continue
@@ -608,11 +635,11 @@ def load_env_profile(path: pathlib.Path) -> dict[str, str]:
     return env
 
 
-def load_json_profile(path: pathlib.Path) -> dict[str, str]:
+def load_json_profile(path: pathlib.Path) -> ProfileEnv:
     raw = json.loads(path.read_text())
     if not isinstance(raw, dict):
         raise SystemExit(f"Profile JSON must be an object: {path}")
-    env: dict[str, str] = {}
+    env: ProfileEnv = {}
     for key, value in raw.items():
         if value is None:
             env[key] = ""
@@ -624,7 +651,7 @@ def load_json_profile(path: pathlib.Path) -> dict[str, str]:
     return env
 
 
-def load_profile(path: pathlib.Path) -> dict[str, str]:
+def load_profile(path: pathlib.Path) -> ProfileEnv:
     if path.suffix == ".json":
         return load_json_profile(path)
     return load_env_profile(path)
@@ -634,11 +661,11 @@ def profile_paths() -> list[pathlib.Path]:
     return sorted(list(PROFILE_DIR.glob("*.env")) + list(PROFILE_DIR.glob("*.json")))
 
 
-def load_profiles() -> dict[str, dict[str, str]]:
+def load_profiles() -> dict[str, ProfileEnv]:
     return {path.stem: load_profile(path) for path in profile_paths()}
 
 
-def require_profile(name: str) -> dict[str, str]:
+def require_profile(name: str) -> ProfileEnv:
     profiles = load_profiles()
     if name not in profiles:
         raise SystemExit(f"Unknown profile: {name}")
@@ -649,11 +676,11 @@ def pid_path(profile_name: str) -> pathlib.Path:
     return RUN_DIR / f"{profile_name}.pid"
 
 
-def log_path(env: dict[str, str]) -> str:
+def log_path(env: ProfileEnv) -> str:
     return f"/tmp/{env.get('MODEL_ALIAS', env['PROFILE_NAME'])}.log"
 
 
-def base_url(env: dict[str, str]) -> str:
+def base_url(env: ProfileEnv) -> str:
     configured = env.get("BASE_URL", "").strip()
     if configured:
         return configured.rstrip("/")
@@ -663,7 +690,7 @@ def base_url(env: dict[str, str]) -> str:
     return f"http://{env.get('HOST', '127.0.0.1')}:{port}/v1"
 
 
-def models_url(env: dict[str, str]) -> str:
+def models_url(env: ProfileEnv) -> str:
     configured = env.get("MODEL_LIST_URL", "").strip()
     if configured:
         return configured
@@ -673,11 +700,11 @@ def models_url(env: dict[str, str]) -> str:
     return f"{url}/models"
 
 
-def healthcheck_mode(env: dict[str, str]) -> str:
+def healthcheck_mode(env: ProfileEnv) -> str:
     return env.get("HEALTHCHECK_MODE", "openai-models").strip().lower()
 
 
-def healthcheck_url(env: dict[str, str]) -> str:
+def healthcheck_url(env: ProfileEnv) -> str:
     configured = env.get("HEALTHCHECK_URL", "").strip()
     if configured:
         return configured
@@ -686,7 +713,7 @@ def healthcheck_url(env: dict[str, str]) -> str:
     return base_url(env)
 
 
-def endpoint_host(env: dict[str, str]) -> str:
+def endpoint_host(env: ProfileEnv) -> str:
     if env.get("HOST"):
         return env["HOST"]
     url = base_url(env)
@@ -694,7 +721,7 @@ def endpoint_host(env: dict[str, str]) -> str:
     return parsed.hostname or "127.0.0.1"
 
 
-def endpoint_port(env: dict[str, str]) -> str:
+def endpoint_port(env: ProfileEnv) -> str:
     if env.get("PORT"):
         return env["PORT"]
     url = base_url(env)
@@ -772,7 +799,7 @@ def fetch_openai_models(url: str, timeout: float = 1.5) -> list[str]:
         return []
 
 
-def probe_health(env: dict[str, str], timeout: float = 1.5) -> tuple[bool, list[str]]:
+def probe_health(env: ProfileEnv, timeout: float = 1.5) -> tuple[bool, list[str]]:
     mode = healthcheck_mode(env)
     url = healthcheck_url(env)
     if mode == "disabled":
@@ -793,7 +820,7 @@ def probe_health(env: dict[str, str], timeout: float = 1.5) -> tuple[bool, list[
     return bool(server_ids), server_ids
 
 
-def status_for_profile(name: str, env: dict[str, str]) -> dict[str, Any]:
+def status_for_profile(name: str, env: ProfileEnv) -> ModelProfileStatusPayload:
     pid = read_pid(name)
     if pid and not process_alive(pid):
         pid_path(name).unlink(missing_ok=True)
@@ -820,28 +847,45 @@ def status_for_profile(name: str, env: dict[str, str]) -> dict[str, Any]:
     }
 
 
-def status_snapshot(selected: list[str] | None = None) -> list[dict[str, Any]]:
+def status_snapshot(selected: list[str] | None = None) -> list[ModelProfileStatusPayload]:
     profiles = load_profiles()
     names = selected or sorted(profiles)
     return [status_for_profile(name, profiles[name]) for name in names]
 
 
-def status_payload(selected: list[str] | None = None) -> dict[str, Any]:
-    return {
-        "statuses": status_snapshot(selected),
-        "benchmark": benchmark_status(),
-        "integrations": integration_status(),
-        "profiles_dir": str(PROFILE_DIR),
-        "controller_root": str(BASE),
-    }
+def status_payload(selected: list[str] | None = None) -> ControllerStatusPayload:
+    return make_controller_status_payload(
+        statuses=status_snapshot(selected),
+        benchmark=benchmark_status(),
+        integrations=integration_status(),
+        profiles_dir=str(PROFILE_DIR),
+        controller_root=str(BASE),
+    )
 
 
-def write_status_cache(payload: dict[str, Any]) -> None:
+def action_response_from_status(
+    payload: ControllerStatusPayload,
+    *,
+    ok: bool = True,
+    error: str | None = None,
+) -> ControllerActionResponsePayload:
+    return make_action_response_payload(
+        statuses=payload["statuses"],
+        benchmark=payload["benchmark"],
+        integrations=payload["integrations"],
+        profiles_dir=payload["profiles_dir"],
+        controller_root=payload["controller_root"],
+        ok=ok,
+        error=error,
+    )
+
+
+def write_status_cache(payload: ControllerStatusPayload) -> None:
     STATUS_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    cache_payload = {
-        "cached_at": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
-        **payload,
-    }
+    cache_payload = make_cached_status_payload(
+        cached_at=dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
+        payload=payload,
+    )
     temp_path = STATUS_CACHE_PATH.with_suffix(".tmp")
     temp_path.write_text(json.dumps(cache_payload, indent=2, sort_keys=True), encoding="utf-8")
     temp_path.replace(STATUS_CACHE_PATH)
@@ -935,8 +979,8 @@ def sync_droid() -> None:
     run([sys.executable, str(SYNC_SCRIPT)], capture=False)
 
 
-def integration_status() -> list[dict[str, Any]]:
-    integrations: list[dict[str, Any]] = []
+def integration_status() -> list[ControllerIntegrationPayload]:
+    integrations: list[ControllerIntegrationPayload] = []
     droid_available = SYNC_SCRIPT.exists() and (FACTORY_SETTINGS_PATH.exists() or shutil.which("droid"))
     if droid_available:
         integrations.append(
@@ -969,7 +1013,7 @@ def switch_profile(name: str) -> None:
     start_profile(name)
 
 
-def latest_benchmark_report() -> dict[str, Any] | None:
+def latest_benchmark_report() -> BenchmarkLatestReportPayload | None:
     latest_json = BENCH_RESULTS_DIR / "latest.json"
     latest_md = BENCH_RESULTS_DIR / "latest.md"
     if not latest_json.exists():
@@ -978,7 +1022,7 @@ def latest_benchmark_report() -> dict[str, Any] | None:
         payload = json.loads(latest_json.read_text())
     except json.JSONDecodeError:
         return None
-    rows = []
+    rows: list[BenchmarkLatestRowPayload] = []
     for item in payload.get("benchmarks", []):
         avg = item.get("averages", {})
         rows.append(
@@ -1009,7 +1053,7 @@ def benchmark_log_path() -> pathlib.Path:
     return pathlib.Path("/tmp/model-benchmark.log")
 
 
-def benchmark_status() -> dict[str, Any]:
+def benchmark_status() -> BenchmarkStatusPayload:
     pid = read_pid("benchmark")
     alive = bool(pid and process_alive(pid))
     if pid and not alive:
@@ -1029,7 +1073,7 @@ def start_benchmark(
     suite: str = "quick",
     allow_concurrent: bool = False,
     keep_running: bool = False,
-) -> dict[str, Any]:
+) -> BenchmarkStatusPayload:
     current = benchmark_status()
     if current["running"]:
         return current
@@ -1053,7 +1097,7 @@ def start_benchmark(
     return benchmark_status()
 
 
-def detect_model_root(env: dict[str, str]) -> pathlib.Path:
+def detect_model_root(env: ProfileEnv) -> pathlib.Path:
     local_model_root = BASE / "../models"
     candidates = [
         env.get("MODEL_ROOT"),
@@ -1095,7 +1139,7 @@ def resolve_mlx_server_bin() -> str | None:
     return shutil.which("mlx_lm.server")
 
 
-def model_path_for_profile(env: dict[str, str]) -> pathlib.Path | None:
+def model_path_for_profile(env: ProfileEnv) -> pathlib.Path | None:
     if env.get("MODEL_PATH"):
         return pathlib.Path(env["MODEL_PATH"])
     if env.get("MODEL_FILE"):
@@ -1103,16 +1147,17 @@ def model_path_for_profile(env: dict[str, str]) -> pathlib.Path | None:
     return None
 
 
-def launch_agent_status() -> dict[str, Any]:
+def launch_agent_status() -> LaunchAgentStatusPayload:
     try:
         output = run(["launchctl", "list"], check=False).stdout
-    except Exception:  # noqa: BLE001
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"warn: failed to read launchctl status: {exc}", file=sys.stderr)
         output = ""
     running = LAUNCH_AGENT_LABEL in output
     return {"plist_path": str(LAUNCH_AGENT_PLIST), "installed": LAUNCH_AGENT_PLIST.exists(), "running": running}
 
 
-def controller_status() -> dict[str, Any]:
+def controller_status() -> ControllerHeartbeatPayload:
     url = f"http://{DEFAULT_WEB_HOST}:{DEFAULT_WEB_PORT}/api/status"
     request = urllib.request.Request(url, headers={"Accept": "application/json"})
     try:
@@ -1124,11 +1169,17 @@ def controller_status() -> dict[str, Any]:
             "profiles": len(payload.get("statuses", [])),
             "integrations": len(payload.get("integrations", [])),
         }
-    except Exception:  # noqa: BLE001
+    except (
+        urllib.error.URLError,
+        urllib.error.HTTPError,
+        TimeoutError,
+        json.JSONDecodeError,
+        UnicodeDecodeError,
+    ):
         return {"url": url, "reachable": False, "profiles": 0, "integrations": 0}
 
 
-def diagnose_profile(name: str, env: dict[str, str]) -> dict[str, Any]:
+def diagnose_profile(name: str, env: ProfileEnv) -> ProfileDiagnosticPayload:
     runtime = env.get("RUNTIME", "llama.cpp")
     errors: list[str] = []
     warnings: list[str] = []
@@ -1194,7 +1245,7 @@ def diagnose_profile(name: str, env: dict[str, str]) -> dict[str, Any]:
     }
 
 
-def doctor_report() -> dict[str, Any]:
+def doctor_report() -> DoctorReportPayload:
     profiles = load_profiles()
     diagnostics = [diagnose_profile(name, env) for name, env in sorted(profiles.items())]
     return {
@@ -1207,7 +1258,7 @@ def doctor_report() -> dict[str, Any]:
     }
 
 
-def print_doctor(report: dict[str, Any]) -> None:
+def print_doctor(report: DoctorReportPayload) -> None:
     controller = report["controller"]
     launch_agent = report["launch_agent"]
     print("component | status | details")
@@ -1243,7 +1294,23 @@ def print_doctor(report: dict[str, Any]) -> None:
 
 
 class DashboardHandler(BaseHTTPRequestHandler):
-    def _send_json(self, payload: dict[str, Any], status: int = 200) -> None:
+    @staticmethod
+    def _required_string(payload: ControllerRequest, key: str) -> str:
+        value = payload.get(key)
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"missing required string field: {key}")
+        return value
+
+    @staticmethod
+    def _optional_profiles(payload: ControllerRequest) -> list[str] | None:
+        profiles = payload.get("profiles")
+        if profiles is None:
+            return None
+        if not isinstance(profiles, list):
+            raise ValueError("profiles must be a list of strings")
+        return profiles
+
+    def _send_json(self, payload: dict[str, object], status: int = 200) -> None:
         body = json.dumps(payload).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
@@ -1259,12 +1326,39 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
-    def _read_json(self) -> dict[str, Any]:
+    def _read_json(self) -> ControllerRequest:
         length = int(self.headers.get("Content-Length", "0") or 0)
         if length <= 0:
             return {}
         payload = self.rfile.read(length).decode()
-        return json.loads(payload) if payload else {}
+        raw_payload = json.loads(payload) if payload else {}
+        if not isinstance(raw_payload, dict):
+            raise ValueError("request body must be a JSON object")
+        request: ControllerRequest = {}
+        profile = raw_payload.get("profile")
+        if isinstance(profile, str):
+            request["profile"] = profile
+        profiles = raw_payload.get("profiles")
+        if isinstance(profiles, list):
+            profile_names = [item for item in profiles if isinstance(item, str)]
+            if profile_names:
+                request["profiles"] = profile_names
+        integration = raw_payload.get("integration")
+        if isinstance(integration, str):
+            request["integration"] = integration
+        action = raw_payload.get("action")
+        if isinstance(action, str):
+            request["action"] = action
+        suite = raw_payload.get("suite")
+        if isinstance(suite, str):
+            request["suite"] = suite
+        allow_concurrent = raw_payload.get("allow_concurrent")
+        if isinstance(allow_concurrent, bool):
+            request["allow_concurrent"] = allow_concurrent
+        keep_running = raw_payload.get("keep_running")
+        if isinstance(keep_running, bool):
+            request["keep_running"] = keep_running
+        return request
 
     def do_GET(self) -> None:
         if self.path in {"/", "/index.html"}:
@@ -1293,49 +1387,31 @@ class DashboardHandler(BaseHTTPRequestHandler):
         try:
             payload = self._read_json()
             if self.path == "/api/start":
-                start_profile(payload["profile"])
+                start_profile(self._required_string(payload, "profile"))
             elif self.path == "/api/stop":
-                stop_profile(payload["profile"])
+                stop_profile(self._required_string(payload, "profile"))
             elif self.path == "/api/restart":
-                restart_profile(payload["profile"])
+                restart_profile(self._required_string(payload, "profile"))
             elif self.path == "/api/switch":
-                switch_profile(payload["profile"])
-            elif self.path == "/api/start-many":
-                for name in payload.get("profiles", []):
-                    start_profile(name)
-            elif self.path == "/api/stop-many":
-                for name in payload.get("profiles", []):
-                    stop_profile(name)
+                switch_profile(self._required_string(payload, "profile"))
             elif self.path == "/api/stop-all":
                 stop_all()
-            elif self.path == "/api/sync-droid":
-                sync_droid()
             elif self.path == "/api/integrations/run":
-                run_integration_action(payload["integration"], payload.get("action", "sync"))
+                run_integration_action(
+                    self._required_string(payload, "integration"),
+                    payload.get("action", "sync"),
+                )
             elif self.path == "/api/benchmark/start":
                 status = start_benchmark(
-                    payload.get("profiles"),
+                    self._optional_profiles(payload),
                     suite=payload.get("suite", "quick"),
                     allow_concurrent=bool(payload.get("allow_concurrent", False)),
                     keep_running=bool(payload.get("keep_running", False)),
                 )
-                response_payload = {
-                    "ok": True,
-                    "benchmark": status,
-                    "statuses": status_snapshot(),
-                    "integrations": integration_status(),
-                    "profiles_dir": str(PROFILE_DIR),
-                    "controller_root": str(BASE),
-                }
-                write_status_cache(
-                    {
-                        "statuses": response_payload["statuses"],
-                        "benchmark": response_payload["benchmark"],
-                        "integrations": response_payload["integrations"],
-                        "profiles_dir": response_payload["profiles_dir"],
-                        "controller_root": response_payload["controller_root"],
-                    }
-                )
+                controller_payload = status_payload()
+                controller_payload["benchmark"] = status
+                response_payload = action_response_from_status(controller_payload)
+                write_status_cache(controller_payload)
                 self._send_json(response_payload)
                 return
             else:
@@ -1344,26 +1420,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
         except Exception as exc:  # noqa: BLE001
             self._send_json({"error": str(exc)}, status=500)
             return
-        payload = {
-            "ok": True,
-            "statuses": status_snapshot(),
-            "benchmark": benchmark_status(),
-            "integrations": integration_status(),
-            "profiles_dir": str(PROFILE_DIR),
-            "controller_root": str(BASE),
-        }
-        write_status_cache(
-            {
-                "statuses": payload["statuses"],
-                "benchmark": payload["benchmark"],
-                "integrations": payload["integrations"],
-                "profiles_dir": payload["profiles_dir"],
-                "controller_root": payload["controller_root"],
-            }
-        )
-        self._send_json(payload)
+        controller_payload = status_payload()
+        response_payload = action_response_from_status(controller_payload)
+        write_status_cache(controller_payload)
+        self._send_json(response_payload)
 
-    def log_message(self, fmt: str, *args: Any) -> None:
+    def log_message(self, fmt: str, *args: object) -> None:
         return
 
 
@@ -1422,7 +1484,6 @@ def build_parser() -> argparse.ArgumentParser:
     integration_cmd.add_argument("integration", help="Integration id")
     integration_cmd.add_argument("--action", default="sync", help="Integration action to run")
 
-    sub.add_parser("sync-droid", help="Sync profile endpoints into Droid settings")
     sub.add_parser("stop-all", help="Stop every managed model process")
 
     web_cmd = sub.add_parser("serve-web", help="Serve the local model dashboard")
@@ -1470,10 +1531,6 @@ def main() -> None:
 
     if args.command == "status":
         print_status(resolve_selected(args), as_json=args.json)
-        return
-
-    if args.command == "sync-droid":
-        sync_droid()
         return
 
     if args.command == "integrations":

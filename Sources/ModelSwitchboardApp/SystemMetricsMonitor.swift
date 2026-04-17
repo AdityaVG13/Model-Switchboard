@@ -12,6 +12,8 @@ final class SystemMetricsMonitor: ObservableObject {
         let idleTicks: UInt64
     }
 
+    private typealias MetricsDictionary = [String: AnyObject]
+
     private var timer: Timer?
     private var previousCPUSample: CPUSample?
 
@@ -99,18 +101,18 @@ final class SystemMetricsMonitor: ObservableObject {
         return nil
     }
 
-    private func copyProperties(for service: io_object_t) -> [String: Any]? {
+    private func copyProperties(for service: io_object_t) -> MetricsDictionary? {
         var rawProperties: Unmanaged<CFMutableDictionary>?
         let status = IORegistryEntryCreateCFProperties(service, &rawProperties, kCFAllocatorDefault, 0)
         guard status == KERN_SUCCESS, let rawProperties else { return nil }
-        return rawProperties.takeRetainedValue() as? [String: Any]
+        return rawProperties.takeRetainedValue() as? MetricsDictionary
     }
 
-    private func parseGPUUsage(from properties: [String: Any]) -> Double? {
-        let containers: [[String: Any]] = [
+    private func parseGPUUsage(from properties: MetricsDictionary) -> Double? {
+        let containers: [MetricsDictionary] = [
             properties,
-            properties["PerformanceStatistics"] as? [String: Any],
-            properties["Statistics"] as? [String: Any]
+            properties["PerformanceStatistics"] as? MetricsDictionary,
+            properties["Statistics"] as? MetricsDictionary
         ]
             .compactMap { $0 }
 
@@ -135,7 +137,7 @@ final class SystemMetricsMonitor: ObservableObject {
         return nil
     }
 
-    private func normalizePercentage(_ value: Any) -> Double? {
+    private func normalizePercentage(_ value: AnyObject) -> Double? {
         if let number = value as? NSNumber {
             return normalizePercentage(number.doubleValue)
         }

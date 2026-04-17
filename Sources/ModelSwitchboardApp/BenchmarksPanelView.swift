@@ -246,18 +246,20 @@ struct BenchmarksPanelView: View {
     }
 
     private func ms(_ value: Double?) -> String {
-        guard let value else { return "—" }
-        return String(format: "%.0f", value)
+        formatted(value, digits: 0)
     }
 
     private func tps(_ value: Double?) -> String {
-        guard let value else { return "—" }
-        return String(format: "%.1f", value)
+        formatted(value, digits: 1)
     }
 
     private func mb(_ value: Double?) -> String {
+        formatted(value, digits: 0)
+    }
+
+    private func formatted(_ value: Double?, digits: Int) -> String {
         guard let value else { return "—" }
-        return String(format: "%.0f", value)
+        return String(format: "%.\(digits)f", value)
     }
 
     private func exportCSV() {

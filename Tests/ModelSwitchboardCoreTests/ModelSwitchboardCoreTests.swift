@@ -188,6 +188,32 @@ import Testing
     let cached = try #require(ControllerStatusCache.load(from: tempURL))
 
     #expect(cached.payload == payload)
+    #expect(cached.sourcePaths.profilesDirectory == "/tmp/model-profiles")
+    #expect(cached.sourcePaths.controllerRoot == "/tmp")
+}
+
+@Test func sourcePathsAreSharedAcrossControllerPayloadTypes() {
+    let statusPayload = ControllerStatusPayload(
+        statuses: [],
+        benchmark: nil,
+        integrations: [],
+        profilesDirectory: "/tmp/profiles",
+        controllerRoot: "/tmp/controller"
+    )
+
+    let actionPayload = ControllerActionResponse(
+        ok: true,
+        statuses: [],
+        benchmark: nil,
+        integrations: [],
+        profilesDirectory: "/tmp/profiles",
+        controllerRoot: "/tmp/controller",
+        error: nil
+    )
+
+    #expect(statusPayload.sourcePaths == actionPayload.sourcePaths)
+    #expect(statusPayload.sourcePaths.profilesDirectory == "/tmp/profiles")
+    #expect(statusPayload.sourcePaths.controllerRoot == "/tmp/controller")
 }
 
 @Test func updatingStatusOverridesMutableFieldsOnly() {

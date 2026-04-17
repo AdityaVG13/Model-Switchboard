@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Observation
+import OSLog
 import ModelSwitchboardCore
 
 @MainActor
@@ -30,6 +31,7 @@ final class SwitchboardStore {
     var activeBenchmarkProfiles: [String] = []
 
     private var refreshTask: Task<Void, Never>?
+    private static let logger = Logger(subsystem: "io.modelswitchboard.app", category: "switchboard-store")
 
     init(controllerBaseURL: String, features: AppFeatures = .current) {
         self.controllerBaseURL = controllerBaseURL
@@ -39,16 +41,18 @@ final class SwitchboardStore {
         loadCachedState()
     }
 
-    var summary: DashboardSummary {
-        DashboardSummary(
-            payload: ControllerStatusPayload(
-                statuses: statuses,
-                benchmark: benchmark,
-                integrations: integrations,
-                profilesDirectory: profilesDirectory,
-                controllerRoot: controllerRoot
-            )
+    private var currentPayload: ControllerStatusPayload {
+        ControllerStatusPayload(
+            statuses: statuses,
+            benchmark: benchmark,
+            integrations: integrations,
+            profilesDirectory: profilesDirectory,
+            controllerRoot: controllerRoot
         )
+    }
+
+    var summary: DashboardSummary {
+        DashboardSummary(payload: currentPayload)
     }
 
     var sortedStatuses: [ModelProfileStatus] {
@@ -111,7 +115,13 @@ final class SwitchboardStore {
             await self.refresh()
             while !Task.isCancelled {
                 let interval = autoRefreshPolicy.interval
-                try? await Task.sleep(for: .seconds(interval))
+                do {
+                    try await Task.sleep(for: .seconds(interval))
+                } catch {
+                    if isBenignCancellation(error) { break }
+                    Self.logger.error("Auto refresh sleep failed: \(String(describing: error), privacy: .public)")
+                    break
+                }
                 if Task.isCancelled { break }
                 await self.refresh()
             }
@@ -130,7 +140,7 @@ final class SwitchboardStore {
         do {
             let payload = try await client.fetchStatus()
             apply(payload: payload)
-            try? ControllerStatusCache.write(payload)
+            cachePayload(payload, context: "refresh")
             lastError = nil
             lastUpdated = Date()
         } catch {
@@ -269,13 +279,7 @@ final class SwitchboardStore {
 
     var autoRefreshPolicy: AutoRefreshPolicy {
         AutoRefreshPolicy(
-            payload: ControllerStatusPayload(
-                statuses: statuses,
-                benchmark: benchmark,
-                integrations: integrations,
-                profilesDirectory: profilesDirectory,
-                controllerRoot: controllerRoot
-            ),
+            payload: currentPayload,
             hasPendingActions: !pendingProfileActions.isEmpty ||
                 !pendingGlobalActions.isEmpty ||
                 !pendingIntegrationActions.isEmpty
@@ -369,15 +373,15 @@ final class SwitchboardStore {
     }
 
     private func cacheCurrentState() {
-        try? ControllerStatusCache.write(
-            ControllerStatusPayload(
-                statuses: statuses,
-                benchmark: benchmark,
-                integrations: integrations,
-                profilesDirectory: profilesDirectory,
-                controllerRoot: controllerRoot
-            )
-        )
+        cachePayload(currentPayload, context: "state")
+    }
+
+    private func cachePayload(_ payload: ControllerStatusPayload, context: String) {
+        do {
+            try ControllerStatusCache.write(payload)
+        } catch {
+            Self.logger.error("Cache write failed (\(context, privacy: .public)): \(String(describing: error), privacy: .public)")
+        }
     }
 
     private func loadLastActiveProfiles() {

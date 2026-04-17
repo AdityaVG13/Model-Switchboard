@@ -78,10 +78,6 @@ struct MenuBarExtraAccess<Content: Scene>: Scene {
             }
     }
     
-    private func togglePresented() {
-        MenuBarExtraUtils.togglePresented(for: .index(index))
-    }
-    
     private func setPresented(_ state: Bool) {
         var state = state
         if state, !isStatusItemEnabled {

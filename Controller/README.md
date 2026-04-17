@@ -1,6 +1,6 @@
 # ModelSwitchboard Controller
 
-This directory contains the local control plane that powers the menu bar app.
+This directory contains the local control plane used by the app.
 
 ## What It Does
 
@@ -8,7 +8,7 @@ This directory contains the local control plane that powers the menu bar app.
 - Reports running and ready status over HTTP
 - Exposes benchmark status and optional integrations
 - Writes a shared cache file for the app and widget
-- Runs under `launchd` through a small branded Swift launcher so macOS does not surface the service as `python3`
+- Runs under `launchd` via a small Swift launcher so macOS does not display the service as `python3`
 
 ## Key Files
 
@@ -24,7 +24,7 @@ This directory contains the local control plane that powers the menu bar app.
 
 ## Operating Model
 
-The controller reads model profiles from its sibling `model-profiles` directory. Each profile defines how a runtime should be launched and how its OpenAI-compatible endpoint should be addressed. The menu bar app remains model-agnostic because it only talks to the controller.
+The controller reads profiles from `model-profiles`. Each profile defines launch and endpoint settings. The app remains model-agnostic because it only calls the controller API.
 
 If you want to keep profiles elsewhere, either:
 
@@ -33,7 +33,7 @@ If you want to keep profiles elsewhere, either:
 
 ## Benchmark harness
 
-The benchmark harness is intentionally split into multiple workload shapes instead of one blended score:
+The benchmark harness is split into multiple workload shapes:
 
 - `quick` for a fast interactive spot check from the UI
 - `local` for short-latency, sustained decode, long-prompt prefill, and coding-oriented runs
@@ -47,7 +47,7 @@ Every completed run writes:
 - `latest.json`
 - `latest.md`
 
-All outputs live in `Controller/benchmark-results/`. The menu bar app opens `latest.md`.
+All outputs are written to `Controller/benchmark-results/`. The app reads `latest.json` and can open the reports.
 
 ## Install
 

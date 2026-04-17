@@ -27,8 +27,7 @@ cd "$ROOT_DIR"
 
 "$ROOT_DIR/Scripts/generate-app-icon.sh" >/dev/null
 
-# Keep the Xcode project in sync with the source tree. New Swift files do not
-# automatically appear in an existing .xcodeproj unless we regenerate it.
+# Regenerate the Xcode project so newly added source files are included.
 if [ "${SKIP_XCODEGEN:-0}" != "1" ]; then
   "$ROOT_DIR/Scripts/generate-xcodeproj.sh"
 fi

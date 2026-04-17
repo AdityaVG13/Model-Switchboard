@@ -195,6 +195,30 @@ public struct BenchmarkStatus: Codable, Equatable, Sendable {
     }
 }
 
+public struct ControllerSourcePaths: Equatable, Sendable {
+    public let profilesDirectory: String?
+    public let controllerRoot: String?
+
+    public init(profilesDirectory: String?, controllerRoot: String?) {
+        self.profilesDirectory = profilesDirectory
+        self.controllerRoot = controllerRoot
+    }
+}
+
+public protocol ControllerSourcePathProviding {
+    var profilesDirectory: String? { get }
+    var controllerRoot: String? { get }
+}
+
+public extension ControllerSourcePathProviding {
+    var sourcePaths: ControllerSourcePaths {
+        ControllerSourcePaths(
+            profilesDirectory: profilesDirectory,
+            controllerRoot: controllerRoot
+        )
+    }
+}
+
 public struct ControllerStatusPayload: Codable, Equatable, Sendable {
     public let statuses: [ModelProfileStatus]
     public let benchmark: BenchmarkStatus?
@@ -262,6 +286,9 @@ public struct ControllerActionResponse: Codable, Equatable, Sendable {
         case error
     }
 }
+
+extension ControllerStatusPayload: ControllerSourcePathProviding {}
+extension ControllerActionResponse: ControllerSourcePathProviding {}
 
 public struct DashboardSummary: Equatable, Sendable {
     public let totalProfiles: Int

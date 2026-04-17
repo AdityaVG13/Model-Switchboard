@@ -18,6 +18,22 @@ public enum ControllerClientError: LocalizedError {
 }
 
 public struct ControllerClient: Sendable {
+    private struct ProfileRequest: Encodable {
+        let profile: String
+    }
+
+    private struct IntegrationRequest: Encodable {
+        let integration: String
+        let action: String
+    }
+
+    private struct BenchmarkRequest: Encodable {
+        let suite: String
+        let profiles: [String]?
+    }
+
+    private struct EmptyRequest: Encodable {}
+
     public let baseURL: URL
     public let session: URLSession
     public let decoder: JSONDecoder
@@ -46,34 +62,31 @@ public struct ControllerClient: Sendable {
     }
 
     public func start(profile: String) async throws -> ControllerActionResponse {
-        try await post("/api/start", payload: ["profile": profile])
+        try await post("/api/start", payload: ProfileRequest(profile: profile))
     }
 
     public func stop(profile: String) async throws -> ControllerActionResponse {
-        try await post("/api/stop", payload: ["profile": profile])
+        try await post("/api/stop", payload: ProfileRequest(profile: profile))
     }
 
     public func restart(profile: String) async throws -> ControllerActionResponse {
-        try await post("/api/restart", payload: ["profile": profile])
+        try await post("/api/restart", payload: ProfileRequest(profile: profile))
     }
 
     public func activate(profile: String) async throws -> ControllerActionResponse {
-        try await post("/api/switch", payload: ["profile": profile])
+        try await post("/api/switch", payload: ProfileRequest(profile: profile))
     }
 
     public func runIntegration(id: String, action: String = "sync") async throws -> ControllerActionResponse {
-        try await post("/api/integrations/run", payload: ["integration": id, "action": action])
+        try await post("/api/integrations/run", payload: IntegrationRequest(integration: id, action: action))
     }
 
     public func stopAll() async throws -> ControllerActionResponse {
-        try await post("/api/stop-all", payload: [:])
+        try await post("/api/stop-all", payload: EmptyRequest())
     }
 
     public func quickBenchmark(profiles: [String]? = nil, suite: String = "quick") async throws -> ControllerActionResponse {
-        var payload: [String: Any] = ["suite": suite]
-        if let profiles {
-            payload["profiles"] = profiles
-        }
+        let payload = BenchmarkRequest(suite: suite, profiles: profiles)
         return try await post("/api/benchmark/start", payload: payload)
     }
 
@@ -84,11 +97,11 @@ public struct ControllerClient: Sendable {
         return try decoder.decode(T.self, from: data)
     }
 
-    private func post(_ path: String, payload: [String: Any]) async throws -> ControllerActionResponse {
+    private func post<Payload: Encodable>(_ path: String, payload: Payload) async throws -> ControllerActionResponse {
         var request = URLRequest(url: baseURL.appendingPathComponent(path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+        request.httpBody = try encoder.encode(payload)
         let (data, response) = try await session.data(for: request)
         try validate(response: response, data: data)
         let decoded = try decoder.decode(ControllerActionResponse.self, from: data)

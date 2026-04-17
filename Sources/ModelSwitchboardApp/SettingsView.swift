@@ -9,9 +9,6 @@ struct SettingsView: View {
     let openProfilesDirectory: () -> Void
     let openControllerRoot: () -> Void
     let reconnect: () -> Void
-    let features: AppFeatures
-    let benchmark: BenchmarkStatus?
-    let runQuickBenchmarkAll: () -> Void
     private let defaultControllerBaseURL = "http://127.0.0.1:8877"
 
     var body: some View {
@@ -63,34 +60,6 @@ struct SettingsView: View {
                 }
 
                 Divider()
-
-                if features.supportsBenchmarks {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Advanced Tools")
-                            .font(.caption.bold())
-
-                        Text("Diagnostics stay available, but they live here so the primary switchboard stays operational instead of turning into a control-center dump.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-
-                    if let latest = benchmark?.latest {
-                        Text("Latest benchmark: \(benchmarkSuiteLabel(latest.suite))")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        } else {
-                            Text("Latest benchmark: none recorded yet")
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                        }
-                        Text("Run benchmarks from the main switchboard controls and inspect/export results in the Benchmarks panel.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    Divider()
-                }
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Launch At Login")
@@ -165,19 +134,5 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(.quaternary.opacity(0.22), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
-    }
-
-    private func benchmarkSuiteLabel(_ suite: String?) -> String {
-        guard let suite, !suite.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return "unknown"
-        }
-        let normalized = suite.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if normalized == "quick" {
-            return "default"
-        }
-        return normalized
-            .replacingOccurrences(of: "_", with: " ")
-            .replacingOccurrences(of: "-", with: " ")
-            .localizedCapitalized
     }
 }

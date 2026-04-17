@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 public struct CachedControllerStatusPayload: Codable, Equatable, Sendable {
     public let cachedAt: Date
@@ -55,17 +56,41 @@ public struct CachedControllerStatusPayload: Codable, Equatable, Sendable {
     }
 }
 
+extension CachedControllerStatusPayload: ControllerSourcePathProviding {}
+
 public enum ControllerStatusCache {
+    private static let logger = Logger(subsystem: "io.modelswitchboard.core", category: "controller-status-cache")
+
     public static let cacheURL: URL = {
         FileManager.default.homeDirectoryForCurrentUser
             .appending(path: "Library/Caches/io.modelswitchboard/controller-status.json")
     }()
 
     public static func load(from url: URL = cacheURL) -> CachedControllerStatusPayload? {
-        guard let data = try? Data(contentsOf: url) else { return nil }
+        let data: Data
+        do {
+            data = try Data(contentsOf: url)
+        } catch {
+            let nsError = error as NSError
+            if nsError.domain == NSCocoaErrorDomain, nsError.code == CocoaError.fileReadNoSuchFile.rawValue {
+                return nil
+            }
+            logger.error("Cache read failed at \(url.path, privacy: .public): \(String(describing: error), privacy: .public)")
+            return nil
+        }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        return try? decoder.decode(CachedControllerStatusPayload.self, from: data)
+        do {
+            return try decoder.decode(CachedControllerStatusPayload.self, from: data)
+        } catch {
+            logger.error("Cache decode failed at \(url.path, privacy: .public): \(String(describing: error), privacy: .public)")
+            do {
+                try FileManager.default.removeItem(at: url)
+            } catch {
+                logger.error("Cache cleanup failed at \(url.path, privacy: .public): \(String(describing: error), privacy: .public)")
+            }
+            return nil
+        }
     }
 
     public static func write(

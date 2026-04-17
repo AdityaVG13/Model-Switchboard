@@ -8,8 +8,16 @@ import pathlib
 import time
 import urllib.error
 import urllib.request
-from typing import Any
 
+from contracts import (
+    BenchmarkCaseResultPayload as BenchmarkCaseResult,
+    BenchmarkProfilePayload as ProfileBenchmark,
+    BenchmarkRunReportPayload as BenchmarkReport,
+    CategorySummaryPayload as CategorySummary,
+    ProfileEnv,
+    PromptSpec,
+    StreamResultPayload as StreamResult,
+)
 from modelctl import (
     base_url,
     load_profiles,
@@ -51,7 +59,7 @@ def build_long_context_prompt(target_tokens: int, *, instruction: str, topic: st
     return "\n\n".join(sections)
 
 
-PROMPT_SUITES: dict[str, list[dict[str, Any]]] = {
+PROMPT_SUITES: dict[str, list[PromptSpec]] = {
     "quick-ui": [
         {
             "name": "interactive-fast",
@@ -171,11 +179,6 @@ PROMPT_SUITES: dict[str, list[dict[str, Any]]] = {
 }
 
 
-class StreamResult(dict):
-    pass
-
-
-
 def stream_chat(base: str, model: str, prompt: str, *, temperature: float, max_tokens: int, timeout: float) -> StreamResult:
     payload = {
         "model": model,
@@ -192,7 +195,7 @@ def stream_chat(base: str, model: str, prompt: str, *, temperature: float, max_t
     )
 
     pieces: list[str] = []
-    usage: dict[str, Any] = {}
+    usage: dict[str, int] = {}
     first_token_at: float | None = None
     started = time.perf_counter()
 
@@ -209,11 +212,28 @@ def stream_chat(base: str, model: str, prompt: str, *, temperature: float, max_t
                     obj = json.loads(data)
                 except json.JSONDecodeError:
                     continue
-                if obj.get("usage"):
-                    usage = obj["usage"]
-                for choice in obj.get("choices", []):
-                    delta = choice.get("delta") or {}
-                    piece = delta.get("content") or delta.get("reasoning_content") or choice.get("text") or ""
+                if not isinstance(obj, dict):
+                    continue
+                raw_usage = obj.get("usage")
+                if isinstance(raw_usage, dict):
+                    usage = {
+                        key: value
+                        for key, value in raw_usage.items()
+                        if isinstance(key, str) and isinstance(value, int)
+                    }
+                choices = obj.get("choices")
+                if not isinstance(choices, list):
+                    continue
+                for choice in choices:
+                    if not isinstance(choice, dict):
+                        continue
+                    delta_value = choice.get("delta")
+                    delta = delta_value if isinstance(delta_value, dict) else {}
+                    piece = (
+                        (delta.get("content") if isinstance(delta.get("content"), str) else None)
+                        or (delta.get("reasoning_content") if isinstance(delta.get("reasoning_content"), str) else None)
+                        or (choice.get("text") if isinstance(choice.get("text"), str) else "")
+                    )
                     if piece:
                         if first_token_at is None:
                             first_token_at = time.perf_counter()
@@ -224,38 +244,38 @@ def stream_chat(base: str, model: str, prompt: str, *, temperature: float, max_t
 
     finished = time.perf_counter()
     content = "".join(pieces)
-    completion_tokens = usage.get("completion_tokens") or estimated_tokens(content)
+    completion_tokens = usage.get("completion_tokens", estimated_tokens(content))
     prompt_tokens = usage.get("prompt_tokens")
     ttft_ms = round(((first_token_at or finished) - started) * 1000, 1)
     total_ms = round((finished - started) * 1000, 1)
     gen_window = max(0.001, finished - (first_token_at or started))
     decode_tps = round(completion_tokens / gen_window, 2)
     e2e_tps = round(completion_tokens / max(0.001, finished - started), 2)
-    return StreamResult(
-        prompt_tokens=prompt_tokens,
-        completion_tokens=completion_tokens,
-        ttft_ms=ttft_ms,
-        total_ms=total_ms,
-        decode_tokens_per_sec=decode_tps,
-        e2e_tokens_per_sec=e2e_tps,
-        content=content,
-        usage_source="server" if usage.get("completion_tokens") else "estimated",
-    )
+    return {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "ttft_ms": ttft_ms,
+        "total_ms": total_ms,
+        "decode_tokens_per_sec": decode_tps,
+        "e2e_tokens_per_sec": e2e_tps,
+        "content": content,
+        "usage_source": "server" if "completion_tokens" in usage else "estimated",
+    }
 
 
 
 def failed_result(error: str) -> StreamResult:
-    return StreamResult(
-        prompt_tokens=None,
-        completion_tokens=None,
-        ttft_ms=None,
-        total_ms=None,
-        decode_tokens_per_sec=None,
-        e2e_tokens_per_sec=None,
-        content="",
-        usage_source="error",
-        error=error,
-    )
+    return {
+        "prompt_tokens": None,
+        "completion_tokens": None,
+        "ttft_ms": None,
+        "total_ms": None,
+        "decode_tokens_per_sec": None,
+        "e2e_tokens_per_sec": None,
+        "content": "",
+        "usage_source": "error",
+        "error": error,
+    }
 
 
 
@@ -271,7 +291,7 @@ def run_case(base: str, model: str, prompt: str, *, temperature: float, max_toke
                 max_tokens=max_tokens,
                 timeout=timeout,
             )
-        except Exception as exc:  # noqa: BLE001
+        except (RuntimeError, urllib.error.URLError, TimeoutError, OSError) as exc:
             last_error = str(exc)
             if attempt < retries:
                 time.sleep(2)
@@ -286,7 +306,7 @@ def mean_or_none(values: list[float | None], digits: int) -> float | None:
     return round(sum(usable) / len(usable), digits)
 
 
-def summarize_category(results: list[dict[str, Any]], category: str) -> dict[str, Any]:
+def summarize_category(results: list[BenchmarkCaseResult], category: str) -> CategorySummary:
     scoped = [item for item in results if item.get("category") == category]
     return {
         "category": category,
@@ -310,14 +330,14 @@ def stop_other_profiles(target_profile: str) -> None:
 
 def benchmark_profile(
     profile_name: str,
-    env: dict[str, str],
-    prompts: list[dict[str, Any]],
+    env: ProfileEnv,
+    prompts: list[PromptSpec],
     *,
     temperature: float,
     timeout: float,
     keep_running: bool,
     isolate: bool,
-) -> dict[str, Any]:
+) -> ProfileBenchmark:
     if isolate:
         stop_other_profiles(profile_name)
 
@@ -329,7 +349,7 @@ def benchmark_profile(
 
         base = base_url(env)
         model = env["REQUEST_MODEL"]
-        results: list[dict[str, Any]] = []
+        results: list[BenchmarkCaseResult] = []
 
         warmup = run_case(
             base,
@@ -350,15 +370,16 @@ def benchmark_profile(
                 max_tokens=spec["max_tokens"],
                 timeout=timeout,
             )
-            result.update(
-                benchmark=spec["name"],
-                category=spec.get("category", "general"),
-                prompt=spec["prompt"],
-                prompt_est_tokens=prompt_tokens_estimate,
-                max_tokens=spec["max_tokens"],
-                output_preview=result["content"][:220].replace("\n", " ").strip(),
-            )
-            results.append(result)
+            case_result: BenchmarkCaseResult = {
+                **result,
+                "benchmark": spec["name"],
+                "category": spec.get("category", "general"),
+                "prompt": spec["prompt"],
+                "prompt_est_tokens": prompt_tokens_estimate,
+                "max_tokens": spec["max_tokens"],
+                "output_preview": result.get("content", "")[:220].replace("\n", " ").strip(),
+            }
+            results.append(case_result)
 
         final_status = status_for_profile(profile_name, env)
         categories = sorted({item["category"] for item in results})
@@ -386,7 +407,7 @@ def benchmark_profile(
 
 
 
-def write_outputs(report: dict[str, Any]) -> tuple[pathlib.Path, pathlib.Path]:
+def write_outputs(report: BenchmarkReport) -> tuple[pathlib.Path, pathlib.Path]:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     json_path = OUTPUT_DIR / f"benchmark-{stamp}.json"

@@ -454,8 +454,7 @@ struct MenuBarContentView: View {
                     .font(.headline)
                 Spacer()
                 Button {
-                    // Defer inspector teardown by one run-loop tick so the close-click
-                    // is not interpreted as an outside click that dismisses the menu.
+                    // Close on next run-loop tick to avoid menu-level outside-click dismissal.
                     DispatchQueue.main.async {
                         setInspectorPanel(nil)
                         hostWindow?.makeKeyAndOrderFront(nil)
@@ -492,12 +491,7 @@ struct MenuBarContentView: View {
                 launchAtLoginManager: launchAtLoginManager,
                 openProfilesDirectory: store.openProfilesDirectory,
                 openControllerRoot: store.openControllerRoot,
-                reconnect: reconnect,
-                features: features,
-                benchmark: store.benchmark,
-                runQuickBenchmarkAll: {
-                    Task { await store.quickBenchmark() }
-                }
+                reconnect: reconnect
             )
         case .benchmarks:
             BenchmarksPanelView(

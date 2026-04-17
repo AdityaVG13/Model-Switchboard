@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 import json
-import os
 import pathlib
-import shlex
-import subprocess
-import sys
+from typing import NotRequired, TypedDict
+
+from contracts import ProfileEnv
+from modelctl import load_env_profile
 
 BASE = pathlib.Path(__file__).resolve().parent
 PROFILE_DIR = BASE / "model-profiles"
@@ -13,26 +13,27 @@ STATE_PATH = BASE / ".droid-managed-models.json"
 REMOVED_STATE_PATH = BASE / ".droid-removed-models.json"
 
 
-def load_env_profile(path: pathlib.Path) -> dict[str, str]:
-    cmd = [
-        "bash",
-        "-lc",
-        f"set -a; source {shlex.quote(str(path))}; env -0",
-    ]
-    data = subprocess.check_output(cmd)
-    env = {}
-    for item in data.decode().split("\0"):
-        if not item or "=" not in item:
-            continue
-        k, v = item.split("=", 1)
-        env[k] = v
-    return env
+class DroidExtraArgs(TypedDict, total=False):
+    temperature: float
 
 
-def build_entry(env: dict[str, str]) -> dict:
+class DroidModelEntry(TypedDict):
+    displayName: str
+    model: str
+    baseUrl: str
+    apiKey: str
+    provider: str
+    maxOutputTokens: int
+    noImageSupport: bool
+    id: NotRequired[str]
+    index: NotRequired[int]
+    extraArgs: NotRequired[DroidExtraArgs]
+
+
+def build_entry(env: ProfileEnv) -> DroidModelEntry:
     host = env.get("HOST", "127.0.0.1")
     base_url = f"http://{host}:{env['PORT']}/v1"
-    extra_args = {}
+    extra_args: DroidExtraArgs = {}
     if env.get("DROID_TEMPERATURE"):
         extra_args["temperature"] = float(env["DROID_TEMPERATURE"])
     entry = {
@@ -59,11 +60,11 @@ def slug(display_name: str) -> str:
     return "-".join("".join(allowed).split())
 
 
-def droid_id_for(env: dict[str, str]) -> str:
+def droid_id_for(env: ProfileEnv) -> str:
     return env.get("DROID_ID") or f"custom:{slug(env['DISPLAY_NAME'])}-0"
 
 
-profiles = []
+profiles: list[ProfileEnv] = []
 for path in sorted(PROFILE_DIR.glob("*.env")):
     env = load_env_profile(path)
     if env.get("SYNC_TO_DROID") != "1":
@@ -94,7 +95,7 @@ removed_ids = set(removed_state.get("ids", []))
 custom_models = data.get("customModels", [])
 
 replace_names = set()
-replace_name_to_entry = {}
+replace_name_to_entry: dict[str, DroidModelEntry] = {}
 for env in profiles:
     for name in env.get("REPLACES_DISPLAY_NAMES", "").split(","):
         name = name.strip()

@@ -1,8 +1,8 @@
 # Model Switchboard
 
-A native macOS menu bar app for switching between local model runtimes.
+A native macOS menu bar app for operating local model runtimes.
 
-`Model Switchboard` is intentionally model-agnostic. It does not care whether the backend launches `llama.cpp`, MLX, Ollama, vLLM, or something else. It talks to a controller API that exposes model profiles and lifecycle actions. The app is generic. The controller or runtime adapter can live in any folder or repo, as long as it serves the expected HTTP contract.
+`Model Switchboard` is model-agnostic. It talks to a controller API; the controller can launch `llama.cpp`, MLX, Ollama, vLLM, or any other compatible runtime.
 
 ## Editions
 
@@ -32,18 +32,16 @@ Feature split:
   - optional controller integrations such as `Sync Droid`
   - plus widget branding
 
-## Why this exists
+## Purpose
 
-Most local-model UIs focus on chat, not operations. The missing piece is a fast top-of-screen control surface that can:
+The app provides a fast operations surface that can:
 
 - show which profiles are actually ready
 - switch the machine to a target model with one click
 - start and stop heavy runtimes cleanly
 - open the backing endpoint when you need details
 
-The plus edition extends that with benchmark and integration operations without forcing the base install to carry extra surface area.
-
-On macOS, the right primitive for that is `MenuBarExtra`, not a WidgetKit-first build.
+The Plus edition adds benchmark and integration controls without increasing base-edition surface area.
 
 ## Buttons in the menu bar app
 
@@ -65,9 +63,9 @@ Per-profile actions:
 - `Restart`
 - `Benchmark` (Plus)
 
-`Activate` is the key workflow for laptops. It gives you one-click model switching without leaving old heavyweight runtimes resident.
+`Activate` is the primary laptop workflow: switch to one model and stop the rest.
 
-`Settings` and `Help` now open inside the menu interface itself as an attached inspector, so they stay attached to the menu bar surface instead of spawning detached desktop windows.
+`Settings` and `Help` open as attached inspector panels, not detached desktop windows.
 
 `Settings` also includes:
 
@@ -75,24 +73,24 @@ Per-profile actions:
 - the live `model-profiles` path reported by the controller
 - one-click actions to open the profiles folder or controller root in Finder
 
-That matters because model locations are defined in controller profile manifests, not in the app itself.
+Model locations are defined in controller profile manifests, not in app preferences.
 
-In `Model Switchboard Plus`, benchmark controls and integration actions stay in the main switchboard surface, and the benchmark side panel adds in-app table viewing plus CSV export.
+In `Model Switchboard Plus`, benchmark controls and integration actions stay in the main surface; benchmark results are viewable in-app and exportable to CSV.
 
 ## Raycast
 
-Raycast users should have two clean paths:
+Raycast users have two paths:
 
 1. the app should appear as a normal macOS application after install
 2. keyboard-first operators should also get direct scriptable actions without opening the menu
 
-This repo now supports both:
+This repo supports both:
 
 - `Scripts/install.sh` explicitly registers the app with Launch Services and forces a Spotlight import so Raycast can discover it faster
 - `Scripts/model-switchboardctl` provides a tiny controller CLI and supports `MODEL_SWITCHBOARD_VARIANT=base|plus`
 - `Integrations/Raycast/Script Commands/` contains lightweight Script Commands for status, opening the profiles folder, stopping all models, and running quick benchmarks
 
-If Finder still shows `.app` on your machine, that is a global Finder preference issue, not an app bundle naming issue. When `AppleShowAllExtensions` is enabled, Finder will keep showing bundle extensions.
+If Finder shows `.app`, that is a Finder preference (`AppleShowAllExtensions`), not a bundle naming issue.
 
 ## Controller API contract
 
@@ -113,9 +111,7 @@ Endpoints used today:
 - `POST /api/integrations/run`
 - `POST /api/benchmark/start`
 
-`POST /api/sync-droid` still exists in the current Python adapter as a backward-compatible alias, but the app no longer depends on that hard-coded route.
-
-A backend can be considered compatible if it returns the same basic JSON shape for profile status, exposes an `integrations` array when optional external actions are available, and supports the lifecycle actions above.
+A backend is compatible if it returns the same profile-status JSON shape, exposes optional `integrations`, and supports the lifecycle actions above.
 
 ## Benchmark outputs
 
@@ -130,7 +126,7 @@ Each completed run produces:
 - `latest.json`
 - `latest.md`
 
-The Plus benchmark panel reads `latest.json` and renders the latest benchmark run directly in-app. `Export CSV` writes a portable report from the current latest run. For broader comparison, run the controller harness with heavier suites after a quick pass.
+The Plus benchmark panel reads `latest.json` and renders the latest run in-app. `Export CSV` writes a portable report from the current latest run.
 
 ## Version
 
@@ -165,13 +161,7 @@ That installs fresh copies at:
 - `~/Applications/Model Switchboard.app`
 - `~/Applications/Model Switchboard Plus.app`
 
-The installer also removes the old legacy `ModelSwitchboard.app` bundle name so you do not keep launching a stale app by accident.
-
-Compatibility alias:
-
-```bash
-./Scripts/clean-install.sh
-```
+The installer also removes the old `ModelSwitchboard.app` bundle name to avoid stale launches.
 
 ## Uninstall
 
@@ -207,7 +197,7 @@ That builds:
 
 - `dist/Model Switchboard Plus.app`
 
-The Xcode build script always regenerates the `.xcodeproj` from `project.yml` first. That avoids the stale-project problem where new Swift files compile in SwiftPM but never make it into the packaged app.
+The Xcode build script regenerates `.xcodeproj` from `project.yml` before building.
 
 ## DMG
 
@@ -241,23 +231,17 @@ Plus verification:
 APP_VARIANT=plus ./Scripts/verify-distribution.sh
 ```
 
-That always verifies the app bundle structure and code signature. Gatekeeper checks are skipped automatically for local ad hoc builds and are enforced once you sign with a real Developer ID identity.
+This verifies app bundle structure and code signature. Gatekeeper checks are skipped for local ad hoc builds.
 
 ## Release stance
 
-For GitHub distribution, the right default is:
+For GitHub distribution:
 
 1. a Developer ID-signed app
 2. a notarized `.dmg`
 3. a GitHub Release that points users to the DMG
 
-Why:
-
-- Apple recommends distributing outside the Mac App Store using a signed distribution container and notarizing that container
-- menu bar apps on GitHub commonly ship as DMGs
-- the widget is part of the containing app, not a separate download
-
-The current repo now builds the DMG locally. For a public release, the next step is signing and notarization.
+This repo builds DMGs locally; public releases should be signed and notarized.
 
 This repo now includes:
 
@@ -293,26 +277,16 @@ It includes:
 - a SwiftBar companion script
 - an example custom-command profile
 
-## Why not WidgetKit first?
+## Widget note
 
-WidgetKit is still useful if you want a desktop widget or Notification Center glance view, but it is not the best starting point for a fast model-switching UX. For top-of-screen interaction, `MenuBarExtra` is the correct foundation. The menu bar app can later share state and actions with a WidgetKit extension if a desktop widget becomes worth building.
-
-Also, WidgetKit distribution follows the host app. Apple requires people to install the containing app and launch it at least once before the widget appears in the gallery.
-
-## Future updates
-
-Once GitHub release packaging is stable, the natural next step is `Sparkle` for in-app updates. That is the standard open-source macOS path for apps distributed outside the App Store.
+WidgetKit distribution follows the host app: users install and launch the containing app once before the widget appears in the gallery.
 
 ## Open source posture
 
-Yes, this should live in a repo and be open-sourceable.
-
-The right way to make it reusable is not to hard-code one person’s Python paths. The right way is:
+To keep this reusable:
 
 - keep the app generic
 - document the controller contract
 - treat external tools like Droid as optional integrations, not required features
 - ship one backend adapter as an example
 - let other people plug in their own runtime stack
-
-That is what this repo is structured to support.

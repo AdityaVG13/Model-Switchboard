@@ -1,9 +1,5 @@
 #!/usr/bin/env bash
-# =============================================================================
-# Stop all local llama.cpp model servers for the current user.
-# Use this before context probes, when switching models, or when a launcher
-# was started in the background and you want unified memory back immediately.
-# =============================================================================
+# Stop all managed local model server processes for the current user.
 
 set -euo pipefail
 

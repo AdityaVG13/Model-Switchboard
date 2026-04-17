@@ -1,4 +1,5 @@
 import AppIntents
+import OSLog
 import SwiftUI
 import WidgetKit
 import ModelSwitchboardCore
@@ -51,6 +52,8 @@ struct SwitchboardWidgetEntry: TimelineEntry {
 }
 
 struct SwitchboardTimelineProvider: AppIntentTimelineProvider {
+    private static let logger = Logger(subsystem: "io.modelswitchboard.widget", category: "timeline")
+
     func placeholder(in context: Context) -> SwitchboardWidgetEntry {
         SwitchboardWidgetEntry(
             date: .now,
@@ -73,7 +76,11 @@ struct SwitchboardTimelineProvider: AppIntentTimelineProvider {
         do {
             let client = try ControllerClient(baseURLString: WidgetControllerConfig.defaultBaseURL)
             let payload = try await client.fetchStatus()
-            try? ControllerStatusCache.write(payload)
+            do {
+                try ControllerStatusCache.write(payload)
+            } catch {
+                Self.logger.error("Cache write failed: \(String(describing: error), privacy: .public)")
+            }
             return SwitchboardWidgetEntry(date: .now, configuration: configuration, payload: payload, errorDescription: nil)
         } catch {
             if let cached = ControllerStatusCache.load() {

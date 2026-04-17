@@ -2,7 +2,7 @@
 
 ## The operating model
 
-`ModelSwitchboard` is not the model runtime. It is the control surface.
+`ModelSwitchboard` is the control surface, not the runtime.
 
 There are three layers:
 
@@ -21,7 +21,7 @@ There are three layers:
    - custom shell scripts
    - anything else that can be launched and health-checked
 
-The controller or runtime adapter does not need to live in a specific path. The app talks to a controller URL. The controller is responsible for discovering profiles, launching runtimes, and reporting health.
+The app only needs a controller URL. The controller discovers profiles, launches runtimes, and reports health.
 
 This repo includes one generic reference implementation under `Controller/`. You can use it directly or replace it with your own backend that exposes the same HTTP contract.
 
@@ -31,9 +31,7 @@ A practical adapter layout is:
 
 - `<adapter-root>/model-profiles`
 
-That folder is the single source of truth.
-
-If you want a new model to appear in the menu bar app, widget, dashboard, and controller CLI, add one manifest there.
+That folder is the source of truth. Add one manifest per model.
 
 ## Accepted profile formats
 
@@ -42,8 +40,7 @@ The example adapter accepts both:
 - `*.env`
 - `*.json`
 
-Use `.env` if you like shell-style configuration.
-Use `.json` if you want cleaner, tool-agnostic setup and easier future validation.
+Use `.env` for shell-style configuration. Use `.json` for structured, tool-agnostic config.
 
 ## Supported runtime styles
 
@@ -86,11 +83,9 @@ Typical JSON example:
 }
 ```
 
-This JSON schema style is the important part, not the file path. Keep a copy-pasteable example manifest in your adapter repo so operators have a clean starting point.
+Keep the schema stable. Path layout can vary by repo.
 
 ## How detection works
-
-The example adapter does not guess blindly.
 
 For each profile it does this:
 
@@ -112,14 +107,11 @@ Supported health-check modes:
   - only use this when you truly cannot probe readiness
   - process state may still be visible, but endpoint health is not verified
 
-This means the UI is not tightly coupled to a single launcher.
-The only hard requirement is that each profile tells the controller how to start it and how to decide whether it is actually ready.
+The UI is launcher-agnostic as long as each profile defines startup and readiness checks.
 
 ## What is standard on a Mac
 
-There is no single universal standard, but there is a practical one.
-
-For serious Apple Silicon local inference, the common stacks are:
+For Apple Silicon local inference, common stacks are:
 
 - `llama.cpp` with Metal
 - `MLX` / `mlx_lm.server`
@@ -135,8 +127,7 @@ Other tools usually fit into one of these buckets:
 - `vLLM`
   - strong on CUDA/Linux, not the default serious choice on Apple Silicon laptops
 
-So the stack we are using on this Mac is not weird.
-It is close to the serious-performance path for Apple hardware:
+A high-performance macOS stack is usually:
 
 - `llama.cpp` for GGUF
 - `MLX` for MLX-native models
@@ -144,7 +135,7 @@ It is close to the serious-performance path for Apple hardware:
 
 ## Why JSON is the right next step
 
-JSON is a better operator UX than raw env files when you want this to be reusable by other people.
+JSON is usually easier to operate than raw env files for shared setups.
 
 Reasons:
 
@@ -154,7 +145,7 @@ Reasons:
 - easier runtime-agnostic fields such as `START_COMMAND`, `BASE_URL`, and `HEALTHCHECK_MODE`
 - easier future migration to a full profile registry
 
-The current adapter keeps `.env` support so your existing profiles do not break.
+The current adapter keeps `.env` support for backward compatibility.
 
 ## Resource profile
 
@@ -167,11 +158,11 @@ The current adapter keeps `.env` support so your existing profiles do not break.
 - no bundled inference engine
 - no constant high-frequency polling
 
-Current choices made to keep it light:
+Design choices that keep the app light:
 
 - the menu refresh loop stops when the menu window disappears
 - the visible footer clock only updates while the menu is open
 - the menu bar hover text is computed from current status, not from a resident background worker
 - the widget refreshes on a simple timeline instead of running its own always-on helper
 
-The heavy memory and heat budget stays in the model runtimes, not in the operator UI.
+Most memory/thermal load should remain in runtimes, not the operator UI.

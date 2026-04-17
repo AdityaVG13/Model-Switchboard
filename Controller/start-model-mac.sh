@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Optimized local model launcher for Mac M5 Max.
+# Local model launcher for profile-backed runtimes on macOS.
 set -euo pipefail
 
 WORK_DIR="$(cd "$(dirname "$0")" && pwd)"

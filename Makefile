@@ -1,9 +1,12 @@
 VERSION := $(shell tr -d '[:space:]' < VERSION)
 
-.PHONY: test xcode app install uninstall dmg release
+.PHONY: test deps-check xcode app install uninstall dmg release
 
 test:
 	swift test
+
+deps-check:
+	./Scripts/check-cycles.py
 
 xcode:
 	./Scripts/build-xcode-app.sh
