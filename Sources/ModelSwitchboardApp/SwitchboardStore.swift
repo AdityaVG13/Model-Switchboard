@@ -151,18 +151,6 @@ final class SwitchboardStore {
         await run { try await $0.quickBenchmark(profiles: profiles) }
     }
 
-    func openDashboard() {
-        guard features.supportsDashboard else { return }
-        guard let url = URL(string: controllerBaseURL) else { return }
-        NSWorkspace.shared.open(url)
-    }
-
-    func openLatestBenchmark() {
-        guard features.supportsBenchmarks else { return }
-        guard let path = benchmark?.latest?.markdownPath else { return }
-        NSWorkspace.shared.open(URL(fileURLWithPath: path))
-    }
-
     func openProfilesDirectory() {
         guard let profilesDirectory else { return }
         NSWorkspace.shared.open(URL(fileURLWithPath: profilesDirectory))

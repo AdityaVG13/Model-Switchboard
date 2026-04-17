@@ -26,7 +26,7 @@ public struct AppFeatures: Equatable, Sendable {
     }
 
     public var supportsDashboard: Bool {
-        edition == .plus
+        false
     }
 
     public var supportsIntegrations: Bool {

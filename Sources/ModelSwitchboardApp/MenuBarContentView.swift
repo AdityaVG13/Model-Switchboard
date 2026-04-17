@@ -103,6 +103,7 @@ struct MenuBarContentView: View {
     private enum InspectorPanel: String, Identifiable {
         case settings
         case help
+        case benchmarks
 
         var id: String { rawValue }
 
@@ -110,6 +111,7 @@ struct MenuBarContentView: View {
             switch self {
             case .settings: "Settings"
             case .help: "Help"
+            case .benchmarks: "Benchmarks"
             }
         }
     }
@@ -359,6 +361,9 @@ struct MenuBarContentView: View {
     private var footer: some View {
         HStack(spacing: 8) {
             footerToggleButton("Settings", panel: .settings, icon: "slider.horizontal.3")
+            if features.supportsBenchmarks {
+                footerToggleButton("Benchmarks", panel: .benchmarks, icon: "tablecells")
+            }
             footerToggleButton("Help", panel: .help, icon: "questionmark.circle")
             Spacer()
             TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -430,9 +435,14 @@ struct MenuBarContentView: View {
                 reconnect: reconnect,
                 features: features,
                 benchmark: store.benchmark,
-                openDashboard: store.openDashboard,
-                openLatestBenchmark: store.openLatestBenchmark,
                 runQuickBenchmarkAll: {
+                    Task { await store.quickBenchmark() }
+                }
+            )
+        case .benchmarks:
+            BenchmarksPanelView(
+                benchmark: store.benchmark,
+                runBenchmark: {
                     Task { await store.quickBenchmark() }
                 }
             )

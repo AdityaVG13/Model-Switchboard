@@ -690,60 +690,17 @@ open_menu
 if [[ "$HAS_ADVANCED" == "1" ]]; then
   press_button Settings
   sleep 0.4
-  if ! press_button "Open Dashboard" 2>/dev/null; then
-    DASHBOARD_SHOT="$WORK_DIR/open-dashboard.png"
-    take_shot "$DASHBOARD_SHOT"
-    ocr_click "$DASHBOARD_SHOT" "Open Dashboard"
-  fi
-  wait_for_browser_url_prefix "$CONTROLLER_URL" || fail "dashboard button"
-  pass "dashboard button"
-fi
-
-activate_anchor_app
-launch_app
-open_menu
-BENCHMARK_MARKDOWN_PATH="$(status_value benchmark_markdown_path '-')"
-if [[ "$HAS_ADVANCED" == "1" ]]; then
-  press_button Settings
-  sleep 0.4
-  if ! press_button "Open Latest Benchmark" 2>/dev/null; then
-    if ! press_button "Latest Bench" 2>/dev/null; then
-      LATEST_BENCH_SHOT="$WORK_DIR/latest-bench.png"
-      take_shot "$LATEST_BENCH_SHOT"
-      if ! ocr_click "$LATEST_BENCH_SHOT" "Open Latest Benchmark"; then
-        ocr_click "$LATEST_BENCH_SHOT" "Latest Bench"
-      fi
-    fi
-  fi
-  for _ in {1..20}; do
-    if [[ -n "$ANCHOR_APP_NAME" && "$(frontmost_app)" != "$ANCHOR_APP_NAME" ]]; then
-      break
-    fi
-    if [[ -n "$BENCHMARK_MARKDOWN_PATH" ]] && lsof "$BENCHMARK_MARKDOWN_PATH" >/dev/null 2>&1; then
-      break
-    fi
-    sleep 0.5
-  done
-  if [[ -n "$ANCHOR_APP_NAME" && "$(frontmost_app)" == "$ANCHOR_APP_NAME" ]]; then
-    if [[ -z "$BENCHMARK_MARKDOWN_PATH" ]] || ! lsof "$BENCHMARK_MARKDOWN_PATH" >/dev/null 2>&1; then
-      fail "latest bench button"
-    fi
-  fi
-  pass "latest bench button"
-fi
-
-launch_app
-open_menu
-if [[ "$HAS_ADVANCED" == "1" ]]; then
-  press_button Settings
-  sleep 0.4
-  if ! press_button "Run Quick Benchmark" 2>/dev/null; then
-    if ! press_button "Quick Benchmark" 2>/dev/null; then
-      QUICK_BENCH_SHOT="$WORK_DIR/quick-bench-all.png"
-      take_shot "$QUICK_BENCH_SHOT"
-      if ! ocr_click "$QUICK_BENCH_SHOT" "Run Quick Benchmark"; then
-        if ! ocr_click "$QUICK_BENCH_SHOT" "Quick Benchmark"; then
-          ocr_click "$QUICK_BENCH_SHOT" "Run Quick Benchmark All"
+  if ! press_button "Run Benchmark" 2>/dev/null; then
+    if ! press_button "Run Quick Benchmark" 2>/dev/null; then
+      if ! press_button "Quick Benchmark" 2>/dev/null; then
+        QUICK_BENCH_SHOT="$WORK_DIR/quick-bench-all.png"
+        take_shot "$QUICK_BENCH_SHOT"
+        if ! ocr_click "$QUICK_BENCH_SHOT" "Run Benchmark"; then
+          if ! ocr_click "$QUICK_BENCH_SHOT" "Run Quick Benchmark"; then
+            if ! ocr_click "$QUICK_BENCH_SHOT" "Quick Benchmark"; then
+              ocr_click "$QUICK_BENCH_SHOT" "Run Quick Benchmark All"
+            fi
+          fi
         fi
       fi
     fi

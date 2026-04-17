@@ -116,11 +116,8 @@ struct HelpView: View {
             "Raycast users can add the repo's `Integrations/Raycast/Script Commands` folder directly in Raycast for keyboard-first actions.",
             "The bundled `Scripts/model-switchboardctl` CLI exposes controller actions like `status`, `activate`, `stop-all`, and `open-profiles` without touching the menu bar.",
         ]
-        if features.supportsDashboard {
-            bullets.append("The browser dashboard is intentionally compact now. Use it when you want a larger surface than the menu bar, not a second product.")
-        }
         if features.supportsBenchmarks {
-            bullets.append("Benchmark controls live in the Plus edition so the default menu stays focused on operating models, not analyzing them.")
+            bullets.append("Benchmark controls live in the Plus edition, and results are viewable directly in the in-app Benchmarks panel.")
         }
         return bullets
     }

@@ -11,8 +11,6 @@ struct SettingsView: View {
     let reconnect: () -> Void
     let features: AppFeatures
     let benchmark: BenchmarkStatus?
-    let openDashboard: () -> Void
-    let openLatestBenchmark: () -> Void
     let runQuickBenchmarkAll: () -> Void
     private let defaultControllerBaseURL = "http://127.0.0.1:8877"
 
@@ -66,7 +64,7 @@ struct SettingsView: View {
 
                 Divider()
 
-                if features.supportsBenchmarks || features.supportsDashboard {
+                if features.supportsBenchmarks {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Advanced Tools")
                             .font(.caption.bold())
@@ -77,7 +75,7 @@ struct SettingsView: View {
                             .fixedSize(horizontal: false, vertical: true)
 
                         if let latest = benchmark?.latest {
-                            Text("Latest benchmark: \(latest.suite ?? "unknown")")
+                            Text("Latest benchmark: \(benchmarkSuiteLabel(latest.suite))")
                                 .font(.footnote.weight(.semibold))
                                 .foregroundStyle(.secondary)
                         } else {
@@ -87,18 +85,9 @@ struct SettingsView: View {
                         }
 
                         VStack(alignment: .leading, spacing: 8) {
-                            if features.supportsDashboard {
-                                Button("Open Dashboard", action: openDashboard)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            if features.supportsBenchmarks {
-                                Button("Open Latest Benchmark", action: openLatestBenchmark)
-                                    .disabled(benchmark?.latest?.markdownPath == nil)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                Button("Run Quick Benchmark", action: runQuickBenchmarkAll)
-                                    .disabled(benchmark?.running == true)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
+                            Button("Run Benchmark", action: runQuickBenchmarkAll)
+                                .disabled(benchmark?.running == true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
 
@@ -178,5 +167,19 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(.quaternary.opacity(0.22), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
+    }
+
+    private func benchmarkSuiteLabel(_ suite: String?) -> String {
+        guard let suite, !suite.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return "unknown"
+        }
+        let normalized = suite.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalized == "quick" {
+            return "default"
+        }
+        return normalized
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+            .localizedCapitalized
     }
 }

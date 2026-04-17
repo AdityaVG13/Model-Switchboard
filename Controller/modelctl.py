@@ -347,7 +347,7 @@ HTML_PAGE = r"""<!doctype html>
 
     <section class="panel toolbar">
       <button class="primary" id="refresh-button">Refresh</button>
-      <button id="bench-all-button">Quick Bench All</button>
+      <button id="bench-all-button">Run Benchmark</button>
       <button class="warn" id="stop-all-button">Stop All</button>
     </section>
 
@@ -424,7 +424,9 @@ HTML_PAGE = r"""<!doctype html>
 
     function suiteLabel(value) {
       if (!value) return 'Idle';
-      return String(value)
+      const normalized = String(value).trim().toLowerCase();
+      if (normalized === 'quick') return 'Default';
+      return normalized
         .replaceAll('_', ' ')
         .replaceAll('-', ' ')
         .replace(/\b\w/g, (char) => char.toUpperCase());
