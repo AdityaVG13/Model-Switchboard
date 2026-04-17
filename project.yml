@@ -4,7 +4,7 @@ options:
   bundleIdPrefix: io.modelswitchboard
   deploymentTarget:
     macOS: "14.0"
-  projectFormat: xcode16_3
+  projectFormat: xcode16_2
   createIntermediateGroups: true
 packages:
   MenuBarExtraAccess:
