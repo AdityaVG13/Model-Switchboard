@@ -2,35 +2,56 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-APP_NAME="Model Switchboard.app"
-LEGACY_APP_NAME="ModelSwitchboard.app"
+APP_VARIANT="${APP_VARIANT:-base}"
+case "$APP_VARIANT" in
+  base)
+    APP_NAME="Model Switchboard.app"
+    PRODUCT_NAME="ModelSwitchboard.app"
+    LEGACY_APP_NAME="ModelSwitchboard.app"
+    ;;
+  plus)
+    APP_NAME="Model Switchboard Plus.app"
+    PRODUCT_NAME="ModelSwitchboardPlus.app"
+    LEGACY_APP_NAME=""
+    ;;
+  *)
+    echo "Unsupported APP_VARIANT: $APP_VARIANT" >&2
+    exit 1
+    ;;
+esac
 INSTALL_DIR="${INSTALL_DIR:-$HOME/Applications}"
 SYSTEM_APPLICATIONS_DIR="/Applications"
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 CONFIGURATION="${CONFIGURATION:-Release}"
-DERIVED_APP="$ROOT_DIR/.xcodebuild/Build/Products/$CONFIGURATION/ModelSwitchboard.app"
+DERIVED_APP="$ROOT_DIR/.xcodebuild/Build/Products/$CONFIGURATION/$PRODUCT_NAME"
 DIST_APP="$ROOT_DIR/dist/$APP_NAME"
-LEGACY_DIST_APP="$ROOT_DIR/dist/$LEGACY_APP_NAME"
+LEGACY_DIST_APP="${LEGACY_APP_NAME:+$ROOT_DIR/dist/$LEGACY_APP_NAME}"
 INSTALL_APP="$INSTALL_DIR/$APP_NAME"
-LEGACY_INSTALL_APP="$INSTALL_DIR/$LEGACY_APP_NAME"
+LEGACY_INSTALL_APP="${LEGACY_APP_NAME:+$INSTALL_DIR/$LEGACY_APP_NAME}"
 SYSTEM_INSTALL_APP="$SYSTEM_APPLICATIONS_DIR/$APP_NAME"
-LEGACY_SYSTEM_INSTALL_APP="$SYSTEM_APPLICATIONS_DIR/$LEGACY_APP_NAME"
+LEGACY_SYSTEM_INSTALL_APP="${LEGACY_APP_NAME:+$SYSTEM_APPLICATIONS_DIR/$LEGACY_APP_NAME}"
 
 cd "$ROOT_DIR"
 
 mkdir -p "$INSTALL_DIR"
 
-pkill -f 'ModelSwitchboard(\.app/Contents/MacOS/ModelSwitchboard|App)' >/dev/null 2>&1 || true
+pkill -f 'ModelSwitchboard(Plus)?(\.app/Contents/MacOS/ModelSwitchboard(Plus)?|App)' >/dev/null 2>&1 || true
 sleep 1
 
-CONFIGURATION="$CONFIGURATION" "$ROOT_DIR/Scripts/build-xcode-app.sh" >/dev/null
+APP_VARIANT="$APP_VARIANT" CONFIGURATION="$CONFIGURATION" "$ROOT_DIR/Scripts/build-xcode-app.sh" >/dev/null
 
-rm -rf "$DIST_APP" "$LEGACY_DIST_APP" "$INSTALL_APP" "$LEGACY_INSTALL_APP"
+rm -rf "$DIST_APP" "$INSTALL_APP"
+if [ -n "$LEGACY_DIST_APP" ]; then
+  rm -rf "$LEGACY_DIST_APP" "$LEGACY_INSTALL_APP"
+fi
 cp -R "$DERIVED_APP" "$DIST_APP"
 cp -R "$DERIVED_APP" "$INSTALL_APP"
 
 if [ -w "$SYSTEM_APPLICATIONS_DIR" ]; then
-  rm -rf "$SYSTEM_INSTALL_APP" "$LEGACY_SYSTEM_INSTALL_APP"
+  rm -rf "$SYSTEM_INSTALL_APP"
+  if [ -n "$LEGACY_SYSTEM_INSTALL_APP" ]; then
+    rm -rf "$LEGACY_SYSTEM_INSTALL_APP"
+  fi
 fi
 
 xattr -dr com.apple.quarantine "$DIST_APP" >/dev/null 2>&1 || true

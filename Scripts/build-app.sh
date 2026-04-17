@@ -3,13 +3,27 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 CONFIGURATION="${CONFIGURATION:-Release}"
+APP_VARIANT="${APP_VARIANT:-base}"
 DIST_DIR="$ROOT_DIR/dist"
-APP_NAME="Model Switchboard.app"
-SOURCE_APP="$ROOT_DIR/.xcodebuild/Build/Products/$CONFIGURATION/ModelSwitchboard.app"
+case "$APP_VARIANT" in
+  base)
+    APP_NAME="Model Switchboard.app"
+    PRODUCT_NAME="ModelSwitchboard.app"
+    ;;
+  plus)
+    APP_NAME="Model Switchboard Plus.app"
+    PRODUCT_NAME="ModelSwitchboardPlus.app"
+    ;;
+  *)
+    echo "Unsupported APP_VARIANT: $APP_VARIANT" >&2
+    exit 1
+    ;;
+esac
+SOURCE_APP="$ROOT_DIR/.xcodebuild/Build/Products/$CONFIGURATION/$PRODUCT_NAME"
 TARGET_APP="$DIST_DIR/$APP_NAME"
 
 cd "$ROOT_DIR"
-CONFIGURATION="$CONFIGURATION" "$ROOT_DIR/Scripts/build-xcode-app.sh" >/dev/null
+APP_VARIANT="$APP_VARIANT" CONFIGURATION="$CONFIGURATION" "$ROOT_DIR/Scripts/build-xcode-app.sh" >/dev/null
 
 rm -rf "$TARGET_APP"
 mkdir -p "$DIST_DIR"

@@ -7,10 +7,11 @@ SYSTEM_APPLICATIONS_DIR="/Applications"
 
 APP_NAMES=(
   "Model Switchboard.app"
+  "Model Switchboard Plus.app"
   "ModelSwitchboard.app"
 )
 
-pkill -f 'ModelSwitchboard(\.app/Contents/MacOS/ModelSwitchboard|App)' >/dev/null 2>&1 || true
+pkill -f 'ModelSwitchboard(Plus)?(\.app/Contents/MacOS/ModelSwitchboard(Plus)?|App)' >/dev/null 2>&1 || true
 sleep 1
 
 for app_name in "${APP_NAMES[@]}"; do
@@ -22,8 +23,12 @@ for app_name in "${APP_NAMES[@]}"; do
 done
 
 rm -f "$HOME/Library/Preferences/io.modelswitchboard.app.plist"
+rm -f "$HOME/Library/Preferences/io.modelswitchboard.plus.plist"
 rm -f "$HOME/Library/Preferences/io.modelswitchboard.app.widget.plist"
+rm -f "$HOME/Library/Preferences/io.modelswitchboard.plus.widget.plist"
 rm -rf "$HOME/Library/Containers/io.modelswitchboard.app.widget"
+rm -rf "$HOME/Library/Containers/io.modelswitchboard.plus.widget"
 rm -rf "$HOME/Library/Application Scripts/io.modelswitchboard.app.widget"
+rm -rf "$HOME/Library/Application Scripts/io.modelswitchboard.plus.widget"
 
 printf 'removed=%s\n' "$INSTALL_DIR/Model Switchboard.app"

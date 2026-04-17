@@ -4,6 +4,32 @@ A native macOS menu bar app for switching between local model runtimes.
 
 `Model Switchboard` is intentionally model-agnostic. It does not care whether the backend launches `llama.cpp`, MLX, Ollama, vLLM, or something else. It talks to a controller API that exposes model profiles and lifecycle actions. The app is generic. The controller or runtime adapter can live in any folder or repo, as long as it serves the expected HTTP contract.
 
+## Editions
+
+This repo ships two editions from one codebase:
+
+- `Model Switchboard` -- the lightweight base edition
+- `Model Switchboard Plus` -- the expanded edition with advanced operations
+
+Profiles stay in the base edition. They are the source of truth for model launches, so they are not treated as an optional power-user feature.
+
+Feature split:
+
+- Base
+  - profile list
+  - `Activate`, `Start`, `Stop`, `Restart`, `Open`
+  - `Refresh`, `Stop All`
+  - attached `Settings` and `Help`
+  - launch-at-login toggle
+  - live `model-profiles` and controller-root discovery
+  - widget
+- Plus
+  - everything in Base
+  - `Open Dashboard`
+  - benchmark actions and latest benchmark access
+  - optional controller integrations such as `Sync Droid`
+  - plus widget branding
+
 ## Why this exists
 
 Most local-model UIs focus on chat, not operations. The missing piece is a fast top-of-screen control surface that can:
@@ -11,8 +37,9 @@ Most local-model UIs focus on chat, not operations. The missing piece is a fast 
 - show which profiles are actually ready
 - switch the machine to a target model with one click
 - start and stop heavy runtimes cleanly
-- trigger benchmarks without digging through terminal history
-- open the backing endpoint or dashboard when you need details
+- open the backing endpoint when you need details
+
+The plus edition extends that with dashboard and benchmark operations without forcing the base install to carry extra surface area.
 
 On macOS, the right primitive for that is `MenuBarExtra`, not a WidgetKit-first build.
 
@@ -21,19 +48,10 @@ On macOS, the right primitive for that is `MenuBarExtra`, not a WidgetKit-first 
 Global actions:
 
 - `Refresh`
-- `Dashboard`
-- `Latest Bench`
-- `Quick Bench All`
 - `Stop All`
 - `Settings`
 - `Help`
 - `Quit`
-
-Optional integration actions:
-
-- zero by default
-- dynamically shown only when the controller reports an available integration
-- current built-in example: `Sync Droid`
 
 Per-profile actions:
 
@@ -41,7 +59,6 @@ Per-profile actions:
 - `Start`
 - `Stop`
 - `Restart`
-- `Bench`
 - `Open`
 
 `Activate` is the key workflow for laptops. It gives you one-click model switching without leaving old heavyweight runtimes resident.
@@ -56,6 +73,13 @@ Per-profile actions:
 
 That matters because model locations are defined in controller profile manifests, not in the app itself.
 
+In `Model Switchboard Plus`, `Settings` also includes:
+
+- `Open Dashboard`
+- `Latest Bench`
+- `Run Quick Benchmark All`
+- any optional integrations reported by the controller
+
 ## Raycast
 
 Raycast users should have two clean paths:
@@ -66,7 +90,7 @@ Raycast users should have two clean paths:
 This repo now supports both:
 
 - `Scripts/install.sh` explicitly registers the app with Launch Services and forces a Spotlight import so Raycast can discover it faster
-- `Scripts/model-switchboardctl` provides a tiny controller CLI
+- `Scripts/model-switchboardctl` provides a tiny controller CLI and supports `MODEL_SWITCHBOARD_VARIANT=base|plus`
 - `Integrations/Raycast/Script Commands/` contains lightweight Script Commands for status, opening the profiles folder, stopping all models, and running quick benchmarks
 
 If Finder still shows `.app` on your machine, that is a global Finder preference issue, not an app bundle naming issue. When `AppleShowAllExtensions` is enabled, Finder will keep showing bundle extensions.
@@ -119,17 +143,30 @@ The current release version lives in:
 
 ## Install
 
-For local development or direct install:
+Base edition:
 
 ```bash
 ./Scripts/install.sh
 ```
 
-That installs a fresh copy at:
+or explicitly:
+
+```bash
+APP_VARIANT=base ./Scripts/install.sh
+```
+
+Plus edition:
+
+```bash
+APP_VARIANT=plus ./Scripts/install.sh
+```
+
+That installs fresh copies at:
 
 - `~/Applications/Model Switchboard.app`
+- `~/Applications/Model Switchboard Plus.app`
 
-and removes the old legacy `ModelSwitchboard.app` bundle name so you do not keep launching a stale app by accident.
+The installer also removes the old legacy `ModelSwitchboard.app` bundle name so you do not keep launching a stale app by accident.
 
 Compatibility alias:
 
@@ -157,9 +194,19 @@ swift test
 ./Scripts/build-app.sh
 ```
 
-That builds a release app bundle at:
+That builds the base release app bundle at:
 
 - `dist/Model Switchboard.app`
+
+Plus edition:
+
+```bash
+APP_VARIANT=plus ./Scripts/build-app.sh
+```
+
+That builds:
+
+- `dist/Model Switchboard Plus.app`
 
 The Xcode build script always regenerates the `.xcodeproj` from `project.yml` first. That avoids the stale-project problem where new Swift files compile in SwiftPM but never make it into the packaged app.
 
@@ -169,14 +216,30 @@ The Xcode build script always regenerates the `.xcodeproj` from `project.yml` fi
 ./Scripts/build-dmg.sh
 ```
 
-That produces:
+That produces the base DMG:
 
 - `dist/Model-Switchboard-1.0.0.dmg`
+
+Plus edition:
+
+```bash
+APP_VARIANT=plus ./Scripts/build-dmg.sh
+```
+
+That produces:
+
+- `dist/Model-Switchboard-Plus-1.0.0.dmg`
 
 For local verification:
 
 ```bash
 ./Scripts/verify-distribution.sh
+```
+
+Plus verification:
+
+```bash
+APP_VARIANT=plus ./Scripts/verify-distribution.sh
 ```
 
 That always verifies the app bundle structure and code signature. Gatekeeper checks are skipped automatically for local ad hoc builds and are enforced once you sign with a real Developer ID identity.
@@ -197,10 +260,12 @@ Why:
 
 The current repo now builds the DMG locally. For a public release, the next step is signing and notarization.
 
-This repo now includes both:
+This repo now includes:
 
 - `Scripts/sign-and-notarize-dmg.sh`
 - `.github/workflows/release.yml`
+
+The release workflow signs, notarizes, verifies, and uploads both editions.
 
 The GitHub release workflow expects these secrets:
 

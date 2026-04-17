@@ -1,6 +1,9 @@
 import SwiftUI
+import ModelSwitchboardCore
 
 struct HelpView: View {
+    private let features = AppFeatures.current
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -9,7 +12,7 @@ struct HelpView: View {
                 section(
                     title: "Quick Start",
                     bullets: [
-                        "Install the local controller service first. ModelSwitchboard assumes a controller is serving status and actions at `http://127.0.0.1:8877` by default.",
+                        "Install the local controller service first. \(features.appDisplayName) assumes a controller is serving status and actions at `http://127.0.0.1:8877` by default.",
                         "Put model launch profiles in the controller's `model-profiles` directory. Settings now shows the live path reported by the controller and can open that folder in Finder.",
                         "Use `Start` to spawn a model, `Activate` to switch your primary endpoint, and `Stop All` before closing the lid or leaving the machine on battery."
                     ]
@@ -46,11 +49,7 @@ struct HelpView: View {
 
                 section(
                     title: "Power User Extras",
-                    bullets: [
-                        "Raycast users can add the repo's `Integrations/Raycast/Script Commands` folder directly in Raycast for keyboard-first actions.",
-                        "The bundled `Scripts/model-switchboardctl` CLI exposes controller actions like `status`, `activate`, `stop-all`, and `open-profiles` without touching the menu bar.",
-                        "The browser dashboard is intentionally compact now. Use it when you want a larger surface than the menu bar, not a second product."
-                    ]
+                    bullets: powerUserBullets
                 )
             }
         }
@@ -106,5 +105,19 @@ struct HelpView: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    private var powerUserBullets: [String] {
+        var bullets = [
+            "Raycast users can add the repo's `Integrations/Raycast/Script Commands` folder directly in Raycast for keyboard-first actions.",
+            "The bundled `Scripts/model-switchboardctl` CLI exposes controller actions like `status`, `activate`, `stop-all`, and `open-profiles` without touching the menu bar.",
+        ]
+        if features.supportsDashboard {
+            bullets.append("The browser dashboard is intentionally compact now. Use it when you want a larger surface than the menu bar, not a second product.")
+        }
+        if features.supportsBenchmarks {
+            bullets.append("Benchmark controls live in the Plus edition so the default menu stays focused on operating models, not analyzing them.")
+        }
+        return bullets
     }
 }

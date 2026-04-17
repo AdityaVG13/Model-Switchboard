@@ -11,13 +11,11 @@ private enum WidgetControllerConfig {
 enum SwitchboardWidgetDisplayMode: String, AppEnum {
     case summary
     case readyFirst
-    case benchmark
 
     static let typeDisplayRepresentation = TypeDisplayRepresentation(name: "Display Mode")
     static let caseDisplayRepresentations: [Self: DisplayRepresentation] = [
         .summary: .init(title: "Summary"),
-        .readyFirst: .init(title: "Ready Models"),
-        .benchmark: .init(title: "Benchmarks")
+        .readyFirst: .init(title: "Ready Models")
     ]
 }
 
@@ -131,14 +129,22 @@ struct SwitchboardTimelineProvider: AppIntentTimelineProvider {
 }
 
 struct ModelSwitchboardStatusWidget: Widget {
-    let kind = "ModelSwitchboardStatusWidget"
+    private let features = AppFeatures.current
+    var kind: String {
+        switch features.edition {
+        case .base:
+            return "ModelSwitchboardStatusWidget"
+        case .plus:
+            return "ModelSwitchboardPlusStatusWidget"
+        }
+    }
 
     var body: some WidgetConfiguration {
         AppIntentConfiguration(kind: kind, intent: SwitchboardWidgetConfigurationIntent.self, provider: SwitchboardTimelineProvider()) { entry in
             SwitchboardWidgetView(entry: entry)
         }
-        .configurationDisplayName("Model Switchboard")
-        .description("Shows local model readiness, benchmarks, and quick runtime context.")
+        .configurationDisplayName(features.appDisplayName)
+        .description("Shows local model readiness and quick runtime context.")
         .supportedFamilies([.systemSmall, .systemMedium])
     }
 }
@@ -146,6 +152,7 @@ struct ModelSwitchboardStatusWidget: Widget {
 struct SwitchboardWidgetView: View {
     @Environment(\.widgetFamily) private var family
     let entry: SwitchboardWidgetEntry
+    private let features = AppFeatures.current
 
     private var statuses: [ModelProfileStatus] {
         (entry.payload?.statuses ?? []).sorted { lhs, rhs in
@@ -157,12 +164,6 @@ struct SwitchboardWidgetView: View {
 
     private var summary: DashboardSummary {
         DashboardSummary(payload: entry.payload ?? ControllerStatusPayload(statuses: [], benchmark: nil, integrations: []))
-    }
-
-    private var topBenchRow: BenchmarkLatestRow? {
-        entry.payload?.benchmark?.latest?.rows.max { lhs, rhs in
-            (lhs.decodeTokensPerSec ?? 0) < (rhs.decodeTokensPerSec ?? 0)
-        }
     }
 
     private var displayMode: SwitchboardWidgetDisplayMode {
@@ -191,14 +192,14 @@ struct SwitchboardWidgetView: View {
         .containerBackground(for: .widget) {
             Color.clear
         }
-        .widgetURL(URL(string: "modelswitchboard://open"))
+        .widgetURL(URL(string: features.edition == .plus ? "modelswitchboardplus://open" : "modelswitchboard://open"))
     }
 
     @ViewBuilder
     private var header: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 3) {
-                Text("Model Switchboard")
+                Text(features.appDisplayName)
                     .font(.system(size: family == .systemSmall ? 13 : 15, weight: .bold, design: .rounded))
                 Text(modeTitle)
                     .font(.caption2)
@@ -218,8 +219,6 @@ struct SwitchboardWidgetView: View {
             summaryContent
         case .readyFirst:
             readyContent
-        case .benchmark:
-            benchmarkContent
         }
     }
 
@@ -262,30 +261,6 @@ struct SwitchboardWidgetView: View {
         }
     }
 
-    private var benchmarkContent: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if let latest = entry.payload?.benchmark?.latest {
-                Text(latest.suite?.uppercased() ?? "LATEST")
-                    .font(.caption2.bold())
-                    .foregroundStyle(.mint)
-                if let row = topBenchRow {
-                    Text(row.profile ?? "Unknown profile")
-                        .font(.caption.bold())
-                        .lineLimit(1)
-                    Text(speedLine(for: row))
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.75))
-                } else {
-                    Text("No benchmark rows yet")
-                        .font(.caption)
-                }
-            } else {
-                Text("No benchmark report yet")
-                    .font(.caption)
-            }
-        }
-    }
-
     private var footer: some View {
         HStack {
             Text(entry.date, style: .time)
@@ -324,20 +299,12 @@ struct SwitchboardWidgetView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func speedLine(for row: BenchmarkLatestRow) -> String {
-        let decode = row.decodeTokensPerSec.map { String(format: "%.0f tok/s", $0) } ?? "n/a"
-        let ttft = row.ttftMS.map { String(format: "%.0f ms TTFT", $0) } ?? "n/a"
-        return "\(decode) • \(ttft)"
-    }
-
     private var modeTitle: String {
         switch displayMode {
         case .summary:
             return "Summary"
         case .readyFirst:
             return "Ready models"
-        case .benchmark:
-            return "Benchmarks"
         }
     }
 }

@@ -25,25 +25,16 @@ targets:
       - Sources/ModelSwitchboardApp
       - path: Resources/App/ModelSwitchboard.icns
         buildPhase: resources
-    info:
-      path: Resources/App/Info.plist
-      properties:
-        CFBundleDisplayName: Model Switchboard
-        CFBundleIconFile: ModelSwitchboard.icns
-        CFBundleName: Model Switchboard
-        CFBundleShortVersionString: $(MARKETING_VERSION)
-        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
-        LSUIElement: true
-        NSHighResolutionCapable: true
-        CFBundleURLTypes:
-          - CFBundleURLName: io.modelswitchboard.app
-            CFBundleURLSchemes:
-              - modelswitchboard
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.modelswitchboard.app
         PRODUCT_NAME: ModelSwitchboard
         GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Resources/App/Info.plist
+        MSW_DISPLAY_NAME: Model Switchboard
+        MSW_EDITION: base
+        MSW_URL_NAME: io.modelswitchboard.app
+        MSW_URL_SCHEME: modelswitchboard
     dependencies:
       - package: ModelSwitchboardPackage
         product: ModelSwitchboardCore
@@ -58,26 +49,69 @@ targets:
       testTargets:
         - ModelSwitchboardTests
 
+  ModelSwitchboardPlus:
+    type: application
+    platform: macOS
+    sources:
+      - Sources/ModelSwitchboardApp
+      - path: Resources/App/ModelSwitchboard.icns
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.modelswitchboard.plus
+        PRODUCT_NAME: ModelSwitchboardPlus
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Resources/App/Info.plist
+        MSW_DISPLAY_NAME: Model Switchboard Plus
+        MSW_EDITION: plus
+        MSW_URL_NAME: io.modelswitchboard.plus
+        MSW_URL_SCHEME: modelswitchboardplus
+    dependencies:
+      - package: ModelSwitchboardPackage
+        product: ModelSwitchboardCore
+      - package: MenuBarExtraAccess
+        product: MenuBarExtraAccess
+      - target: ModelSwitchboardPlusWidget
+        embed: true
+        codeSign: true
+        copy:
+          destination: plugins
+    scheme:
+      testTargets:
+        - ModelSwitchboardTests
+
   ModelSwitchboardWidget:
     type: app-extension
     platform: macOS
     sources:
       - Sources/ModelSwitchboardWidget
-    info:
-      path: Resources/Widget/Info.plist
-      properties:
-        CFBundleDisplayName: Model Switchboard Widget
-        CFBundleName: Model Switchboard Widget
-        CFBundleShortVersionString: $(MARKETING_VERSION)
-        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
-        NSExtension:
-          NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.modelswitchboard.app.widget
         PRODUCT_NAME: ModelSwitchboardWidget
         GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Resources/Widget/Info.plist
         APPLICATION_EXTENSION_API_ONLY: YES
+        MSW_WIDGET_DISPLAY_NAME: Model Switchboard Widget
+        MSW_EDITION: base
+    dependencies:
+      - package: ModelSwitchboardPackage
+        product: ModelSwitchboardCore
+
+  ModelSwitchboardPlusWidget:
+    type: app-extension
+    platform: macOS
+    sources:
+      - Sources/ModelSwitchboardWidget
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.modelswitchboard.plus.widget
+        PRODUCT_NAME: ModelSwitchboardPlusWidget
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Resources/Widget/Info.plist
+        APPLICATION_EXTENSION_API_ONLY: YES
+        MSW_WIDGET_DISPLAY_NAME: Model Switchboard Plus Widget
+        MSW_EDITION: plus
     dependencies:
       - package: ModelSwitchboardPackage
         product: ModelSwitchboardCore

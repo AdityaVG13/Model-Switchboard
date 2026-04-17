@@ -3,7 +3,24 @@ set -euo pipefail
 
 CONTROLLER_URL="${MODEL_SWITCHBOARD_URL:-http://127.0.0.1:8877}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
-APP_PATH="${MODEL_SWITCHBOARD_APP_PATH:-$HOME/Applications/Model Switchboard.app}"
+APP_VARIANT="${MODEL_SWITCHBOARD_VARIANT:-base}"
+
+case "$APP_VARIANT" in
+  base)
+    DEFAULT_APP_NAME="Model Switchboard"
+    DEFAULT_APP_PATH="$HOME/Applications/Model Switchboard.app"
+    ;;
+  plus)
+    DEFAULT_APP_NAME="Model Switchboard Plus"
+    DEFAULT_APP_PATH="$HOME/Applications/Model Switchboard Plus.app"
+    ;;
+  *)
+    printf 'error: unsupported MODEL_SWITCHBOARD_VARIANT %s\n' "$APP_VARIANT" >&2
+    exit 1
+    ;;
+esac
+
+APP_PATH="${MODEL_SWITCHBOARD_APP_PATH:-$DEFAULT_APP_PATH}"
 
 usage() {
   cat <<USAGE
@@ -101,7 +118,7 @@ PY
     if [ -d "$APP_PATH" ]; then
       open -a "$APP_PATH"
     else
-      open -a "Model Switchboard"
+      open -a "$DEFAULT_APP_NAME"
     fi
     ;;
   open-dashboard)

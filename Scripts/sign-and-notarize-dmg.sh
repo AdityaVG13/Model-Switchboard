@@ -3,9 +3,23 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION="$(tr -d '[:space:]' < "$ROOT_DIR/VERSION")"
-APP_NAME="Model Switchboard.app"
+APP_VARIANT="${APP_VARIANT:-base}"
+case "$APP_VARIANT" in
+  base)
+    APP_NAME="Model Switchboard.app"
+    DMG_NAME="Model-Switchboard-$VERSION.dmg"
+    ;;
+  plus)
+    APP_NAME="Model Switchboard Plus.app"
+    DMG_NAME="Model-Switchboard-Plus-$VERSION.dmg"
+    ;;
+  *)
+    echo "Unsupported APP_VARIANT: $APP_VARIANT" >&2
+    exit 1
+    ;;
+esac
 APP_PATH="$ROOT_DIR/dist/$APP_NAME"
-DMG_PATH="$ROOT_DIR/dist/Model-Switchboard-$VERSION.dmg"
+DMG_PATH="$ROOT_DIR/dist/$DMG_NAME"
 IDENTITY="${APPLE_DEVELOPER_IDENTITY:?set APPLE_DEVELOPER_IDENTITY}"
 NOTARY_PROFILE="${APPLE_NOTARY_KEYCHAIN_PROFILE:-}"
 API_KEY_PATH="${APPLE_NOTARY_API_KEY_PATH:-}"
@@ -14,7 +28,7 @@ API_ISSUER_ID="${APPLE_NOTARY_API_ISSUER_ID:-}"
 
 cd "$ROOT_DIR"
 
-"$ROOT_DIR/Scripts/build-app.sh" >/dev/null
+APP_VARIANT="$APP_VARIANT" "$ROOT_DIR/Scripts/build-app.sh" >/dev/null
 
 codesign \
   --force \
@@ -24,7 +38,7 @@ codesign \
   --sign "$IDENTITY" \
   "$APP_PATH"
 
-SKIP_BUILD=1 "$ROOT_DIR/Scripts/build-dmg.sh" >/dev/null
+APP_VARIANT="$APP_VARIANT" SKIP_BUILD=1 "$ROOT_DIR/Scripts/build-dmg.sh" >/dev/null
 
 if [ -n "$NOTARY_PROFILE" ]; then
   xcrun notarytool submit "$DMG_PATH" --keychain-profile "$NOTARY_PROFILE" --wait

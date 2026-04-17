@@ -1,4 +1,5 @@
 import SwiftUI
+import ModelSwitchboardCore
 
 struct SettingsView: View {
     @Binding var controllerBaseURL: String
@@ -8,6 +9,11 @@ struct SettingsView: View {
     let openProfilesDirectory: () -> Void
     let openControllerRoot: () -> Void
     let reconnect: () -> Void
+    let features: AppFeatures
+    let benchmark: BenchmarkStatus?
+    let openDashboard: () -> Void
+    let openLatestBenchmark: () -> Void
+    let runQuickBenchmarkAll: () -> Void
     private let defaultControllerBaseURL = "http://127.0.0.1:8877"
 
     var body: some View {
@@ -57,6 +63,45 @@ struct SettingsView: View {
             }
 
             Divider()
+
+            if features.supportsBenchmarks || features.supportsDashboard {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Advanced Tools")
+                        .font(.caption.bold())
+
+                    Text("Diagnostics stay available, but they live here so the primary switchboard stays operational instead of turning into a control-center dump.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if let latest = benchmark?.latest {
+                        Text("Latest benchmark: \(latest.suite ?? "unknown")")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("Latest benchmark: none recorded yet")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    HStack {
+                        if features.supportsDashboard {
+                            Button("Open Dashboard", action: openDashboard)
+                        }
+                        if features.supportsBenchmarks {
+                            Button("Latest Bench", action: openLatestBenchmark)
+                                .disabled(benchmark?.latest?.markdownPath == nil)
+                        }
+                    }
+
+                    if features.supportsBenchmarks {
+                        Button("Run Quick Benchmark All", action: runQuickBenchmarkAll)
+                            .disabled(benchmark?.running == true)
+                    }
+                }
+
+                Divider()
+            }
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("Launch At Login")

@@ -18,6 +18,7 @@ struct MenuBarContentView: View {
     }
 
     @Bindable var store: SwitchboardStore
+    let features: AppFeatures
     @ObservedObject var launchAtLoginManager: LaunchAtLoginManager
     @Binding var controllerBaseURL: String
     let reconnect: () -> Void
@@ -27,11 +28,7 @@ struct MenuBarContentView: View {
     private let inspectorPanelWidth: CGFloat = 290
     private let panelHeight: CGFloat = 620
     private let panelGap: CGFloat = 10
-    private let inspectorAnimation = Animation.interactiveSpring(
-        response: 0.32,
-        dampingFraction: 0.9,
-        blendDuration: 0.12
-    )
+    private let inspectorAnimation = Animation.easeInOut(duration: 0.32)
 
     @State private var inspectorPanel: InspectorPanel?
     @State private var hostWindow: NSWindow?
@@ -51,8 +48,8 @@ struct MenuBarContentView: View {
                 inspectorCard(inspectorPanel)
                     .transition(
                         .asymmetric(
-                            insertion: .move(edge: .leading).combined(with: .opacity),
-                            removal: .move(edge: .leading).combined(with: .opacity)
+                            insertion: .opacity,
+                            removal: .opacity
                         )
                     )
             }
@@ -134,11 +131,11 @@ struct MenuBarContentView: View {
             )
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("Model Switchboard")
+                Text(features.appDisplayName)
                     .font(.title2.bold())
                 HStack(spacing: 10) {
                     Label("\(store.summary.readyProfiles)/\(store.summary.totalProfiles) ready", systemImage: "bolt.fill")
-                    Label(store.benchmark?.running == true ? "benchmarking" : (store.benchmark?.latest?.suite ?? "idle"), systemImage: "speedometer")
+                    Label("local control", systemImage: "switch.2")
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -159,20 +156,11 @@ struct MenuBarContentView: View {
                 actionButton("Refresh", icon: "arrow.clockwise", isBusy: store.isRefreshing) {
                     Task { await store.refresh() }
                 }
-                actionButton("Dashboard", icon: "safari") { store.openDashboard() }
-                actionButton("Latest Bench", icon: "doc.text.magnifyingglass", isDisabled: store.benchmark?.latest?.markdownPath == nil) {
-                    store.openLatestBenchmark()
-                }
-            }
-            HStack {
-                actionButton("Quick Bench All", icon: "speedometer", isBusy: store.pendingGlobalActions.contains("bench-all")) {
-                    Task { await store.quickBenchmark() }
-                }
                 actionButton("Stop All", icon: "stop.fill", role: .destructive, isBusy: store.pendingGlobalActions.contains("stop-all")) {
                     Task { await store.stopAll() }
                 }
             }
-            if !store.integrations.isEmpty {
+            if features.supportsIntegrations, !store.integrations.isEmpty {
                 integrationActions
             }
         }
@@ -235,9 +223,6 @@ struct MenuBarContentView: View {
             HStack {
                 actionButton("Restart", icon: "arrow.clockwise", isBusy: store.pendingLabel(for: profile.profile) == "RESTARTING", isDisabled: store.isBusy(profile: profile.profile)) {
                     Task { await store.restart(profile.profile) }
-                }
-                actionButton("Bench", icon: "speedometer", isDisabled: store.isBusy(profile: profile.profile)) {
-                    Task { await store.quickBenchmark([profile.profile]) }
                 }
                 actionButton("Open", icon: "link") { store.openEndpoint(profile) }
             }
@@ -332,7 +317,14 @@ struct MenuBarContentView: View {
                 launchAtLoginManager: launchAtLoginManager,
                 openProfilesDirectory: store.openProfilesDirectory,
                 openControllerRoot: store.openControllerRoot,
-                reconnect: reconnect
+                reconnect: reconnect,
+                features: features,
+                benchmark: store.benchmark,
+                openDashboard: store.openDashboard,
+                openLatestBenchmark: store.openLatestBenchmark,
+                runQuickBenchmarkAll: {
+                    Task { await store.quickBenchmark() }
+                }
             )
         case .help:
             HelpView()

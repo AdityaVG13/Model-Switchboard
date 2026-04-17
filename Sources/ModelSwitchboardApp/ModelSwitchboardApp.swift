@@ -7,15 +7,17 @@ import MenuBarExtraAccess
 struct ModelSwitchboardApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @AppStorage("controllerBaseURL") private var controllerBaseURL = "http://127.0.0.1:8877"
-    @State private var store = SwitchboardStore(controllerBaseURL: "http://127.0.0.1:8877")
+    @State private var store = SwitchboardStore(controllerBaseURL: "http://127.0.0.1:8877", features: AppFeatures.current)
     @StateObject private var launchAtLoginManager = LaunchAtLoginManager.shared
     @State private var isMenuPresented = false
     @State private var statusItem: NSStatusItem?
+    private let features = AppFeatures.current
 
     var body: some Scene {
         MenuBarExtra {
             MenuBarContentView(
                 store: store,
+                features: features,
                 launchAtLoginManager: launchAtLoginManager,
                 controllerBaseURL: $controllerBaseURL,
                 reconnect: {
@@ -45,7 +47,7 @@ struct ModelSwitchboardApp: App {
         .menuBarExtraAccess(isPresented: $isMenuPresented) { item in
             statusItem = item
             item.button?.toolTip = store.menuBarHelp
-            item.button?.setAccessibilityLabel("Model Switchboard")
+            item.button?.setAccessibilityLabel(features.appDisplayName)
         }
         .menuBarExtraStyle(.window)
     }

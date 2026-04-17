@@ -7,6 +7,7 @@ import ModelSwitchboardCore
 @Observable
 final class SwitchboardStore {
     var controllerBaseURL: String
+    let features: AppFeatures
     var statuses: [ModelProfileStatus] = []
     var benchmark: BenchmarkStatus?
     var integrations: [ControllerIntegration] = []
@@ -21,8 +22,9 @@ final class SwitchboardStore {
 
     private var refreshTask: Task<Void, Never>?
 
-    init(controllerBaseURL: String) {
+    init(controllerBaseURL: String, features: AppFeatures = .current) {
         self.controllerBaseURL = controllerBaseURL
+        self.features = features
         loadCachedState()
     }
 
@@ -128,6 +130,7 @@ final class SwitchboardStore {
     }
 
     func runIntegration(_ integration: ControllerIntegration, action: String = "sync") async {
+        guard features.supportsIntegrations else { return }
         guard pendingIntegrationActions.insert(integration.id).inserted else { return }
         defer { pendingIntegrationActions.remove(integration.id) }
         await run { try await $0.runIntegration(id: integration.id, action: action) }
@@ -141,6 +144,7 @@ final class SwitchboardStore {
     }
 
     func quickBenchmark(_ profiles: [String]? = nil) async {
+        guard features.supportsBenchmarks else { return }
         let key = profiles == nil ? "bench-all" : "bench-selected"
         guard pendingGlobalActions.insert(key).inserted else { return }
         defer { pendingGlobalActions.remove(key) }
@@ -148,11 +152,13 @@ final class SwitchboardStore {
     }
 
     func openDashboard() {
+        guard features.supportsDashboard else { return }
         guard let url = URL(string: controllerBaseURL) else { return }
         NSWorkspace.shared.open(url)
     }
 
     func openLatestBenchmark() {
+        guard features.supportsBenchmarks else { return }
         guard let path = benchmark?.latest?.markdownPath else { return }
         NSWorkspace.shared.open(URL(fileURLWithPath: path))
     }
@@ -251,8 +257,8 @@ final class SwitchboardStore {
 
     private func apply(payload: ControllerStatusPayload) {
         statuses = payload.statuses
-        benchmark = payload.benchmark
-        integrations = payload.integrations
+        benchmark = features.supportsBenchmarks ? payload.benchmark : nil
+        integrations = features.supportsIntegrations ? payload.integrations : []
         profilesDirectory = payload.profilesDirectory
         controllerRoot = payload.controllerRoot
     }

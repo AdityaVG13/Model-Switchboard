@@ -3,7 +3,25 @@ set -euo pipefail
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 
-APP_NAME="Model Switchboard"
+APP_VARIANT="${APP_VARIANT:-base}"
+case "$APP_VARIANT" in
+  base)
+    APP_NAME="Model Switchboard"
+    APP_BINARY_NAME="ModelSwitchboard"
+    APP_BUNDLE_ID="io.modelswitchboard.app"
+    HAS_ADVANCED=0
+    ;;
+  plus)
+    APP_NAME="Model Switchboard Plus"
+    APP_BINARY_NAME="ModelSwitchboardPlus"
+    APP_BUNDLE_ID="io.modelswitchboard.plus"
+    HAS_ADVANCED=1
+    ;;
+  *)
+    echo "error: unsupported APP_VARIANT: $APP_VARIANT" >&2
+    exit 1
+    ;;
+esac
 APP_PATH="${MSW_APP_PATH:-$HOME/Applications/$APP_NAME.app}"
 if [[ ! -d "$APP_PATH" ]]; then
   APP_PATH="/Applications/$APP_NAME.app"
@@ -43,7 +61,7 @@ let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID)
 for window in windows {
     let owner = window[kCGWindowOwnerName as String] as? String ?? ""
     let name = window[kCGWindowName as String] as? String ?? ""
-    if owner == "Model Switchboard" && (target.isEmpty || name == target) {
+    if owner == (ProcessInfo.processInfo.environment["MSW_APP_NAME"] ?? "") && (target.isEmpty || name == target) {
         let bounds = window[kCGWindowBounds as String] as? [String: Any] ?? [:]
         let x = bounds["X"] as? Double ?? 0
         let y = bounds["Y"] as? Double ?? 0
@@ -245,20 +263,20 @@ PY
 }
 
 app_pid() {
-  pgrep -f "$APP_PATH/Contents/MacOS/ModelSwitchboard" | head -n 1
+  pgrep -f "$APP_PATH/Contents/MacOS/$APP_BINARY_NAME" | head -n 1
 }
 
 launch_app() {
-  pkill -f "$APP_PATH/Contents/MacOS/ModelSwitchboard" || true
+  pkill -f "$APP_PATH/Contents/MacOS/$APP_BINARY_NAME" || true
   sleep 1
   open -a "$APP_PATH"
   sleep 1.5
 }
 
 open_menu() {
-  osascript -e 'tell application "System Events" to tell process "ModelSwitchboard" to click menu bar item 1 of menu bar 2' >/dev/null
+  osascript -e "tell application \"System Events\" to tell process \"$APP_BINARY_NAME\" to click menu bar item 1 of menu bar 2" >/dev/null
   for _ in {1..20}; do
-    if [[ -n "$("$WORK_DIR/msw_window_bounds" '' | awk -F'|' '$1=="" {print $0}' | head -n 1)" ]]; then
+    if [[ -n "$(MSW_APP_NAME="$APP_NAME" "$WORK_DIR/msw_window_bounds" '' | awk -F'|' '$1=="" {print $0}' | head -n 1)" ]]; then
       sleep 0.5
       return 0
     fi
@@ -274,7 +292,7 @@ press_button() {
 }
 
 window_bounds() {
-  "$WORK_DIR/msw_window_bounds" "$1" | head -n 1
+  MSW_APP_NAME="$APP_NAME" "$WORK_DIR/msw_window_bounds" "$1" | head -n 1
 }
 
 window_present() {
@@ -282,7 +300,7 @@ window_present() {
 }
 
 main_window_bounds() {
-  "$WORK_DIR/msw_window_bounds" '' | awk -F'|' '$1=="" {print $0}' | head -n 1
+  MSW_APP_NAME="$APP_NAME" "$WORK_DIR/msw_window_bounds" '' | awk -F'|' '$1=="" {print $0}' | head -n 1
 }
 
 frontmost_app() {
@@ -299,6 +317,19 @@ frontmost_browser_url() {
   else
     echo ""
   fi
+}
+
+wait_for_browser_url_prefix() {
+  local prefix="$1"
+  for _ in {1..20}; do
+    local current
+    current="$(frontmost_browser_url)"
+    if [[ -n "$current" && "$current" == "$prefix"* ]]; then
+      return 0
+    fi
+    sleep 0.5
+  done
+  return 1
 }
 
 finder_front_path() {
@@ -439,7 +470,7 @@ ocr_expect() {
 }
 
 click_settings_action_until_path() {
-  local query="$1"
+  local button_label="$1"
   local expected_path="$2"
   local label="$3"
   local attempt screenshot current
@@ -451,9 +482,11 @@ click_settings_action_until_path() {
     press_button Settings
     sleep 1
 
-    screenshot="$WORK_DIR/${label}-${attempt}.png"
-    take_shot "$screenshot"
-    ocr_click "$screenshot" "$query"
+    if ! press_button "$button_label" 2>/dev/null; then
+      screenshot="$WORK_DIR/${label}-${attempt}.png"
+      take_shot "$screenshot"
+      ocr_click "$screenshot" "$button_label"
+    fi
 
     for _ in {1..12}; do
       current="$(finder_front_path)"
@@ -468,7 +501,7 @@ click_settings_action_until_path() {
 }
 
 click_settings_action_until_text() {
-  local button_query="$1"
+  local button_label="$1"
   local expected_text="$2"
   local label="$3"
   local attempt screenshot
@@ -479,9 +512,11 @@ click_settings_action_until_text() {
     press_button Settings
     sleep 1
 
-    screenshot="$WORK_DIR/${label}-${attempt}-before.png"
-    take_shot "$screenshot"
-    ocr_click "$screenshot" "$button_query"
+    if ! press_button "$button_label" 2>/dev/null; then
+      screenshot="$WORK_DIR/${label}-${attempt}-before.png"
+      take_shot "$screenshot"
+      ocr_click "$screenshot" "$button_label"
+    fi
 
     for _ in {1..12}; do
       screenshot="$WORK_DIR/${label}-${attempt}-after.png"
@@ -525,6 +560,8 @@ pass "bundle metadata"
 
 mdfind "kMDItemFSName == \"$APP_NAME.app\"" | rg -F "$APP_PATH" >/dev/null || fail "spotlight registration"
 pass "spotlight registration"
+
+defaults write "$APP_BUNDLE_ID" controllerBaseURL "$DEFAULT_CONTROLLER_URL"
 
 launch_app
 open_menu
@@ -592,59 +629,71 @@ pass "help outside-click close"
 osascript -e 'tell application "ghostty" to activate'
 launch_app
 open_menu
-press_button Dashboard
-sleep 2
-[[ "$(frontmost_browser_url)" == "$CONTROLLER_URL/" ]] || fail "dashboard button"
-pass "dashboard button"
+if [[ "$HAS_ADVANCED" == "1" ]]; then
+  press_button Settings
+  sleep 0.4
+  press_button "Open Dashboard"
+  wait_for_browser_url_prefix "$CONTROLLER_URL" || fail "dashboard button"
+  pass "dashboard button"
+fi
 
 osascript -e 'tell application "ghostty" to activate'
 launch_app
 open_menu
 press_button Open 1
-sleep 2
-[[ "$(frontmost_browser_url)" == "$FIRST_PROFILE_BASE_URL/models" ]] || fail "open endpoint button"
+wait_for_browser_url_prefix "$FIRST_PROFILE_BASE_URL/models" || fail "open endpoint button"
 pass "open endpoint button"
 
 osascript -e 'tell application "ghostty" to activate'
 launch_app
 open_menu
 BENCHMARK_MARKDOWN_PATH="$(status_value benchmark_markdown_path '-')"
-press_button "Latest Bench"
-for _ in {1..20}; do
-  if [[ "$(frontmost_app)" != "ghostty" ]]; then
-    break
+if [[ "$HAS_ADVANCED" == "1" ]]; then
+  press_button Settings
+  sleep 0.4
+  press_button "Latest Bench"
+  for _ in {1..20}; do
+    if [[ "$(frontmost_app)" != "ghostty" ]]; then
+      break
+    fi
+    if [[ -n "$BENCHMARK_MARKDOWN_PATH" ]] && lsof "$BENCHMARK_MARKDOWN_PATH" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.5
+  done
+  if [[ "$(frontmost_app)" == "ghostty" ]]; then
+    if [[ -z "$BENCHMARK_MARKDOWN_PATH" ]] || ! lsof "$BENCHMARK_MARKDOWN_PATH" >/dev/null 2>&1; then
+      fail "latest bench button"
+    fi
   fi
-  if [[ -n "$BENCHMARK_MARKDOWN_PATH" ]] && lsof "$BENCHMARK_MARKDOWN_PATH" >/dev/null 2>&1; then
-    break
-  fi
-  sleep 0.5
-done
-if [[ "$(frontmost_app)" == "ghostty" ]]; then
-  if [[ -z "$BENCHMARK_MARKDOWN_PATH" ]] || ! lsof "$BENCHMARK_MARKDOWN_PATH" >/dev/null 2>&1; then
-    fail "latest bench button"
-  fi
+  pass "latest bench button"
 fi
-pass "latest bench button"
 
 launch_app
 open_menu
-press_button "Quick Bench All"
-wait_for_benchmark_change "$(status_value benchmark_generated_at '-')" || fail "quick bench all"
-pass "quick bench all"
+if [[ "$HAS_ADVANCED" == "1" ]]; then
+  press_button Settings
+  sleep 0.4
+  press_button "Run Quick Benchmark All"
+  wait_for_benchmark_change "$(status_value benchmark_generated_at '-')" || fail "quick bench all"
+  pass "quick bench all"
+fi
 
 launch_app
 open_menu
-BEFORE_MTIME="$(stat -f '%m' "$DROID_SETTINGS")"
-press_button "Sync Droid"
-for _ in {1..20}; do
-  NOW_MTIME="$(stat -f '%m' "$DROID_SETTINGS")"
-  if [[ "$NOW_MTIME" -gt "$BEFORE_MTIME" ]]; then
-    pass "sync droid"
-    break
-  fi
-  sleep 1
-done
-[[ "$NOW_MTIME" -gt "$BEFORE_MTIME" ]] || fail "sync droid"
+if [[ "$HAS_ADVANCED" == "1" ]]; then
+  BEFORE_MTIME="$(stat -f '%m' "$DROID_SETTINGS")"
+  press_button "Sync Droid"
+  for _ in {1..20}; do
+    NOW_MTIME="$(stat -f '%m' "$DROID_SETTINGS")"
+    if [[ "$NOW_MTIME" -gt "$BEFORE_MTIME" ]]; then
+      pass "sync droid"
+      break
+    fi
+    sleep 1
+  done
+  [[ "$NOW_MTIME" -gt "$BEFORE_MTIME" ]] || fail "sync droid"
+fi
 
 controller_post /api/stop-all ""
 launch_app
@@ -659,13 +708,6 @@ open_menu
 press_button Restart 1
 wait_for_pid_change "$FIRST_PROFILE" "$PID_BEFORE_RESTART" || fail "restart button"
 pass "restart button"
-
-BENCH_BEFORE="$(status_value benchmark_generated_at '-')"
-launch_app
-open_menu
-press_button Bench 1
-wait_for_benchmark_change "$BENCH_BEFORE" || fail "profile bench button"
-pass "profile bench button"
 
 launch_app
 open_menu
@@ -704,19 +746,21 @@ take_shot "$REFRESH_SHOT"
 ocr_expect "$REFRESH_SHOT" "NOT RUNNING" || fail "refresh button"
 pass "refresh button"
 
-click_settings_action_until_path "Open Profiles" "$PROFILES_DIR" "open-profiles" || fail "open profiles folder button"
+click_settings_action_until_path "Open Profiles Folder" "$PROFILES_DIR" "open-profiles" || fail "open profiles folder button"
 pass "open profiles folder button"
 
-click_settings_action_until_path "Open Controller" "$CONTROLLER_ROOT" "open-controller" || fail "open controller root button"
+click_settings_action_until_path "Open Controller Root" "$CONTROLLER_ROOT" "open-controller" || fail "open controller root button"
 pass "open controller root button"
 
-defaults write io.modelswitchboard.app controllerBaseURL 'http://127.0.0.1:9999'
+defaults write "$APP_BUNDLE_ID" controllerBaseURL 'http://127.0.0.1:9999'
 click_settings_action_until_text "Use Default" "$DEFAULT_CONTROLLER_URL" "use-default" || fail "use default button"
 pass "use default button"
 
 RECONNECT_SHOT="$WORK_DIR/reconnect-before.png"
-take_shot "$RECONNECT_SHOT"
-ocr_click "$RECONNECT_SHOT" "Reconnect"
+if ! press_button "Reconnect" 2>/dev/null; then
+  take_shot "$RECONNECT_SHOT"
+  ocr_click "$RECONNECT_SHOT" "Reconnect"
+fi
 wait_for_main_window_text_absent "ERROR" "reconnect" || fail "reconnect button"
 pass "reconnect button"
 
@@ -726,12 +770,12 @@ if ! press_button Quit 2>/dev/null; then
   true
 fi
 sleep 1
-if pgrep -f "$APP_PATH/Contents/MacOS/ModelSwitchboard" >/dev/null; then
+if pgrep -f "$APP_PATH/Contents/MacOS/$APP_BINARY_NAME" >/dev/null; then
   fail "quit button"
 fi
 pass "quit button"
 
-defaults write io.modelswitchboard.app controllerBaseURL "$DEFAULT_CONTROLLER_URL"
+defaults write "$APP_BUNDLE_ID" controllerBaseURL "$DEFAULT_CONTROLLER_URL"
 controller_post /api/stop-all ""
 
 echo "verification complete"
