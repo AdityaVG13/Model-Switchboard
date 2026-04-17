@@ -4,6 +4,8 @@ struct HelpView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                logoPreviewSection
+
                 section(
                     title: "Quick Start",
                     bullets: [
@@ -43,6 +45,24 @@ struct HelpView: View {
         }
     }
 
+    private var logoPreviewSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Menu Bar Mark")
+                .font(.caption.bold())
+                .foregroundStyle(.secondary)
+
+            Text("The menu bar now uses a stripped-down PCB glyph instead of a miniature illustrated logo. At 18 px on a black menu bar, silhouette and contrast matter more than ornament.")
+                .font(.footnote)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 12) {
+                logoStatePreview(title: "Ready", hasReadyModels: true, hasRunningModels: false)
+                logoStatePreview(title: "Running", hasReadyModels: false, hasRunningModels: true)
+                logoStatePreview(title: "Idle", hasReadyModels: false, hasRunningModels: false)
+            }
+        }
+    }
+
     private func section(title: String, bullets: [String]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
@@ -58,5 +78,22 @@ struct HelpView: View {
                 }
             }
         }
+    }
+
+    private func logoStatePreview(title: String, hasReadyModels: Bool, hasRunningModels: Bool) -> some View {
+        VStack(spacing: 8) {
+            LeverSwitchIcon(
+                hasReadyModels: hasReadyModels,
+                hasRunningModels: hasRunningModels,
+                size: 52
+            )
+            .frame(width: 62, height: 62)
+            .background(.quaternary.opacity(0.30), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+            Text(title)
+                .font(.caption2.bold())
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
     }
 }
