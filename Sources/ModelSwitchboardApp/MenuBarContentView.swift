@@ -136,6 +136,7 @@ struct MenuBarContentView: View {
     @State private var inspectorPanel: InspectorPanel?
     @State private var hostWindow: NSWindow?
     @State private var inspectorController = InspectorPanelController()
+    @StateObject private var systemMetrics = SystemMetricsMonitor()
 
     private static let clockFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -167,17 +168,22 @@ struct MenuBarContentView: View {
             let clamped = clampPanelWidth(Double(window.frame.width))
             if abs(storedMainPanelWidth - clamped) > 0.5 {
                 storedMainPanelWidth = clamped
-            } else {
-                synchronizeInspectorWindow()
             }
+            synchronizeInspectorWindow()
         }
         .task {
             store.startAutoRefresh()
+            if features.supportsBenchmarks {
+                systemMetrics.start()
+            } else {
+                systemMetrics.stop()
+            }
             updateMenuBarHelp(store.menuBarHelp)
             synchronizeInspectorWindow()
         }
         .onDisappear {
             store.stopAutoRefresh()
+            systemMetrics.stop()
             inspectorController.hide()
             inspectorPanel = nil
         }
@@ -188,14 +194,12 @@ struct MenuBarContentView: View {
             let clamped = clampPanelWidth(newValue)
             if abs(clamped - newValue) > .ulpOfOne {
                 storedMainPanelWidth = clamped
+                return
             }
             if let hostWindow {
-                var frame = hostWindow.frame
                 let nextWidth = CGFloat(clamped)
-                if abs(frame.width - nextWidth) > 0.5 {
-                    frame.origin.x += (frame.width - nextWidth)
-                    frame.size.width = nextWidth
-                    hostWindow.setFrame(frame, display: true, animate: false)
+                if abs(hostWindow.frame.width - nextWidth) > 0.5, !hostWindow.inLiveResize {
+                    hostWindow.setContentSize(NSSize(width: nextWidth, height: panelHeight))
                 }
             }
             synchronizeInspectorWindow()
@@ -254,9 +258,18 @@ struct MenuBarContentView: View {
 
             Spacer()
 
-            if store.isRefreshing {
-                ProgressView()
-                    .controlSize(.small)
+            VStack(alignment: .trailing, spacing: 6) {
+                if features.supportsBenchmarks {
+                    HStack(spacing: 6) {
+                        utilizationBadge(label: "CPU", value: systemMetrics.cpuUsagePercent)
+                        utilizationBadge(label: "GPU", value: systemMetrics.gpuUsagePercent)
+                    }
+                }
+
+                if store.isRefreshing {
+                    ProgressView()
+                        .controlSize(.small)
+                }
             }
         }
     }
@@ -271,6 +284,29 @@ struct MenuBarContentView: View {
                     Task { await store.stopAll() }
                 }
             }
+
+            if features.supportsBenchmarks {
+                HStack {
+                    actionButton(
+                        "Benchmark All",
+                        icon: "gauge.with.dots.needle.50percent",
+                        isDisabled: store.pendingGlobalActions.contains("stop-all")
+                    ) {
+                        setInspectorPanel(.benchmarks)
+                        Task { await store.quickBenchmark() }
+                    }
+
+                    actionButton(
+                        "Reopen Last",
+                        icon: "arrow.clockwise.circle",
+                        isBusy: store.pendingGlobalActions.contains("reopen-last"),
+                        isDisabled: !store.canReopenLastActive || store.pendingGlobalActions.contains("stop-all")
+                    ) {
+                        Task { await store.reopenLastActive() }
+                    }
+                }
+            }
+
             if features.supportsIntegrations, !store.integrations.isEmpty {
                 integrationActions
             }
@@ -335,6 +371,16 @@ struct MenuBarContentView: View {
                 actionButton("Restart", icon: "arrow.clockwise", isBusy: store.pendingLabel(for: profile.profile) == "RESTARTING", isDisabled: store.isBusy(profile: profile.profile)) {
                     Task { await store.restart(profile.profile) }
                 }
+                if features.supportsBenchmarks {
+                    actionButton(
+                        "Benchmark",
+                        icon: "chart.xyaxis.line",
+                        isDisabled: store.pendingGlobalActions.contains("stop-all") || store.isBusy(profile: profile.profile)
+                    ) {
+                        setInspectorPanel(.benchmarks)
+                        Task { await store.quickBenchmark([profile.profile]) }
+                    }
+                }
             }
         }
         .padding(12)
@@ -361,9 +407,6 @@ struct MenuBarContentView: View {
     private var footer: some View {
         HStack(spacing: 8) {
             footerToggleButton("Settings", panel: .settings, icon: "slider.horizontal.3")
-            if features.supportsBenchmarks {
-                footerToggleButton("Benchmarks", panel: .benchmarks, icon: "tablecells")
-            }
             footerToggleButton("Help", panel: .help, icon: "questionmark.circle")
             Spacer()
             TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -385,6 +428,23 @@ struct MenuBarContentView: View {
                 NSApplication.shared.terminate(nil)
             }
         }
+    }
+
+    private func utilizationBadge(label: String, value: Double?) -> some View {
+        let text: String
+        if let value {
+            text = "\(label) \(Int(value.rounded()))%"
+        } else {
+            text = "\(label) --"
+        }
+
+        return Text(text)
+            .font(.caption2.monospacedDigit())
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(.quaternary.opacity(0.42), in: Capsule())
+            .foregroundStyle(.secondary)
+            .help(label == "GPU" && value == nil ? "GPU percentage unavailable on this macOS API path." : "")
     }
 
     private func inspectorCard(_ panel: InspectorPanel) -> some View {
@@ -442,6 +502,8 @@ struct MenuBarContentView: View {
         case .benchmarks:
             BenchmarksPanelView(
                 benchmark: store.benchmark,
+                activeBenchmarkProfiles: store.activeBenchmarkProfiles,
+                cooldownEndsAt: store.benchmarkCooldownEndsAt,
                 runBenchmark: {
                     Task { await store.quickBenchmark() }
                 }

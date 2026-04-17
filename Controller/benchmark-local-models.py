@@ -52,6 +52,20 @@ def build_long_context_prompt(target_tokens: int, *, instruction: str, topic: st
 
 
 PROMPT_SUITES: dict[str, list[dict[str, Any]]] = {
+    "quick-ui": [
+        {
+            "name": "interactive-fast",
+            "category": "interactive",
+            "prompt": "In one sentence, explain why TTFT matters most for a local coding assistant.",
+            "max_tokens": 48,
+        },
+        {
+            "name": "code-fast",
+            "category": "coding",
+            "prompt": "Write a short Python function that groups file paths by extension.",
+            "max_tokens": 96,
+        },
+    ],
     "quick": [
         {
             "name": "interactive-chat",

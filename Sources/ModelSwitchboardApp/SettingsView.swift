@@ -74,21 +74,19 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
 
-                        if let latest = benchmark?.latest {
-                            Text("Latest benchmark: \(benchmarkSuiteLabel(latest.suite))")
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(.secondary)
+                    if let latest = benchmark?.latest {
+                        Text("Latest benchmark: \(benchmarkSuiteLabel(latest.suite))")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.secondary)
                         } else {
                             Text("Latest benchmark: none recorded yet")
                                 .font(.footnote.weight(.semibold))
                                 .foregroundStyle(.secondary)
                         }
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            Button("Run Benchmark", action: runQuickBenchmarkAll)
-                                .disabled(benchmark?.running == true)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
+                        Text("Run benchmarks from the main switchboard controls and inspect/export results in the Benchmarks panel.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
 
                     Divider()

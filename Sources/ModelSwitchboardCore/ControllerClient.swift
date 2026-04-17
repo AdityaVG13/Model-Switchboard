@@ -69,8 +69,8 @@ public struct ControllerClient: Sendable {
         try await post("/api/stop-all", payload: [:])
     }
 
-    public func quickBenchmark(profiles: [String]? = nil) async throws -> ControllerActionResponse {
-        var payload: [String: Any] = ["suite": "quick"]
+    public func quickBenchmark(profiles: [String]? = nil, suite: String = "quick") async throws -> ControllerActionResponse {
+        var payload: [String: Any] = ["suite": suite]
         if let profiles {
             payload["profiles"] = profiles
         }

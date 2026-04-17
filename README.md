@@ -17,7 +17,7 @@ Feature split:
 
 - Base
   - profile list
-  - `Activate`, `Start`, `Stop`, `Restart`, `Open`
+  - `Activate`, `Start`, `Stop`, `Restart`
   - `Refresh`, `Stop All`
   - attached `Settings` and `Help`
   - launch-at-login toggle
@@ -25,8 +25,10 @@ Feature split:
   - widget
 - Plus
   - everything in Base
-  - `Open Dashboard`
-  - benchmark actions and latest benchmark access
+  - `Benchmark All` and `Reopen Last`
+  - per-profile `Benchmark`
+  - in-app benchmark panel with CSV export
+  - CPU and GPU utilization badges in the header
   - optional controller integrations such as `Sync Droid`
   - plus widget branding
 
@@ -39,7 +41,7 @@ Most local-model UIs focus on chat, not operations. The missing piece is a fast 
 - start and stop heavy runtimes cleanly
 - open the backing endpoint when you need details
 
-The plus edition extends that with dashboard and benchmark operations without forcing the base install to carry extra surface area.
+The plus edition extends that with benchmark and integration operations without forcing the base install to carry extra surface area.
 
 On macOS, the right primitive for that is `MenuBarExtra`, not a WidgetKit-first build.
 
@@ -49,6 +51,8 @@ Global actions:
 
 - `Refresh`
 - `Stop All`
+- `Benchmark All` (Plus)
+- `Reopen Last` (Plus)
 - `Settings`
 - `Help`
 - `Quit`
@@ -59,7 +63,7 @@ Per-profile actions:
 - `Start`
 - `Stop`
 - `Restart`
-- `Open`
+- `Benchmark` (Plus)
 
 `Activate` is the key workflow for laptops. It gives you one-click model switching without leaving old heavyweight runtimes resident.
 
@@ -73,12 +77,7 @@ Per-profile actions:
 
 That matters because model locations are defined in controller profile manifests, not in the app itself.
 
-In `Model Switchboard Plus`, `Settings` also includes:
-
-- `Open Dashboard`
-- `Latest Bench`
-- `Run Quick Benchmark All`
-- any optional integrations reported by the controller
+In `Model Switchboard Plus`, benchmark controls and integration actions stay in the main switchboard surface, and the benchmark side panel adds in-app table viewing plus CSV export.
 
 ## Raycast
 
@@ -131,7 +130,7 @@ Each completed run produces:
 - `latest.json`
 - `latest.md`
 
-`Latest Bench` in the menu bar app opens `latest.md`, which is simply the most recent completed benchmark run. The quick menu action stays intentionally lightweight. If you want a more representative comparison, run the controller harness with `--suite local` or `--suite context`.
+The Plus benchmark panel reads `latest.json` and renders the latest benchmark run directly in-app. `Export CSV` writes a portable report from the current latest run. For broader comparison, run the controller harness with heavier suites after a quick pass.
 
 ## Version
 

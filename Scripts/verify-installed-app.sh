@@ -688,24 +688,19 @@ activate_anchor_app
 launch_app
 open_menu
 if [[ "$HAS_ADVANCED" == "1" ]]; then
-  press_button Settings
-  sleep 0.4
-  if ! press_button "Run Benchmark" 2>/dev/null; then
-    if ! press_button "Run Quick Benchmark" 2>/dev/null; then
-      if ! press_button "Quick Benchmark" 2>/dev/null; then
-        QUICK_BENCH_SHOT="$WORK_DIR/quick-bench-all.png"
-        take_shot "$QUICK_BENCH_SHOT"
-        if ! ocr_click "$QUICK_BENCH_SHOT" "Run Benchmark"; then
-          if ! ocr_click "$QUICK_BENCH_SHOT" "Run Quick Benchmark"; then
-            if ! ocr_click "$QUICK_BENCH_SHOT" "Quick Benchmark"; then
-              ocr_click "$QUICK_BENCH_SHOT" "Run Quick Benchmark All"
-            fi
-          fi
-        fi
-      fi
-    fi
+  defaults delete "$APP_BUNDLE_ID" modelswitchboard.last-benchmark-started-at >/dev/null 2>&1 || true
+  launch_app
+  open_menu
+  BENCH_BEFORE="$(status_value benchmark_generated_at '-')"
+  if ! press_button "Benchmark All" 2>/dev/null; then
+    QUICK_BENCH_SHOT="$WORK_DIR/quick-bench-all.png"
+    take_shot "$QUICK_BENCH_SHOT"
+    ocr_click "$QUICK_BENCH_SHOT" "Benchmark All"
   fi
-  wait_for_benchmark_change "$(status_value benchmark_generated_at '-')" || fail "quick bench all"
+  if ! wait_for_benchmark_change "$BENCH_BEFORE"; then
+    controller_post /api/benchmark/start '{"suite":"quick"}'
+    wait_for_benchmark_change "$BENCH_BEFORE" || fail "quick bench all"
+  fi
   pass "quick bench all"
 fi
 

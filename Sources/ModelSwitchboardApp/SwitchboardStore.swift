@@ -6,6 +6,12 @@ import ModelSwitchboardCore
 @MainActor
 @Observable
 final class SwitchboardStore {
+    private enum Constants {
+        static let lastActiveProfilesKey = "modelswitchboard.last-active-profiles"
+        static let benchmarkCooldownKey = "modelswitchboard.last-benchmark-started-at"
+        static let benchmarkCooldownSeconds: TimeInterval = 300
+    }
+
     var controllerBaseURL: String
     let features: AppFeatures
     var statuses: [ModelProfileStatus] = []
@@ -19,12 +25,17 @@ final class SwitchboardStore {
     var pendingProfileActions: [String: String] = [:]
     var pendingGlobalActions: Set<String> = []
     var pendingIntegrationActions: Set<String> = []
+    var lastActiveProfiles: [String] = []
+    var lastBenchmarkStartedAt: Date?
+    var activeBenchmarkProfiles: [String] = []
 
     private var refreshTask: Task<Void, Never>?
 
     init(controllerBaseURL: String, features: AppFeatures = .current) {
         self.controllerBaseURL = controllerBaseURL
         self.features = features
+        loadLastActiveProfiles()
+        loadBenchmarkCooldownState()
         loadCachedState()
     }
 
@@ -54,6 +65,43 @@ final class SwitchboardStore {
             return "No local models running"
         }
         return "Running: " + running.map(\.displayName).joined(separator: ", ")
+    }
+
+    var canReopenLastActive: Bool {
+        features.supportsBenchmarks &&
+        !lastActiveProfiles.isEmpty &&
+        !pendingGlobalActions.contains("reopen-last") &&
+        !statuses.contains(where: \.running) &&
+        pendingProfileActions.isEmpty
+    }
+
+    var benchmarkCooldownRemaining: TimeInterval {
+        guard let lastBenchmarkStartedAt else { return 0 }
+        let remaining = Constants.benchmarkCooldownSeconds - Date().timeIntervalSince(lastBenchmarkStartedAt)
+        return max(0, remaining)
+    }
+
+    var benchmarkCooldownEndsAt: Date? {
+        guard let lastBenchmarkStartedAt else { return nil }
+        return lastBenchmarkStartedAt.addingTimeInterval(Constants.benchmarkCooldownSeconds)
+    }
+
+    var canStartBenchmarkNow: Bool {
+        features.supportsBenchmarks &&
+        benchmark?.running != true &&
+        benchmarkCooldownRemaining <= 0
+    }
+
+    var benchmarkCooldownLabel: String? {
+        let remaining = benchmarkCooldownRemaining
+        guard remaining > 0 else { return nil }
+        let seconds = Int(remaining.rounded(.up))
+        let minutesPart = seconds / 60
+        let secondsPart = seconds % 60
+        if minutesPart > 0 {
+            return "\(minutesPart)m \(secondsPart)s"
+        }
+        return "\(secondsPart)s"
     }
 
     func startAutoRefresh() {
@@ -139,16 +187,63 @@ final class SwitchboardStore {
     func stopAll() async {
         guard pendingGlobalActions.insert("stop-all").inserted else { return }
         defer { pendingGlobalActions.remove("stop-all") }
+        rememberLastActiveProfiles(from: statuses)
         statuses = statuses.map { $0.updating(running: false, ready: false) }
         await run { try await $0.stopAll() }
     }
 
     func quickBenchmark(_ profiles: [String]? = nil) async {
         guard features.supportsBenchmarks else { return }
-        let key = profiles == nil ? "bench-all" : "bench-selected"
+        if benchmark?.running == true {
+            return
+        }
+        if benchmarkCooldownRemaining > 0 {
+            return
+        }
+        let key: String
+        if let profiles, profiles.count == 1, let profile = profiles.first {
+            key = "bench-\(profile)"
+        } else if profiles == nil {
+            key = "bench-all"
+        } else {
+            key = "bench-selected"
+        }
         guard pendingGlobalActions.insert(key).inserted else { return }
-        defer { pendingGlobalActions.remove(key) }
+        activeBenchmarkProfiles = profiles ?? []
+        markBenchmarkStarted()
+        defer {
+            pendingGlobalActions.remove(key)
+        }
         await run { try await $0.quickBenchmark(profiles: profiles) }
+    }
+
+    func reopenLastActive() async {
+        guard canReopenLastActive else { return }
+        let profiles = lastActiveProfiles
+        guard pendingGlobalActions.insert("reopen-last").inserted else { return }
+        defer { pendingGlobalActions.remove("reopen-last") }
+
+        for profile in profiles {
+            pendingProfileActions[profile] = "STARTING"
+            markProfile(profile, running: true, ready: false)
+        }
+
+        defer {
+            for profile in profiles {
+                pendingProfileActions.removeValue(forKey: profile)
+            }
+        }
+
+        do {
+            let client = try self.client
+            for profile in profiles {
+                _ = try await client.start(profile: profile)
+            }
+            await refresh()
+        } catch {
+            if isBenignCancellation(error) { return }
+            lastError = error.localizedDescription
+        }
     }
 
     func openProfilesDirectory() {
@@ -199,11 +294,28 @@ final class SwitchboardStore {
         pendingProfileActions[profile]
     }
 
+    func isBenchmarkInFlight(for profile: String? = nil) -> Bool {
+        if benchmark?.running == true { return true }
+        if let profile {
+            return pendingGlobalActions.contains("bench-\(profile)") ||
+                pendingGlobalActions.contains("bench-selected") ||
+                pendingGlobalActions.contains("bench-all")
+        }
+
+        if pendingGlobalActions.contains("bench-all") || pendingGlobalActions.contains("bench-selected") {
+            return true
+        }
+        return pendingGlobalActions.contains(where: { $0.hasPrefix("bench-") })
+    }
+
     private func run(_ action: @escaping (ControllerClient) async throws -> ControllerActionResponse) async {
         do {
             let client = try self.client
             let response = try await action(client)
-            if let statuses = response.statuses { self.statuses = statuses }
+            if let statuses = response.statuses {
+                self.statuses = statuses
+                rememberLastActiveProfiles(from: statuses)
+            }
             if let benchmark = response.benchmark { self.benchmark = benchmark }
             if let integrations = response.integrations { self.integrations = integrations }
             if let profilesDirectory = response.profilesDirectory { self.profilesDirectory = profilesDirectory }
@@ -240,7 +352,11 @@ final class SwitchboardStore {
 
     private func apply(payload: ControllerStatusPayload) {
         statuses = payload.statuses
+        rememberLastActiveProfiles(from: payload.statuses)
         benchmark = features.supportsBenchmarks ? payload.benchmark : nil
+        if benchmark?.running == false {
+            activeBenchmarkProfiles = []
+        }
         integrations = features.supportsIntegrations ? payload.integrations : []
         profilesDirectory = payload.profilesDirectory
         controllerRoot = payload.controllerRoot
@@ -262,6 +378,39 @@ final class SwitchboardStore {
                 controllerRoot: controllerRoot
             )
         )
+    }
+
+    private func loadLastActiveProfiles() {
+        lastActiveProfiles = UserDefaults.standard.stringArray(forKey: Constants.lastActiveProfilesKey) ?? []
+    }
+
+    private func loadBenchmarkCooldownState() {
+        guard let timestamp = UserDefaults.standard.object(forKey: Constants.benchmarkCooldownKey) as? TimeInterval else {
+            lastBenchmarkStartedAt = nil
+            return
+        }
+        lastBenchmarkStartedAt = Date(timeIntervalSince1970: timestamp)
+    }
+
+    private func markBenchmarkStarted() {
+        let now = Date()
+        lastBenchmarkStartedAt = now
+        UserDefaults.standard.set(now.timeIntervalSince1970, forKey: Constants.benchmarkCooldownKey)
+    }
+
+    private func rememberLastActiveProfiles(from sourceStatuses: [ModelProfileStatus]) {
+        let runningProfiles = sourceStatuses
+            .filter(\.running)
+            .map(\.profile)
+        guard !runningProfiles.isEmpty else { return }
+
+        var deduplicated: [String] = []
+        var seen: Set<String> = []
+        for profile in runningProfiles where seen.insert(profile).inserted {
+            deduplicated.append(profile)
+        }
+        lastActiveProfiles = deduplicated
+        UserDefaults.standard.set(deduplicated, forKey: Constants.lastActiveProfilesKey)
     }
 
     private func isBenignCancellation(_ error: Error) -> Bool {
