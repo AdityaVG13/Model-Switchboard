@@ -21,8 +21,8 @@ On macOS, the right primitive for that is `MenuBarExtra`, not a WidgetKit-first 
 Global actions:
 
 - `Refresh`
-- `Open Dashboard`
-- `Open Latest Bench`
+- `Dashboard`
+- `Latest Bench`
 - `Quick Bench All`
 - `Stop All`
 - `Settings`
@@ -47,6 +47,8 @@ Per-profile actions:
 `Activate` is the key workflow for laptops. It gives you one-click model switching without leaving old heavyweight runtimes resident.
 
 `Settings` and `Help` now open inside the menu interface itself as a right-side inspector, so they stay attached to the menu bar surface instead of spawning detached desktop windows.
+
+`Settings` also includes a `Launch At Login` toggle backed by macOS `ServiceManagement`, so people who want the switchboard available after reboot do not have to wire that up by hand.
 
 ## Controller API contract
 
@@ -123,6 +125,8 @@ That builds a release app bundle at:
 
 - `dist/Model Switchboard.app`
 
+The Xcode build script always regenerates the `.xcodeproj` from `project.yml` first. That avoids the stale-project problem where new Swift files compile in SwiftPM but never make it into the packaged app.
+
 ## DMG
 
 ```bash
@@ -132,6 +136,14 @@ That builds a release app bundle at:
 That produces:
 
 - `dist/Model-Switchboard-1.0.0.dmg`
+
+For local verification:
+
+```bash
+./Scripts/verify-distribution.sh
+```
+
+That always verifies the app bundle structure and code signature. Gatekeeper checks are skipped automatically for local ad hoc builds and are enforced once you sign with a real Developer ID identity.
 
 ## Release stance
 
@@ -148,6 +160,20 @@ Why:
 - the widget is part of the containing app, not a separate download
 
 The current repo now builds the DMG locally. For a public release, the next step is signing and notarization.
+
+This repo now includes both:
+
+- `Scripts/sign-and-notarize-dmg.sh`
+- `.github/workflows/release.yml`
+
+The GitHub release workflow expects these secrets:
+
+- `APPLE_CERTIFICATE_P12_BASE64`
+- `APPLE_CERTIFICATE_PASSWORD`
+- `APPLE_DEVELOPER_IDENTITY`
+- `APPLE_NOTARY_API_KEY_P8_BASE64`
+- `APPLE_NOTARY_API_KEY_ID`
+- `APPLE_NOTARY_API_ISSUER_ID`
 
 ## Iterative development
 

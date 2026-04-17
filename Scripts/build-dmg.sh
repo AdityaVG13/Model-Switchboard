@@ -17,7 +17,9 @@ trap cleanup EXIT
 
 cd "$ROOT_DIR"
 
-"$ROOT_DIR/Scripts/build-app.sh" >/dev/null
+if [ "${SKIP_BUILD:-0}" != "1" ]; then
+  "$ROOT_DIR/Scripts/build-app.sh" >/dev/null
+fi
 
 rm -f "$DMG_PATH"
 mkdir -p "$STAGING_DIR"

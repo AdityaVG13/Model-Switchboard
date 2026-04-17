@@ -51,7 +51,7 @@ struct HelpView: View {
                 .font(.caption.bold())
                 .foregroundStyle(.secondary)
 
-            Text("The menu bar now uses a stripped-down PCB glyph instead of a miniature illustrated logo. At 18 px on a black menu bar, silhouette and contrast matter more than ornament.")
+            Text("The menu bar uses a native chip symbol instead of a custom illustration. At 18 px on a black menu bar, the macOS template symbol stays visible and reads more cleanly.")
                 .font(.footnote)
                 .fixedSize(horizontal: false, vertical: true)
 

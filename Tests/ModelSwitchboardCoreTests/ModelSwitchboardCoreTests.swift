@@ -120,7 +120,35 @@ import Testing
     )
     let summary = DashboardSummary(payload: payload)
     #expect(summary.menuBarTitle == "Ready 1/1")
-    #expect(summary.menuBarSystemImage == "bolt.circle.fill")
+    #expect(summary.menuBarSystemImage == "memorychip.fill")
+}
+
+@Test func summaryUsesChipOutlineWhileStarting() {
+    let payload = ControllerStatusPayload(
+        statuses: [
+            ModelProfileStatus(
+                profile: "qwen",
+                displayName: "Qwen",
+                runtime: "llama.cpp",
+                host: "127.0.0.1",
+                port: "8080",
+                baseURL: "http://127.0.0.1:8080/v1",
+                requestModel: "qwen",
+                serverModelID: "qwen",
+                pid: 123,
+                running: true,
+                ready: false,
+                serverIDs: [],
+                rssMB: nil,
+                command: nil,
+                logPath: "/tmp/qwen.log"
+            )
+        ],
+        benchmark: BenchmarkStatus(running: false, pid: nil, logPath: nil, latest: nil),
+        integrations: []
+    )
+    let summary = DashboardSummary(payload: payload)
+    #expect(summary.menuBarSystemImage == "memorychip")
 }
 
 @Test func cacheRoundTripPreservesPayload() throws {

@@ -18,6 +18,7 @@ struct MenuBarContentView: View {
     }
 
     @Bindable var store: SwitchboardStore
+    @ObservedObject var launchAtLoginManager: LaunchAtLoginManager
     @Binding var controllerBaseURL: String
     let reconnect: () -> Void
     let updateMenuBarHelp: (String) -> Void
@@ -229,9 +230,9 @@ struct MenuBarContentView: View {
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 HStack(spacing: 6) {
                     Text(Self.clockFormatter.string(from: context.date))
-                    if let lastUpdated = store.lastUpdated {
+                    if let freshness = freshnessText(relativeTo: context.date) {
                         Text("•")
-                        Text("Updated \(Self.clockFormatter.string(from: lastUpdated))")
+                        Text(freshness)
                     }
                 }
                 .font(.caption2.monospacedDigit())
@@ -262,7 +263,11 @@ struct MenuBarContentView: View {
 
             switch panel {
             case .settings:
-                SettingsView(controllerBaseURL: $controllerBaseURL, reconnect: reconnect)
+                SettingsView(
+                    controllerBaseURL: $controllerBaseURL,
+                    launchAtLoginManager: launchAtLoginManager,
+                    reconnect: reconnect
+                )
             case .help:
                 HelpView()
             }
@@ -309,5 +314,29 @@ struct MenuBarContentView: View {
         .controlSize(.small)
         .disabled(isBusy || isDisabled)
         .accessibilityLabel(title)
+    }
+
+    private func freshnessText(relativeTo now: Date) -> String? {
+        guard let lastUpdated = store.lastUpdated else { return nil }
+        let elapsed = max(0, Int(now.timeIntervalSince(lastUpdated)))
+
+        if elapsed < 5 {
+            return "Synced just now"
+        }
+        if elapsed < 60 {
+            return "Synced \(elapsed)s ago"
+        }
+
+        let minutes = elapsed / 60
+        if minutes < 60 {
+            return "Synced \(minutes)m ago"
+        }
+
+        let hours = minutes / 60
+        if hours < 24 {
+            return "Synced \(hours)h ago"
+        }
+
+        return "Synced \(hours / 24)d ago"
     }
 }

@@ -256,10 +256,10 @@ public struct DashboardSummary: Equatable, Sendable {
             return "speedometer"
         }
         if readyProfiles > 0 {
-            return "bolt.circle.fill"
+            return "memorychip.fill"
         }
         if runningProfiles > 0 {
-            return "bolt.circle"
+            return "memorychip"
         }
         return "cpu"
     }

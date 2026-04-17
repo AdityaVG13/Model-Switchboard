@@ -8,6 +8,7 @@ struct ModelSwitchboardApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @AppStorage("controllerBaseURL") private var controllerBaseURL = "http://127.0.0.1:8877"
     @State private var store = SwitchboardStore(controllerBaseURL: "http://127.0.0.1:8877")
+    @StateObject private var launchAtLoginManager = LaunchAtLoginManager.shared
     @State private var isMenuPresented = false
     @State private var statusItem: NSStatusItem?
 
@@ -15,6 +16,7 @@ struct ModelSwitchboardApp: App {
         MenuBarExtra {
             MenuBarContentView(
                 store: store,
+                launchAtLoginManager: launchAtLoginManager,
                 controllerBaseURL: $controllerBaseURL,
                 reconnect: {
                     store.controllerBaseURL = controllerBaseURL
