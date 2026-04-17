@@ -28,7 +28,8 @@ struct MenuBarContentView: View {
     private let inspectorPanelWidth: CGFloat = 290
     private let panelHeight: CGFloat = 620
     private let panelGap: CGFloat = 10
-    private let inspectorAnimation = Animation.easeInOut(duration: 0.32)
+    private let inspectorAnimation = Animation.easeInOut(duration: 0.24)
+    private let inspectorCloseDelay: TimeInterval = 0.12
 
     @State private var inspectorPanel: InspectorPanel?
     @State private var hostWindow: NSWindow?
@@ -78,9 +79,6 @@ struct MenuBarContentView: View {
         }
         .onChange(of: store.menuBarHelp) { _, newValue in
             updateMenuBarHelp(newValue)
-        }
-        .onChange(of: inspectorPanel) { _, _ in
-            stabilizeWindowFrame(hostWindow)
         }
         .animation(inspectorAnimation, value: inspectorPanel)
         .animation(.snappy(duration: 0.18), value: store.pendingProfileActions)
@@ -281,9 +279,7 @@ struct MenuBarContentView: View {
                     .font(.headline)
                 Spacer()
                 Button {
-                    withAnimation(inspectorAnimation) {
-                        inspectorPanel = nil
-                    }
+                    setInspectorPanel(nil)
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                 }
@@ -333,9 +329,8 @@ struct MenuBarContentView: View {
 
     private func footerToggleButton(_ title: String, panel: InspectorPanel, icon: String) -> some View {
         Button {
-            withAnimation(inspectorAnimation) {
-                inspectorPanel = inspectorPanel == panel ? nil : panel
-            }
+            let nextPanel = inspectorPanel == panel ? nil : panel
+            setInspectorPanel(nextPanel)
         } label: {
             Label(title, systemImage: icon)
         }
@@ -343,10 +338,48 @@ struct MenuBarContentView: View {
         .accessibilityLabel(title)
     }
 
-    private func stabilizeWindowFrame(_ window: NSWindow?, animate: Bool = false) {
+    private func setInspectorPanel(_ nextPanel: InspectorPanel?) {
+        if nextPanel == inspectorPanel {
+            return
+        }
+
+        // Switching between inspector panes should not trigger geometry changes.
+        if inspectorPanel != nil, nextPanel != nil {
+            withAnimation(inspectorAnimation) {
+                inspectorPanel = nextPanel
+            }
+            return
+        }
+
+        // Expand first, then reveal panel.
+        if let nextPanel {
+            stabilizeWindowFrame(hostWindow, targetPanel: nextPanel, animate: true)
+            withAnimation(inspectorAnimation) {
+                inspectorPanel = nextPanel
+            }
+            return
+        }
+
+        // Fade panel out, then shrink the container once the content is gone.
+        withAnimation(inspectorAnimation) {
+            inspectorPanel = nil
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + inspectorCloseDelay) {
+            stabilizeWindowFrame(hostWindow, targetPanel: nil, animate: true)
+        }
+    }
+
+    private func panelWidth(for panel: InspectorPanel?) -> CGFloat {
+        if panel == nil {
+            return mainPanelWidth
+        }
+        return mainPanelWidth + inspectorPanelWidth + panelGap
+    }
+
+    private func stabilizeWindowFrame(_ window: NSWindow?, targetPanel: InspectorPanel? = nil, animate: Bool = false) {
         guard let window else { return }
 
-        let desiredWidth = totalWidth
+        let desiredWidth = panelWidth(for: targetPanel ?? inspectorPanel)
         let desiredHeight = panelHeight
         let currentFrame = window.frame
         if anchoredRightEdge == nil || abs(currentFrame.width - mainPanelWidth) < 0.5 {
@@ -364,7 +397,7 @@ struct MenuBarContentView: View {
             width: desiredWidth,
             height: desiredHeight
         )
-        window.setFrame(nextFrame, display: true, animate: animate)
+        window.setFrame(nextFrame, display: true, animate: false)
     }
 
     private func actionButton(
