@@ -10,6 +10,8 @@ final class SwitchboardStore {
     var statuses: [ModelProfileStatus] = []
     var benchmark: BenchmarkStatus?
     var integrations: [ControllerIntegration] = []
+    var profilesDirectory: String?
+    var controllerRoot: String?
     var lastError: String?
     var isRefreshing = false
     var lastUpdated: Date?
@@ -25,7 +27,15 @@ final class SwitchboardStore {
     }
 
     var summary: DashboardSummary {
-        DashboardSummary(payload: ControllerStatusPayload(statuses: statuses, benchmark: benchmark, integrations: integrations))
+        DashboardSummary(
+            payload: ControllerStatusPayload(
+                statuses: statuses,
+                benchmark: benchmark,
+                integrations: integrations,
+                profilesDirectory: profilesDirectory,
+                controllerRoot: controllerRoot
+            )
+        )
     }
 
     var sortedStatuses: [ModelProfileStatus] {
@@ -145,9 +155,30 @@ final class SwitchboardStore {
         NSWorkspace.shared.open(URL(fileURLWithPath: path))
     }
 
+    func openProfilesDirectory() {
+        guard let profilesDirectory else { return }
+        NSWorkspace.shared.open(URL(fileURLWithPath: profilesDirectory))
+    }
+
+    func openControllerRoot() {
+        guard let target = resolvedControllerRoot else { return }
+        NSWorkspace.shared.open(URL(fileURLWithPath: target))
+    }
+
     func openEndpoint(_ profile: ModelProfileStatus) {
         guard let url = URL(string: profile.baseURL + "/models") else { return }
         NSWorkspace.shared.open(url)
+    }
+
+    var resolvedControllerRoot: String? {
+        if let controllerRoot, !controllerRoot.isEmpty {
+            return controllerRoot
+        }
+
+        guard let profilesDirectory, !profilesDirectory.isEmpty else { return nil }
+        return URL(fileURLWithPath: profilesDirectory)
+            .deletingLastPathComponent()
+            .path
     }
 
     private var client: ControllerClient {
@@ -169,6 +200,8 @@ final class SwitchboardStore {
             if let statuses = response.statuses { self.statuses = statuses }
             if let benchmark = response.benchmark { self.benchmark = benchmark }
             if let integrations = response.integrations { self.integrations = integrations }
+            if let profilesDirectory = response.profilesDirectory { self.profilesDirectory = profilesDirectory }
+            if let controllerRoot = response.controllerRoot { self.controllerRoot = controllerRoot }
             cacheCurrentState()
             lastError = nil
             lastUpdated = Date()
@@ -203,6 +236,8 @@ final class SwitchboardStore {
         statuses = payload.statuses
         benchmark = payload.benchmark
         integrations = payload.integrations
+        profilesDirectory = payload.profilesDirectory
+        controllerRoot = payload.controllerRoot
     }
 
     private func loadCachedState() {
@@ -213,7 +248,13 @@ final class SwitchboardStore {
 
     private func cacheCurrentState() {
         try? ControllerStatusCache.write(
-            ControllerStatusPayload(statuses: statuses, benchmark: benchmark, integrations: integrations)
+            ControllerStatusPayload(
+                statuses: statuses,
+                benchmark: benchmark,
+                integrations: integrations,
+                profilesDirectory: profilesDirectory,
+                controllerRoot: controllerRoot
+            )
         )
     }
 

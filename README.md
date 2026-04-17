@@ -46,9 +46,15 @@ Per-profile actions:
 
 `Activate` is the key workflow for laptops. It gives you one-click model switching without leaving old heavyweight runtimes resident.
 
-`Settings` and `Help` now open inside the menu interface itself as a right-side inspector, so they stay attached to the menu bar surface instead of spawning detached desktop windows.
+`Settings` and `Help` now open inside the menu interface itself as an attached inspector, so they stay attached to the menu bar surface instead of spawning detached desktop windows.
 
-`Settings` also includes a `Launch At Login` toggle backed by macOS `ServiceManagement`, so people who want the switchboard available after reboot do not have to wire that up by hand.
+`Settings` also includes:
+
+- a `Launch At Login` toggle backed by macOS `ServiceManagement`
+- the live `model-profiles` path reported by the controller
+- one-click actions to open the profiles folder or controller root in Finder
+
+That matters because model locations are defined in controller profile manifests, not in the app itself.
 
 ## Controller API contract
 

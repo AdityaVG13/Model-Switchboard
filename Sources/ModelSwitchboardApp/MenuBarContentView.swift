@@ -35,16 +35,17 @@ struct MenuBarContentView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            mainPanel
-                .frame(width: inspectorPanel == nil ? 470 : 500, height: 620)
-
             if let inspectorPanel {
-                Divider()
                 inspectorView(inspectorPanel)
                     .frame(width: 280, height: 620)
                     .background(.regularMaterial)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+
+                Divider()
             }
+
+            mainPanel
+                .frame(width: inspectorPanel == nil ? 470 : 500, height: 620)
         }
         .background(.thickMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -229,11 +230,15 @@ struct MenuBarContentView: View {
             Spacer()
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 HStack(spacing: 6) {
-                    Text(Self.clockFormatter.string(from: context.date))
-                    if let freshness = freshnessText(relativeTo: context.date) {
-                        Text("•")
-                        Text(freshness)
+                    if let footerState = footerState(relativeTo: context.date) {
+                        Text(footerState.label)
+                            .font(.caption2.bold())
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(footerState.color.opacity(0.16), in: Capsule())
+                            .foregroundStyle(footerState.color)
                     }
+                    Text(Self.clockFormatter.string(from: context.date))
                 }
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.secondary)
@@ -265,7 +270,11 @@ struct MenuBarContentView: View {
             case .settings:
                 SettingsView(
                     controllerBaseURL: $controllerBaseURL,
+                    profilesDirectory: store.profilesDirectory,
+                    controllerRoot: store.resolvedControllerRoot,
                     launchAtLoginManager: launchAtLoginManager,
+                    openProfilesDirectory: store.openProfilesDirectory,
+                    openControllerRoot: store.openControllerRoot,
                     reconnect: reconnect
                 )
             case .help:
@@ -316,27 +325,21 @@ struct MenuBarContentView: View {
         .accessibilityLabel(title)
     }
 
-    private func freshnessText(relativeTo now: Date) -> String? {
+    private func footerState(relativeTo now: Date) -> (label: String, color: Color)? {
+        if let lastError = store.lastError {
+            if lastError.localizedCaseInsensitiveContains("cached") {
+                return ("CACHED", .orange)
+            }
+            return ("ERROR", .red)
+        }
+
         guard let lastUpdated = store.lastUpdated else { return nil }
         let elapsed = max(0, Int(now.timeIntervalSince(lastUpdated)))
 
-        if elapsed < 5 {
-            return "Synced just now"
-        }
-        if elapsed < 60 {
-            return "Synced \(elapsed)s ago"
+        if elapsed > 45 {
+            return ("STALE", .orange)
         }
 
-        let minutes = elapsed / 60
-        if minutes < 60 {
-            return "Synced \(minutes)m ago"
-        }
-
-        let hours = minutes / 60
-        if hours < 24 {
-            return "Synced \(hours)h ago"
-        }
-
-        return "Synced \(hours / 24)d ago"
+        return nil
     }
 }

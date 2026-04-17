@@ -5,17 +5,23 @@ public struct CachedControllerStatusPayload: Codable, Equatable, Sendable {
     public let statuses: [ModelProfileStatus]
     public let benchmark: BenchmarkStatus?
     public let integrations: [ControllerIntegration]
+    public let profilesDirectory: String?
+    public let controllerRoot: String?
 
     public init(
         cachedAt: Date = .now,
         statuses: [ModelProfileStatus],
         benchmark: BenchmarkStatus?,
-        integrations: [ControllerIntegration]
+        integrations: [ControllerIntegration],
+        profilesDirectory: String? = nil,
+        controllerRoot: String? = nil
     ) {
         self.cachedAt = cachedAt
         self.statuses = statuses
         self.benchmark = benchmark
         self.integrations = integrations
+        self.profilesDirectory = profilesDirectory
+        self.controllerRoot = controllerRoot
     }
 
     public init(cachedAt: Date = .now, payload: ControllerStatusPayload) {
@@ -23,12 +29,20 @@ public struct CachedControllerStatusPayload: Codable, Equatable, Sendable {
             cachedAt: cachedAt,
             statuses: payload.statuses,
             benchmark: payload.benchmark,
-            integrations: payload.integrations
+            integrations: payload.integrations,
+            profilesDirectory: payload.profilesDirectory,
+            controllerRoot: payload.controllerRoot
         )
     }
 
     public var payload: ControllerStatusPayload {
-        ControllerStatusPayload(statuses: statuses, benchmark: benchmark, integrations: integrations)
+        ControllerStatusPayload(
+            statuses: statuses,
+            benchmark: benchmark,
+            integrations: integrations,
+            profilesDirectory: profilesDirectory,
+            controllerRoot: controllerRoot
+        )
     }
 
     enum CodingKeys: String, CodingKey {
@@ -36,6 +50,8 @@ public struct CachedControllerStatusPayload: Codable, Equatable, Sendable {
         case statuses
         case benchmark
         case integrations
+        case profilesDirectory = "profiles_dir"
+        case controllerRoot = "controller_root"
     }
 }
 

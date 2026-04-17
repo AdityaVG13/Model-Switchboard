@@ -10,7 +10,7 @@ struct HelpView: View {
                     title: "Quick Start",
                     bullets: [
                         "Install the local controller service first. ModelSwitchboard assumes a controller is serving status and actions at `http://127.0.0.1:8877` by default.",
-                        "Put model launch profiles in the controller's `model-profiles` directory. Profiles can point to `llama.cpp`, MLX, or any custom command adapter that exposes an OpenAI-compatible endpoint.",
+                        "Put model launch profiles in the controller's `model-profiles` directory. Settings now shows the live path reported by the controller and can open that folder in Finder.",
                         "Use `Start` to spawn a model, `Activate` to switch your primary endpoint, and `Stop All` before closing the lid or leaving the machine on battery."
                     ]
                 )
@@ -19,6 +19,7 @@ struct HelpView: View {
                     title: "Profile Setup",
                     bullets: [
                         "Each profile should define a stable profile name, runtime, host, port, request model ID, and the command needed to launch the server.",
+                        "For `llama.cpp`, set `MODEL_PATH` or `MODEL_FILE`. For MLX, set `MODEL_DIR` or `MODEL_REPO`. For custom launchers, use `START_COMMAND` and a health check.",
                         "Keep one centralized profile folder and treat it as the source of truth. ModelSwitchboard reads whatever the controller reports, so the app stays model-agnostic.",
                         "If you add new profiles, refresh the app after the controller picks them up."
                     ]
@@ -51,7 +52,7 @@ struct HelpView: View {
                 .font(.caption.bold())
                 .foregroundStyle(.secondary)
 
-            Text("The menu bar uses a native chip symbol instead of a custom illustration. At 18 px on a black menu bar, the macOS template symbol stays visible and reads more cleanly.")
+            Text("The menu bar mark uses a native template symbol so it stays readable on both dark and light menu bars at true menu-bar size.")
                 .font(.footnote)
                 .fixedSize(horizontal: false, vertical: true)
 

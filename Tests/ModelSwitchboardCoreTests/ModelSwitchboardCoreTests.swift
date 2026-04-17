@@ -34,6 +34,8 @@ import Testing
           "description": "Sync managed local profiles into Factory Droid custom model settings."
         }
       ],
+      "profiles_dir": "/Users/example/controller/model-profiles",
+      "controller_root": "/Users/example/controller",
       "benchmark": {
         "running": false,
         "pid": null,
@@ -62,6 +64,8 @@ import Testing
     #expect(payload.statuses.count == 1)
     #expect(payload.statuses[0].displayName == "Qwen3.5 35B A3B Local (llama.cpp)")
     #expect(payload.integrations.first?.id == "droid")
+    #expect(payload.profilesDirectory == "/Users/example/controller/model-profiles")
+    #expect(payload.controllerRoot == "/Users/example/controller")
     #expect(payload.benchmark?.latest?.rows.first?.decodeTokensPerSec == 119.63)
 }
 
@@ -172,7 +176,9 @@ import Testing
     let payload = ControllerStatusPayload(
         statuses: [status],
         benchmark: BenchmarkStatus(running: false, pid: nil, logPath: nil, latest: nil),
-        integrations: []
+        integrations: [],
+        profilesDirectory: "/tmp/model-profiles",
+        controllerRoot: "/tmp"
     )
     let tempURL = FileManager.default.temporaryDirectory
         .appendingPathComponent(UUID().uuidString)

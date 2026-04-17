@@ -2,7 +2,11 @@ import SwiftUI
 
 struct SettingsView: View {
     @Binding var controllerBaseURL: String
+    let profilesDirectory: String?
+    let controllerRoot: String?
     @ObservedObject var launchAtLoginManager: LaunchAtLoginManager
+    let openProfilesDirectory: () -> Void
+    let openControllerRoot: () -> Void
     let reconnect: () -> Void
     private let defaultControllerBaseURL = "http://127.0.0.1:8877"
 
@@ -21,6 +25,35 @@ struct SettingsView: View {
                 Text("Use the loopback controller unless you intentionally moved the control plane to another host or port.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Model Profile Source Of Truth")
+                    .font(.caption.bold())
+
+                Text("Users set model locations in the controller's profile manifests, not in app preferences. Each `.env` or `.json` file in `model-profiles` defines the runtime, model path, port, and launch behavior for one local model.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let profilesDirectory, !profilesDirectory.isEmpty {
+                    pathBlock(title: "Profiles Folder", value: profilesDirectory)
+
+                    HStack {
+                        Button("Open Profiles Folder", action: openProfilesDirectory)
+
+                        if let controllerRoot, !controllerRoot.isEmpty {
+                            Button("Open Controller Root", action: openControllerRoot)
+                        }
+                    }
+                } else {
+                    Text("Connect to a running controller once and Model Switchboard will surface the live `model-profiles` path here.")
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
             Divider()
@@ -77,6 +110,21 @@ struct SettingsView: View {
         }
         .onAppear {
             launchAtLoginManager.refresh()
+        }
+    }
+
+    private func pathBlock(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            Text(value)
+                .font(.caption.monospaced())
+                .textSelection(.enabled)
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.quaternary.opacity(0.22), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
     }
 }
