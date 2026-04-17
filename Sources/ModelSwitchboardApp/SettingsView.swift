@@ -13,146 +13,190 @@ struct SettingsView: View {
     let benchmark: BenchmarkStatus?
     let openDashboard: () -> Void
     let openLatestBenchmark: () -> Void
+    @Binding var menuPanelWidth: Double
+    let menuPanelWidthRange: ClosedRange<Double>
+    let defaultMenuPanelWidth: Double
     let runQuickBenchmarkAll: () -> Void
     private let defaultControllerBaseURL = "http://127.0.0.1:8877"
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Tune the connection without leaving the menu bar. This stays attached to ModelSwitchboard instead of opening a detached desktop window.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Controller Base URL")
-                    .font(.caption.bold())
-                TextField(defaultControllerBaseURL, text: $controllerBaseURL)
-                    .textFieldStyle(.roundedBorder)
-                    .textSelection(.enabled)
-                Text("Use the loopback controller unless you intentionally moved the control plane to another host or port.")
-                    .font(.footnote)
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Tune the connection without leaving the menu bar. This stays attached to ModelSwitchboard instead of opening a detached desktop window.")
+                    .font(.caption)
                     .foregroundStyle(.secondary)
-            }
 
-            Divider()
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Model Profile Source Of Truth")
-                    .font(.caption.bold())
-
-                Text("Users set model locations in the controller's profile manifests, not in app preferences. Each `.env` or `.json` file in `model-profiles` defines the runtime, model path, port, and launch behavior for one local model.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                if let profilesDirectory, !profilesDirectory.isEmpty {
-                    pathBlock(title: "Profiles Folder", value: profilesDirectory)
-
-                    HStack {
-                        Button("Open Profiles Folder", action: openProfilesDirectory)
-
-                        if let controllerRoot, !controllerRoot.isEmpty {
-                            Button("Open Controller Root", action: openControllerRoot)
-                        }
-                    }
-                } else {
-                    Text("Connect to a running controller once and Model Switchboard will surface the live `model-profiles` path here.")
-                        .font(.footnote)
-                        .foregroundStyle(.orange)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-
-            Divider()
-
-            if features.supportsBenchmarks || features.supportsDashboard {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Advanced Tools")
+                    Text("Controller Base URL")
                         .font(.caption.bold())
-
-                    Text("Diagnostics stay available, but they live here so the primary switchboard stays operational instead of turning into a control-center dump.")
+                    TextField(defaultControllerBaseURL, text: $controllerBaseURL)
+                        .textFieldStyle(.roundedBorder)
+                        .textSelection(.enabled)
+                    Text("Use the loopback controller unless you intentionally moved the control plane to another host or port.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    if let latest = benchmark?.latest {
-                        Text("Latest benchmark: \(latest.suite ?? "unknown")")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text("Latest benchmark: none recorded yet")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                    }
-
-                    HStack {
-                        if features.supportsDashboard {
-                            Button("Open Dashboard", action: openDashboard)
-                        }
-                        if features.supportsBenchmarks {
-                            Button("Latest Bench", action: openLatestBenchmark)
-                                .disabled(benchmark?.latest?.markdownPath == nil)
-                        }
-                    }
-
-                    if features.supportsBenchmarks {
-                        Button("Run Quick Benchmark All", action: runQuickBenchmarkAll)
-                            .disabled(benchmark?.running == true)
-                    }
                 }
 
                 Divider()
-            }
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Launch At Login")
-                    .font(.caption.bold())
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Model Profile Source Of Truth")
+                        .font(.caption.bold())
 
-                if launchAtLoginManager.isAvailable {
-                    Toggle(
-                        "Open Model Switchboard when you log in",
-                        isOn: Binding(
-                            get: {
-                                launchAtLoginManager.isEnabled || launchAtLoginManager.requiresApproval
-                            },
-                            set: { launchAtLoginManager.setEnabled($0) }
-                        )
-                    )
-
-                    Text("The app is idle when closed in the menu bar. When the menu is open, it refreshes every 10 minutes while idle, every 30 seconds while a model is live, and faster only during active actions or benchmarks.")
+                    Text("Users set model locations in the controller's profile manifests, not in app preferences. Each `.env` or `.json` file in `model-profiles` defines the runtime, model path, port, and launch behavior for one local model.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    if launchAtLoginManager.requiresApproval {
-                        Text("macOS needs you to approve the login item in System Settings > General > Login Items.")
+                    if let profilesDirectory, !profilesDirectory.isEmpty {
+                        pathBlock(title: "Profiles Folder", value: profilesDirectory)
+
+                        HStack {
+                            Button("Open Profiles Folder", action: openProfilesDirectory)
+
+                            if let controllerRoot, !controllerRoot.isEmpty {
+                                Button("Open Controller Root", action: openControllerRoot)
+                            }
+                        }
+                    } else {
+                        Text("Connect to a running controller once and Model Switchboard will surface the live `model-profiles` path here.")
                             .font(.footnote)
                             .foregroundStyle(.orange)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                } else {
-                    Text("Launch at login requires a newer macOS Service Management API.")
+                }
+
+                Divider()
+
+                if features.supportsBenchmarks || features.supportsDashboard {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Advanced Tools")
+                            .font(.caption.bold())
+
+                        Text("Diagnostics stay available, but they live here so the primary switchboard stays operational instead of turning into a control-center dump.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        if let latest = benchmark?.latest {
+                            Text("Latest benchmark: \(latest.suite ?? "unknown")")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("Latest benchmark: none recorded yet")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+
+                        HStack(spacing: 8) {
+                            if features.supportsDashboard {
+                                Button("Open Dashboard", action: openDashboard)
+                                    .frame(maxWidth: .infinity)
+                            }
+                            if features.supportsBenchmarks {
+                                Button("Latest Bench", action: openLatestBenchmark)
+                                    .disabled(benchmark?.latest?.markdownPath == nil)
+                                    .frame(maxWidth: .infinity)
+                                Button("Quick Benchmark", action: runQuickBenchmarkAll)
+                                    .disabled(benchmark?.running == true)
+                                    .frame(maxWidth: .infinity)
+                            }
+                        }
+                    }
+
+                    Divider()
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Launch At Login")
+                        .font(.caption.bold())
+
+                    if launchAtLoginManager.isAvailable {
+                        Toggle(
+                            "Open Model Switchboard when you log in",
+                            isOn: Binding(
+                                get: {
+                                    launchAtLoginManager.isEnabled || launchAtLoginManager.requiresApproval
+                                },
+                                set: { launchAtLoginManager.setEnabled($0) }
+                            )
+                        )
+
+                        Text("The app is idle when closed in the menu bar. When the menu is open, it refreshes every 10 minutes while idle, every 30 seconds while a model is live, and faster only during active actions or benchmarks.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        if launchAtLoginManager.requiresApproval {
+                            Text("macOS needs you to approve the login item in System Settings > General > Login Items.")
+                                .font(.footnote)
+                                .foregroundStyle(.orange)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    } else {
+                        Text("Launch at login requires a newer macOS Service Management API.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if let error = launchAtLoginManager.lastError {
+                        Text(error)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Menu Width")
+                        .font(.caption.bold())
+
+                    Text("Resize the main switchboard surface to match your preferred density. Layout and controls adapt automatically.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                }
-
-                if let error = launchAtLoginManager.lastError {
-                    Text(error)
-                        .font(.footnote)
-                        .foregroundStyle(.red)
                         .fixedSize(horizontal: false, vertical: true)
-                }
-            }
 
-            HStack {
-                Button("Use Default") {
-                    controllerBaseURL = defaultControllerBaseURL
+                    HStack(alignment: .center, spacing: 10) {
+                        Slider(value: $menuPanelWidth, in: menuPanelWidthRange, step: 10)
+                        Text("\(Int(menuPanelWidth.rounded())) px")
+                            .font(.footnote.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .frame(width: 56, alignment: .trailing)
+                    }
+
+                    HStack(spacing: 8) {
+                        Button("Narrow") {
+                            menuPanelWidth = max(menuPanelWidthRange.lowerBound, defaultMenuPanelWidth - 70)
+                        }
+                        .frame(maxWidth: .infinity)
+                        Button("Default") {
+                            menuPanelWidth = defaultMenuPanelWidth
+                        }
+                        .frame(maxWidth: .infinity)
+                        Button("Wide") {
+                            menuPanelWidth = min(menuPanelWidthRange.upperBound, defaultMenuPanelWidth + 70)
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
                 }
-                Button("Reconnect") {
-                    reconnect()
+
+                HStack {
+                    Button("Use Default") {
+                        controllerBaseURL = defaultControllerBaseURL
+                    }
+                    Button("Reconnect") {
+                        reconnect()
+                    }
+                    .buttonStyle(.borderedProminent)
                 }
-                .buttonStyle(.borderedProminent)
             }
+            .padding(.trailing, 14)
+            .padding(.bottom, 8)
         }
+        .scrollIndicators(.visible)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear {
             launchAtLoginManager.refresh()
         }

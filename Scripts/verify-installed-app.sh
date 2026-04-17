@@ -307,6 +307,19 @@ frontmost_app() {
   osascript -e 'tell application "System Events" to get name of first process whose frontmost is true'
 }
 
+ANCHOR_APP_NAME=""
+
+activate_anchor_app() {
+  local candidate
+  for candidate in "${MSW_ANCHOR_APP:-ghostty}" ghostty Terminal iTerm2 Finder; do
+    if osascript -e "tell application \"$candidate\" to activate" >/dev/null 2>&1; then
+      ANCHOR_APP_NAME="$candidate"
+      return 0
+    fi
+  done
+  ANCHOR_APP_NAME="Finder"
+}
+
 frontmost_browser_url() {
   local app
   app="$(frontmost_app)"
@@ -369,6 +382,16 @@ wait_for_benchmark_change() {
     running="$(status_value benchmark_running '-')"
     generated="$(status_value benchmark_generated_at '-')"
     if [[ "$running" == "true" || ( -n "$generated" && "$generated" != "$before" ) ]]; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+wait_for_benchmark_idle() {
+  for _ in {1..90}; do
+    if [[ "$(status_value benchmark_running '-')" == "false" ]]; then
       return 0
     fi
     sleep 1
@@ -640,11 +663,11 @@ sys.exit(0 if abs(float("$MAIN_AFTER_HELP_Y") - float("$MAIN_BEFORE_Y")) < 0.5 e
 PY
 pass "help side panel"
 
-"$WORK_DIR/msw_click" 80 200
+"$WORK_DIR/msw_click" 8 8
 wait_for_main_window_absent || fail "help outside-click close"
 pass "help outside-click close"
 
-osascript -e 'tell application "ghostty" to activate'
+activate_anchor_app
 launch_app
 open_menu
 if [[ "$HAS_ADVANCED" == "1" ]]; then
@@ -659,14 +682,14 @@ if [[ "$HAS_ADVANCED" == "1" ]]; then
   pass "dashboard button"
 fi
 
-osascript -e 'tell application "ghostty" to activate'
+activate_anchor_app
 launch_app
 open_menu
 press_button Open 1
 wait_for_browser_url_prefix "$FIRST_PROFILE_BASE_URL/models" || fail "open endpoint button"
 pass "open endpoint button"
 
-osascript -e 'tell application "ghostty" to activate'
+activate_anchor_app
 launch_app
 open_menu
 BENCHMARK_MARKDOWN_PATH="$(status_value benchmark_markdown_path '-')"
@@ -679,7 +702,7 @@ if [[ "$HAS_ADVANCED" == "1" ]]; then
     ocr_click "$LATEST_BENCH_SHOT" "Latest Bench"
   fi
   for _ in {1..20}; do
-    if [[ "$(frontmost_app)" != "ghostty" ]]; then
+    if [[ -n "$ANCHOR_APP_NAME" && "$(frontmost_app)" != "$ANCHOR_APP_NAME" ]]; then
       break
     fi
     if [[ -n "$BENCHMARK_MARKDOWN_PATH" ]] && lsof "$BENCHMARK_MARKDOWN_PATH" >/dev/null 2>&1; then
@@ -687,7 +710,7 @@ if [[ "$HAS_ADVANCED" == "1" ]]; then
     fi
     sleep 0.5
   done
-  if [[ "$(frontmost_app)" == "ghostty" ]]; then
+  if [[ -n "$ANCHOR_APP_NAME" && "$(frontmost_app)" == "$ANCHOR_APP_NAME" ]]; then
     if [[ -z "$BENCHMARK_MARKDOWN_PATH" ]] || ! lsof "$BENCHMARK_MARKDOWN_PATH" >/dev/null 2>&1; then
       fail "latest bench button"
     fi
@@ -700,10 +723,12 @@ open_menu
 if [[ "$HAS_ADVANCED" == "1" ]]; then
   press_button Settings
   sleep 0.4
-  if ! press_button "Run Quick Benchmark All" 2>/dev/null; then
+  if ! press_button "Quick Benchmark" 2>/dev/null; then
     QUICK_BENCH_SHOT="$WORK_DIR/quick-bench-all.png"
     take_shot "$QUICK_BENCH_SHOT"
-    ocr_click "$QUICK_BENCH_SHOT" "Run Quick Benchmark All"
+    if ! ocr_click "$QUICK_BENCH_SHOT" "Quick Benchmark"; then
+      ocr_click "$QUICK_BENCH_SHOT" "Run Quick Benchmark All"
+    fi
   fi
   wait_for_benchmark_change "$(status_value benchmark_generated_at '-')" || fail "quick bench all"
   pass "quick bench all"
@@ -726,6 +751,7 @@ if [[ "$HAS_ADVANCED" == "1" ]]; then
 fi
 
 controller_post /api/stop-all ""
+wait_for_benchmark_idle || fail "stop all benchmark settle"
 launch_app
 open_menu
 press_button Start 1

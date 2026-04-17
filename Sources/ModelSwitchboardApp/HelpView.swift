@@ -5,7 +5,7 @@ struct HelpView: View {
     private let features = AppFeatures.current
 
     var body: some View {
-        ScrollView {
+        ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: 16) {
                 logoPreviewSection
 
@@ -52,7 +52,11 @@ struct HelpView: View {
                     bullets: powerUserBullets
                 )
             }
+            .padding(.trailing, 14)
+            .padding(.bottom, 8)
         }
+        .scrollIndicators(.visible)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private var logoPreviewSection: some View {

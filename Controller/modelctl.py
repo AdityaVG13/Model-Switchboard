@@ -422,6 +422,14 @@ HTML_PAGE = r"""<!doctype html>
       `;
     }
 
+    function suiteLabel(value) {
+      if (!value) return 'Idle';
+      return String(value)
+        .replaceAll('_', ' ')
+        .replaceAll('-', ' ')
+        .replace(/\b\w/g, (char) => char.toUpperCase());
+    }
+
     async function api(path, options = {}) {
       const response = await fetch(path, {
         headers: { 'Content-Type': 'application/json' },
@@ -453,7 +461,7 @@ HTML_PAGE = r"""<!doctype html>
 
       summaryEl.innerHTML = [
         metric('Ready', `${ready}/${statuses.length}`, `${running} process${running === 1 ? '' : 'es'} live`),
-        metric('Benchmark', benchmark.running ? 'Running' : (latest.suite || 'Idle'), latest.generated_at ? new Date(latest.generated_at).toLocaleTimeString() : 'No recent benchmark'),
+        metric('Benchmark', benchmark.running ? 'Running' : suiteLabel(latest.suite), latest.generated_at ? new Date(latest.generated_at).toLocaleTimeString() : 'No recent benchmark'),
         metric('Profiles folder', statuses.length ? 'Live' : 'Waiting', data.profiles_dir || 'not reported'),
       ].join('');
 
@@ -517,7 +525,7 @@ HTML_PAGE = r"""<!doctype html>
       footerEl.innerHTML = `
         <div><strong>Controller:</strong> ${escapeHTML(window.location.origin)}</div>
         <div><strong>Profiles:</strong> ${escapeHTML(data.profiles_dir || 'not reported')}</div>
-        <div><strong>Benchmark:</strong> ${escapeHTML(benchmark.running ? 'running' : (latest.suite || 'idle'))}</div>
+        <div><strong>Benchmark:</strong> ${escapeHTML(benchmark.running ? 'Running' : suiteLabel(latest.suite))}</div>
       `;
     }
 

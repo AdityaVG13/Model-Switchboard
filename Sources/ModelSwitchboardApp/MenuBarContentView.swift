@@ -35,7 +35,7 @@ private final class InspectorPanelController {
 
             window = InspectorPanelWindow(
                 contentRect: NSRect(x: 0, y: 0, width: width, height: height),
-                styleMask: [.titled, .fullSizeContentView],
+                styleMask: [.borderless],
                 backing: .buffered,
                 defer: false
             )
@@ -48,11 +48,6 @@ private final class InspectorPanelController {
             window.hidesOnDeactivate = false
             window.level = .floating
             window.collectionBehavior = [.transient, .moveToActiveSpace]
-            window.titleVisibility = .hidden
-            window.titlebarAppearsTransparent = true
-            window.standardWindowButton(.closeButton)?.isHidden = true
-            window.standardWindowButton(.miniaturizeButton)?.isHidden = true
-            window.standardWindowButton(.zoomButton)?.isHidden = true
 
             panelWindow = window
             hostingView = host
@@ -126,7 +121,12 @@ struct MenuBarContentView: View {
     let reconnect: () -> Void
     let updateMenuBarHelp: (String) -> Void
 
-    private let mainPanelWidth: CGFloat = 470
+    @AppStorage("menuPanelWidth")
+    private var storedMainPanelWidth: Double = 470
+
+    private let defaultMainPanelWidth: Double = 470
+    private let minMainPanelWidth: Double = 390
+    private let maxMainPanelWidth: Double = 620
     private let inspectorPanelWidth: CGFloat = 290
     private let panelHeight: CGFloat = 620
     private let panelGap: CGFloat = 10
@@ -144,13 +144,23 @@ struct MenuBarContentView: View {
         return formatter
     }()
 
+    private var mainPanelWidth: CGFloat {
+        CGFloat(clampPanelWidth(storedMainPanelWidth))
+    }
+
     var body: some View {
         mainPanelCard
             .frame(width: mainPanelWidth, height: panelHeight)
             .background(
                 WindowAccessor { window in
+                    guard let window else { return }
                     if hostWindow !== window {
                         hostWindow = window
+                    }
+                    configureHostWindow(window)
+                    let detectedWidth = clampPanelWidth(Double(window.frame.width))
+                    if abs(detectedWidth - storedMainPanelWidth) > 0.5 {
+                        storedMainPanelWidth = detectedWidth
                     }
                     synchronizeInspectorWindow()
                 }
@@ -167,6 +177,22 @@ struct MenuBarContentView: View {
         }
         .onChange(of: store.menuBarHelp) { _, newValue in
             updateMenuBarHelp(newValue)
+        }
+        .onChange(of: storedMainPanelWidth) { _, newValue in
+            let clamped = clampPanelWidth(newValue)
+            if abs(clamped - newValue) > .ulpOfOne {
+                storedMainPanelWidth = clamped
+            }
+            if let hostWindow {
+                var frame = hostWindow.frame
+                let nextWidth = CGFloat(clamped)
+                if abs(frame.width - nextWidth) > 0.5 {
+                    frame.origin.x += (frame.width - nextWidth)
+                    frame.size.width = nextWidth
+                    hostWindow.setFrame(frame, display: true, animate: false)
+                }
+            }
+            synchronizeInspectorWindow()
         }
         .animation(inspectorAnimation, value: inspectorPanel)
         .animation(.snappy(duration: 0.18), value: store.pendingProfileActions)
@@ -370,8 +396,7 @@ struct MenuBarContentView: View {
             }
 
             inspectorView(panel)
-
-            Spacer(minLength: 0)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .padding(16)
         .frame(width: inspectorPanelWidth, height: panelHeight, alignment: .topLeading)
@@ -399,6 +424,12 @@ struct MenuBarContentView: View {
                 benchmark: store.benchmark,
                 openDashboard: store.openDashboard,
                 openLatestBenchmark: store.openLatestBenchmark,
+                menuPanelWidth: Binding(
+                    get: { clampPanelWidth(storedMainPanelWidth) },
+                    set: { storedMainPanelWidth = clampPanelWidth($0) }
+                ),
+                menuPanelWidthRange: minMainPanelWidth...maxMainPanelWidth,
+                defaultMenuPanelWidth: defaultMainPanelWidth,
                 runQuickBenchmarkAll: {
                     Task { await store.quickBenchmark() }
                 }
@@ -491,5 +522,17 @@ struct MenuBarContentView: View {
         }
 
         return nil
+    }
+
+    private func clampPanelWidth(_ value: Double) -> Double {
+        min(max(value, minMainPanelWidth), maxMainPanelWidth)
+    }
+
+    private func configureHostWindow(_ window: NSWindow) {
+        window.styleMask.insert(.resizable)
+        window.showsResizeIndicator = true
+        window.minSize = NSSize(width: minMainPanelWidth, height: panelHeight)
+        window.maxSize = NSSize(width: maxMainPanelWidth, height: panelHeight)
+        window.resizeIncrements = NSSize(width: 10, height: 1)
     }
 }
