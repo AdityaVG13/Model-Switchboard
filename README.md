@@ -17,7 +17,7 @@
 
 ---
 
-Running local models on an Apple Silicon Mac usually means a sprawl of terminal windows, half-remembered launch scripts, and no clean way to see **what's actually running.** Model Switchboard puts every runtime you have — `llama.cpp`, MLX, Ollama, vLLM, or anything you can script — behind **one menu bar panel.** Click **Activate**, every other model stops, the one you picked comes up at an OpenAI-compatible endpoint.
+Running local models on an Apple Silicon Mac usually means a sprawl of terminal windows, half-remembered launch scripts, and no clean way to see **what's actually running.** Model Switchboard puts `llama.cpp`, MLX, Ollama, vLLM, and custom launch scripts behind **one menu bar panel.** Click **Activate**, every other model stops, and the one you picked comes up at an OpenAI-compatible endpoint.
 
 *No terminals. No orphan processes. No "green dot" lies.*
 
@@ -29,7 +29,7 @@ Running local models on an Apple Silicon Mac usually means a sprawl of terminal 
 
 **`Activate` stops every other profile and brings the chosen one up.** No more forgetting to `kill -9` a 24 GB process before starting the next one.
 
-Profiles are marked **ready** *only* after a real health check passes — `/v1/models` by default, or a custom HTTP probe. If it says green, it means green.
+Profiles are marked **ready** *only* after a real health check passes. By default, the app checks `/v1/models`, and you can swap in a custom HTTP probe. If it says green, it means green.
 
 Built with **SwiftUI** and `MenuBarExtra`. No Electron, no bundled inference engine, no resident background worker pegging your CPU.
 
@@ -43,7 +43,7 @@ Built with **SwiftUI** and `MenuBarExtra`. No Electron, no bundled inference eng
 
 **CPU and GPU utilization** live in the header, so you know what your machine is doing *without* dropping into Activity Monitor.
 
-**`Benchmark All`** runs the fleet. **`Reopen Last`** jumps straight back to what you had up. **`Sync Droid`** pushes your managed profiles into Factory Droid's custom-model settings, so the model you just activated is the one Droid uses — *the first of several planned sync adapters ([see contributing](#contributing)).*
+**`Benchmark All`** runs the fleet. **`Reopen Last`** jumps straight back to what you had up. **`Sync Droid`** pushes your managed profiles into Factory Droid's custom-model settings, so the model you just activated is the one Droid uses. It is the first of several planned sync adapters ([see contributing](#contributing)).
 
 <br clear="left">
 
@@ -55,7 +55,7 @@ Built with **SwiftUI** and `MenuBarExtra`. No Electron, no bundled inference eng
 
 The inline panel reads the latest run and shows **TTFT**, **Decode**, **E2E**, and **RSS** per profile in one place.
 
-Tap **`Export CSV`** and you have a portable report. Every run lands as both JSON and Markdown under `Controller/benchmark-results/` — easy to diff, commit, or feed into another tool.
+Tap **`Export CSV`** and you have a portable report. Every run lands as both JSON and Markdown under `Controller/benchmark-results/`, so it is easy to diff, commit, or feed into another tool.
 
 <br clear="right">
 
@@ -71,18 +71,18 @@ Tap **`Export CSV`** and you have a portable report. Every run lands as both JSO
 | `Activate` / `Start` / `Stop` / `Restart` | ✓ | ✓ |
 | `Refresh` / `Stop All` | ✓ | ✓ |
 | `Launch At Login` + attached Settings / Help | ✓ | ✓ |
-| CPU / GPU utilization badges | — | ✓ |
-| `Benchmark All` + per-profile `Benchmark` | — | ✓ |
-| In-app Benchmarks panel + CSV export | — | ✓ |
-| `Reopen Last` | — | ✓ |
-| `Sync Droid` and future integration adapters | — | ✓ |
+| CPU / GPU utilization badges | - | ✓ |
+| `Benchmark All` + per-profile `Benchmark` | - | ✓ |
+| In-app Benchmarks panel + CSV export | - | ✓ |
+| `Reopen Last` | - | ✓ |
+| `Sync Droid` and future integration adapters | - | ✓ |
 
 ---
 
 ## Requirements
 
 - **macOS 14** (Sonoma) or later
-- **Apple Silicon recommended** — Intel Macs run the app fine, but *MLX models require Apple Silicon*
+- **Apple Silicon recommended**. Intel Macs run the app fine, but *MLX models require Apple Silicon*
 - A running **controller** that exposes the [controller contract](SETUP.md#controller-api-contract). This repo ships a reference controller under `Controller/`
 
 ---
@@ -111,7 +111,7 @@ The installer places a fresh build under `~/Applications/`, registers it with La
 
 ## First run
 
-*Model Switchboard is the control surface — it doesn't run models itself.* You need a controller that knows how to launch and health-check them.
+*Model Switchboard is the control surface. It does not run models itself.* You need a controller that knows how to launch and health-check models.
 
 **1. Install the reference controller:**
 
@@ -134,15 +134,29 @@ SERVER_MODEL_ID=qwen35-local
 
 > Using your own runtime or launcher? Any backend that honors the [controller contract](SETUP.md#controller-api-contract) works. MLX, Ollama, vLLM, and custom-command examples live in [SETUP.md](SETUP.md).
 
+## Status labels
+
+If something looks off, these labels tell you what the app is seeing right now:
+
+| Label | Where it appears | Meaning |
+|---|---|---|
+| `RUNNING` | Profile card badge | Process is currently running. |
+| `NOT RUNNING` | Profile card badge | Process is not running. |
+| `STARTING` / `STOPPING` / `RESTARTING` / `ACTIVATING` | Profile card badge | Action is in progress for that profile. |
+| `STALE` | Footer chip near the clock | Last successful status refresh is older than ~45 seconds. |
+| `CACHED` | Footer chip near the clock | Controller was temporarily unavailable and the app is showing last cached status. |
+| `ERROR` | Footer chip near the clock | Latest refresh or action returned an error. |
+| `RUNNING` / `READY` | Plus Benchmarks panel | Benchmark job is active / no benchmark currently running. |
+
 ---
 
 ## Documentation
 
 All the deeper material lives in one place so this README stays skimmable:
 
-> **[SETUP.md](SETUP.md)** — profile formats, supported runtimes, health checks, controller API contract, build-from-source flow, release pipeline, Raycast power-user notes, troubleshooting, known limitations.
+> **[SETUP.md](SETUP.md)**: profile formats, supported runtimes, health checks, controller API contract, build-from-source flow, release pipeline, Raycast power-user notes, troubleshooting, and known limitations.
 
-> **[CHANGELOG.md](CHANGELOG.md)** — release-by-release changes and distribution hardening notes.
+> **[CHANGELOG.md](CHANGELOG.md)**: release-by-release changes and distribution hardening notes.
 
 *The app's **Help** button opens the same doc.*
 
@@ -153,19 +167,19 @@ All the deeper material lives in one place so this README stays skimmable:
 PRs, issues, and profile recipes are welcome. A few ground rules that keep the project reusable:
 
 - **Keep the app generic.** Runtime-specific behavior belongs in the controller or a profile manifest.
-- **The controller HTTP contract is the stability boundary** — additive changes only.
+- **The controller HTTP contract is the stability boundary.** Make additive changes only.
 - External tools stay **optional integrations**, never required features.
 - Ship a runnable example with any new adapter.
 
 ### Especially wanted: more sync adapters
 
-**`Sync Droid` is currently Factory-Droid-specific** because that's the agent I run. The integration slot is generic — the adapter is not. **PRs that add sync adapters for other local-model terminals or agentic tools are very welcome**, including but not limited to:
+**`Sync Droid` is currently Factory-Droid-specific** because that's the agent I run. The integration slot is generic, but the adapter is not. **PRs that add sync adapters for other local-model terminals or agentic tools are very welcome**, including but not limited to:
 
-- **Cursor** / **Windsurf** — push the active profile into the OpenAI-compatible provider settings
-- **OpenAI Codex CLI** — update `~/.codex/config.toml` model entry
-- **Zed** — update `~/.config/zed/settings.json` assistant provider
+- **Cursor** / **Windsurf**: push the active profile into the OpenAI-compatible provider settings
+- **OpenAI Codex CLI**: update `~/.codex/config.toml` model entry
+- **Zed**: update `~/.config/zed/settings.json` assistant provider
 - **Continue** (`~/.continue/config.json`)
-- **Aider** — point at the active endpoint
+- **Aider**: point at the active endpoint
 - **LM Studio** / **Ollama chat frontends** / any **OpenAI-compatible consumer**
 
 If you build one, follow the shape of `Controller/sync-droid-local-models.py` and register it under `Controller/integrations/` so it shows up in the Plus menu automatically.
