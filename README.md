@@ -192,27 +192,6 @@ swift test && ./Scripts/check-cycles.py && ./Scripts/build-app.sh
 
 ---
 
-## License
-
-**[MIT](LICENSE)** © 2026 AdityaVG13
-
----
-
-<div align="center">
-
-### Support the project
-
-*Model Switchboard is a solo side project, open-sourced for free.*
-If it saves you time flipping between local models, a small tip helps cover the API and tooling bills that keep it moving forward.
-
-<a href="https://ko-fi.com/AdityaVG13">
-  <img src="https://img.shields.io/badge/Ko--fi-Buy%20me%20a%20coffee-FF5E5B?logo=ko-fi&logoColor=white&style=for-the-badge" alt="Support on Ko-fi">
-</a>
-
-</div>
-
----
-
 ## Let your AI set it up
 
 If you already downloaded the app and just want the controller and profiles wired up, give your favorite AI this prompt:
@@ -241,3 +220,24 @@ End state:
 - health checks go green only when the endpoint is actually ready
 - nothing is tied to one specific Mac beyond what is truly installed here
 ```
+
+---
+
+## License
+
+**[MIT](LICENSE)** © 2026 AdityaVG13
+
+---
+
+<div align="center">
+
+### Support the project
+
+*Model Switchboard is a solo side project, open-sourced for free.*
+If it saves you time flipping between local models, a small tip helps cover the API and tooling bills that keep it moving forward.
+
+<a href="https://ko-fi.com/AdityaVG13">
+  <img src="https://img.shields.io/badge/Ko--fi-Buy%20me%20a%20coffee-FF5E5B?logo=ko-fi&logoColor=white&style=for-the-badge" alt="Support on Ko-fi">
+</a>
+
+</div>

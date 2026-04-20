@@ -14,6 +14,7 @@ final class InspectorPanelController {
     private weak var parentWindow: NSWindow?
     private let showAnimationDuration: TimeInterval
     private let hideAnimationDuration: TimeInterval
+    private var visibilityGeneration = 0
 
     init(
         showAnimationDuration: TimeInterval = 0.16,
@@ -31,6 +32,7 @@ final class InspectorPanelController {
         gap: CGFloat,
         content: AnyView
     ) {
+        visibilityGeneration += 1
         let window: InspectorPanelWindow
         let host: NSHostingView<AnyView>
 
@@ -67,7 +69,8 @@ final class InspectorPanelController {
         window.setContentSize(NSSize(width: width, height: height))
         host.frame = NSRect(x: 0, y: 0, width: width, height: height)
 
-        if parentWindow !== parent {
+        let isAttachedToParent = parent.childWindows?.contains(where: { $0 === window }) == true
+        if parentWindow !== parent || !isAttachedToParent {
             parentWindow?.removeChildWindow(window)
             parent.addChildWindow(window, ordered: .above)
             parentWindow = parent
@@ -80,8 +83,9 @@ final class InspectorPanelController {
             height: height
         )
         window.setFrame(frame, display: true)
+        window.alphaValue = 1
         if !window.isVisible {
-            window.alphaValue = 0
+            window.alphaValue = showAnimationDuration > 0 ? 0 : 1
             window.orderFront(nil)
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = showAnimationDuration
@@ -97,12 +101,15 @@ final class InspectorPanelController {
             completion?()
             return
         }
+        visibilityGeneration += 1
+        let hideGeneration = visibilityGeneration
 
         NSAnimationContext.runAnimationGroup { context in
             context.duration = hideAnimationDuration
             window.animator().alphaValue = 0
         } completionHandler: {
             DispatchQueue.main.async {
+                guard hideGeneration == self.visibilityGeneration else { return }
                 self.parentWindow?.removeChildWindow(window)
                 self.parentWindow = nil
                 window.orderOut(nil)

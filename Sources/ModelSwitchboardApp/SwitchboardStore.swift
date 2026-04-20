@@ -59,11 +59,7 @@ final class SwitchboardStore {
     }
 
     var sortedStatuses: [ModelProfileStatus] {
-        statuses.sorted { lhs, rhs in
-            if lhs.ready != rhs.ready { return lhs.ready && !rhs.ready }
-            if lhs.running != rhs.running { return lhs.running && !rhs.running }
-            return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
-        }
+        statuses.sorted(by: ModelProfileStatus.compareForDisplay)
     }
 
     var menuBarHelp: String {

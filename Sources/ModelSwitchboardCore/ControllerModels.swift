@@ -106,6 +106,62 @@ public struct ModelProfileStatus: Codable, Identifiable, Equatable, Sendable {
     }
 }
 
+public extension ModelProfileStatus {
+    static func compareForDisplay(_ lhs: Self, _ rhs: Self) -> Bool {
+        if lhs.running != rhs.running {
+            return lhs.running && !rhs.running
+        }
+        if lhs.running && lhs.ready != rhs.ready {
+            return lhs.ready && !rhs.ready
+        }
+
+        let lhsHostRank = lhs.displayHostRank
+        let rhsHostRank = rhs.displayHostRank
+        if lhsHostRank != rhsHostRank {
+            return lhsHostRank < rhsHostRank
+        }
+
+        let lhsHost = lhs.normalizedDisplayHost
+        let rhsHost = rhs.normalizedDisplayHost
+        if lhsHost != rhsHost {
+            return lhsHost.localizedCaseInsensitiveCompare(rhsHost) == .orderedAscending
+        }
+
+        let lhsPort = lhs.displayPortRank
+        let rhsPort = rhs.displayPortRank
+        if lhsPort != rhsPort {
+            return lhsPort < rhsPort
+        }
+
+        let nameComparison = lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName)
+        if nameComparison != .orderedSame {
+            return nameComparison == .orderedAscending
+        }
+
+        return lhs.profile.localizedCaseInsensitiveCompare(rhs.profile) == .orderedAscending
+    }
+
+    private var displayHostRank: Int {
+        isLoopbackHost ? 0 : 1
+    }
+
+    private var normalizedDisplayHost: String {
+        if isLoopbackHost {
+            return "localhost"
+        }
+        return host.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var displayPortRank: Int {
+        Int(port.trimmingCharacters(in: .whitespacesAndNewlines)) ?? .max
+    }
+
+    private var isLoopbackHost: Bool {
+        let normalized = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalized == "127.0.0.1" || normalized == "localhost" || normalized == "::1"
+    }
+}
+
 public struct BenchmarkLatestRow: Codable, Equatable, Sendable {
     public let profile: String?
     public let runtime: String?

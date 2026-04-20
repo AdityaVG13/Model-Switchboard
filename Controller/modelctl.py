@@ -513,9 +513,25 @@ HTML_PAGE = r"""<!doctype html>
     }
 
     function renderCards(data) {
+      const normalizeHost = (value) => {
+        const normalized = (value || '').trim().toLowerCase();
+        if (normalized === '127.0.0.1' || normalized === 'localhost' || normalized === '::1') return 'localhost';
+        return normalized;
+      };
+      const hostRank = (value) => normalizeHost(value) === 'localhost' ? 0 : 1;
+      const portRank = (value) => {
+        const parsed = Number.parseInt(String(value || '').trim(), 10);
+        return Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER;
+      };
       const statuses = [...(data.statuses || [])].sort((a, b) => {
-        if (a.ready !== b.ready) return Number(b.ready) - Number(a.ready);
         if (a.running !== b.running) return Number(b.running) - Number(a.running);
+        if (a.running && a.ready !== b.ready) return Number(b.ready) - Number(a.ready);
+        if (hostRank(a.host) !== hostRank(b.host)) return hostRank(a.host) - hostRank(b.host);
+        const aHost = normalizeHost(a.host);
+        const bHost = normalizeHost(b.host);
+        const hostCompare = aHost.localeCompare(bHost);
+        if (hostCompare !== 0) return hostCompare;
+        if (portRank(a.port) !== portRank(b.port)) return portRank(a.port) - portRank(b.port);
         return a.display_name.localeCompare(b.display_name);
       });
 

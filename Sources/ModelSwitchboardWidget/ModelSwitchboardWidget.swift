@@ -162,11 +162,7 @@ struct SwitchboardWidgetView: View {
     private let features = AppFeatures.current
 
     private var statuses: [ModelProfileStatus] {
-        (entry.payload?.statuses ?? []).sorted { lhs, rhs in
-            if lhs.ready != rhs.ready { return lhs.ready && !rhs.ready }
-            if lhs.running != rhs.running { return lhs.running && !rhs.running }
-            return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
-        }
+        (entry.payload?.statuses ?? []).sorted(by: ModelProfileStatus.compareForDisplay)
     }
 
     private var summary: DashboardSummary {

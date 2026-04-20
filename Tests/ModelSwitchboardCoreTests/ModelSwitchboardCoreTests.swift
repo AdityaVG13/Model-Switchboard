@@ -412,3 +412,121 @@ import Testing
 @Test func companionBundleIdentifierReturnsNilForUnknownSuffix() {
     #expect(LoginItemBundleIdentifiers.companion(for: "io.modelswitchboard.desktop") == nil)
 }
+
+@Test func profileDisplayOrderKeepsRunningAtTopThenSortsLoopbackPorts() {
+    let statuses = [
+        ModelProfileStatus(
+            profile: "remote",
+            displayName: "Remote",
+            runtime: "custom",
+            host: "192.168.1.10",
+            port: "9000",
+            baseURL: "http://192.168.1.10:9000/v1",
+            requestModel: "remote",
+            serverModelID: "remote",
+            pid: nil,
+            running: false,
+            ready: false,
+            serverIDs: [],
+            rssMB: nil,
+            command: nil,
+            logPath: "/tmp/remote.log"
+        ),
+        ModelProfileStatus(
+            profile: "local-8082",
+            displayName: "Local 8082",
+            runtime: "mlx",
+            host: "127.0.0.1",
+            port: "8082",
+            baseURL: "http://127.0.0.1:8082/v1",
+            requestModel: "local-8082",
+            serverModelID: "local-8082",
+            pid: nil,
+            running: false,
+            ready: false,
+            serverIDs: [],
+            rssMB: nil,
+            command: nil,
+            logPath: "/tmp/local-8082.log"
+        ),
+        ModelProfileStatus(
+            profile: "local-8080",
+            displayName: "Local 8080",
+            runtime: "llama.cpp",
+            host: "localhost",
+            port: "8080",
+            baseURL: "http://localhost:8080/v1",
+            requestModel: "local-8080",
+            serverModelID: "local-8080",
+            pid: nil,
+            running: false,
+            ready: false,
+            serverIDs: [],
+            rssMB: nil,
+            command: nil,
+            logPath: "/tmp/local-8080.log"
+        ),
+        ModelProfileStatus(
+            profile: "running-8081",
+            displayName: "Running 8081",
+            runtime: "llama.cpp",
+            host: "127.0.0.1",
+            port: "8081",
+            baseURL: "http://127.0.0.1:8081/v1",
+            requestModel: "running-8081",
+            serverModelID: "running-8081",
+            pid: 42,
+            running: true,
+            ready: false,
+            serverIDs: [],
+            rssMB: nil,
+            command: nil,
+            logPath: "/tmp/running-8081.log"
+        )
+    ]
+
+    let ordered = statuses.sorted(by: ModelProfileStatus.compareForDisplay)
+    #expect(ordered.map(\.profile) == ["running-8081", "local-8080", "local-8082", "remote"])
+}
+
+@Test func profileDisplayOrderPrefersReadyWhenBothProfilesAreRunning() {
+    let statuses = [
+        ModelProfileStatus(
+            profile: "warming",
+            displayName: "Warming",
+            runtime: "llama.cpp",
+            host: "127.0.0.1",
+            port: "8081",
+            baseURL: "http://127.0.0.1:8081/v1",
+            requestModel: "warming",
+            serverModelID: "warming",
+            pid: 1,
+            running: true,
+            ready: false,
+            serverIDs: [],
+            rssMB: nil,
+            command: nil,
+            logPath: "/tmp/warming.log"
+        ),
+        ModelProfileStatus(
+            profile: "ready",
+            displayName: "Ready",
+            runtime: "llama.cpp",
+            host: "127.0.0.1",
+            port: "8080",
+            baseURL: "http://127.0.0.1:8080/v1",
+            requestModel: "ready",
+            serverModelID: "ready",
+            pid: 2,
+            running: true,
+            ready: true,
+            serverIDs: [],
+            rssMB: nil,
+            command: nil,
+            logPath: "/tmp/ready.log"
+        )
+    ]
+
+    let ordered = statuses.sorted(by: ModelProfileStatus.compareForDisplay)
+    #expect(ordered.map(\.profile) == ["ready", "warming"])
+}

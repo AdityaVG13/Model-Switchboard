@@ -310,7 +310,12 @@ struct MenuBarContentView: View {
     private var footer: some View {
         HStack(spacing: 8) {
             footerToggleButton("Settings", panel: .settings, icon: "slider.horizontal.3")
+            footerSeparator()
             footerToggleButton("Help", panel: .help, icon: "questionmark.circle")
+            if features.supportsBenchmarks {
+                footerSeparator()
+                footerIconToggleButton("Benchmarks", panel: .benchmarks, icon: "chart.xyaxis.line")
+            }
             Spacer()
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 HStack(spacing: 6) {
@@ -331,6 +336,13 @@ struct MenuBarContentView: View {
                 NSApplication.shared.terminate(nil)
             }
         }
+    }
+
+    private func footerSeparator() -> some View {
+        Text("|")
+            .font(.caption.bold())
+            .foregroundStyle(.tertiary)
+            .accessibilityHidden(true)
     }
 
     private func utilizationBadge(label: String, value: Double?) -> some View {
@@ -361,10 +373,7 @@ struct MenuBarContentView: View {
                     // Close on next run-loop tick to avoid menu-level outside-click dismissal.
                     DispatchQueue.main.async {
                         let nextPanel = inspectorCoordinator.commitDeferredClose(of: panel)
-                        synchronizeInspectorWindow(panel: nextPanel)
-                        if nextPanel == nil {
-                            hostWindow?.makeKeyAndOrderFront(nil)
-                        }
+                        synchronizeInspectorWindow(panel: nextPanel, refocusHostWindowOnHide: nextPanel == nil)
                     }
                 } label: {
                     Image(systemName: "xmark.circle.fill")
@@ -434,6 +443,18 @@ struct MenuBarContentView: View {
         .accessibilityLabel(title)
     }
 
+    private func footerIconToggleButton(_ title: String, panel: InspectorPanel, icon: String) -> some View {
+        Button {
+            let nextPanel = inspectorCoordinator.toggle(panel)
+            synchronizeInspectorWindow(panel: nextPanel)
+        } label: {
+            Image(systemName: icon)
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel(title)
+        .help(title)
+    }
+
     private func setInspectorPanel(_ nextPanel: InspectorPanel?) {
         if nextPanel == inspectorCoordinator.openPanel,
             inspectorCoordinator.deferredClosePanel != nextPanel {
@@ -445,11 +466,18 @@ struct MenuBarContentView: View {
         synchronizeInspectorWindow(panel: nextPanel)
     }
 
-    private func synchronizeInspectorWindow(panel: InspectorPanel? = nil) {
+    private func synchronizeInspectorWindow(
+        panel: InspectorPanel? = nil,
+        refocusHostWindowOnHide: Bool = false
+    ) {
         guard let hostWindow else { return }
         let currentPanel = panel ?? inspectorCoordinator.openPanel
         guard let currentPanel else {
-            inspectorController.hide()
+            inspectorController.hide {
+                if refocusHostWindowOnHide {
+                    hostWindow.makeKeyAndOrderFront(nil)
+                }
+            }
             return
         }
 
