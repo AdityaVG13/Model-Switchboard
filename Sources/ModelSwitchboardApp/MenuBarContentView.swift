@@ -133,7 +133,7 @@ struct MenuBarContentView: View {
     private let panelGap: CGFloat = 10
     private let inspectorAnimation = Animation.easeInOut(duration: 0.2)
 
-    @State private var inspectorPanel: InspectorPanel?
+    @State private var inspectorCoordinator = InspectorPanelCoordinator<InspectorPanel>()
     @State private var hostWindow: NSWindow?
     @State private var inspectorController = InspectorPanelController()
     @StateObject private var systemMetrics = SystemMetricsMonitor()
@@ -185,7 +185,7 @@ struct MenuBarContentView: View {
             store.stopAutoRefresh()
             systemMetrics.stop()
             inspectorController.hide()
-            inspectorPanel = nil
+            inspectorCoordinator.reset()
         }
         .onChange(of: store.menuBarHelp) { _, newValue in
             updateMenuBarHelp(newValue)
@@ -204,7 +204,7 @@ struct MenuBarContentView: View {
             }
             synchronizeInspectorWindow()
         }
-        .animation(inspectorAnimation, value: inspectorPanel)
+        .animation(inspectorAnimation, value: inspectorCoordinator.openPanel)
         .animation(.snappy(duration: 0.18), value: store.pendingProfileActions)
         .animation(.snappy(duration: 0.18), value: store.pendingGlobalActions)
     }
@@ -454,10 +454,14 @@ struct MenuBarContentView: View {
                     .font(.headline)
                 Spacer()
                 Button {
+                    inspectorCoordinator.requestDeferredClose(of: panel)
                     // Close on next run-loop tick to avoid menu-level outside-click dismissal.
                     DispatchQueue.main.async {
-                        setInspectorPanel(nil)
-                        hostWindow?.makeKeyAndOrderFront(nil)
+                        let nextPanel = inspectorCoordinator.commitDeferredClose(of: panel)
+                        synchronizeInspectorWindow(panel: nextPanel)
+                        if nextPanel == nil {
+                            hostWindow?.makeKeyAndOrderFront(nil)
+                        }
                     }
                 } label: {
                     Image(systemName: "xmark.circle.fill")
@@ -509,8 +513,8 @@ struct MenuBarContentView: View {
 
     private func footerToggleButton(_ title: String, panel: InspectorPanel, icon: String) -> some View {
         Button {
-            let nextPanel = inspectorPanel == panel ? nil : panel
-            setInspectorPanel(nextPanel)
+            let nextPanel = inspectorCoordinator.toggle(panel)
+            synchronizeInspectorWindow(panel: nextPanel)
         } label: {
             Label(title, systemImage: icon)
         }
@@ -519,29 +523,31 @@ struct MenuBarContentView: View {
     }
 
     private func setInspectorPanel(_ nextPanel: InspectorPanel?) {
-        if nextPanel == inspectorPanel {
+        if nextPanel == inspectorCoordinator.openPanel,
+            inspectorCoordinator.deferredClosePanel != nextPanel {
             return
         }
-        withAnimation(inspectorAnimation) {
-            inspectorPanel = nextPanel
+        _ = withAnimation(inspectorAnimation) {
+            inspectorCoordinator.show(nextPanel)
         }
-        synchronizeInspectorWindow()
+        synchronizeInspectorWindow(panel: nextPanel)
     }
 
-    private func synchronizeInspectorWindow() {
+    private func synchronizeInspectorWindow(panel: InspectorPanel? = nil) {
         guard let hostWindow else { return }
-        guard let inspectorPanel else {
+        let currentPanel = panel ?? inspectorCoordinator.openPanel
+        guard let currentPanel else {
             inspectorController.hide()
             return
         }
 
         inspectorController.show(
-            title: inspectorPanel.title,
+            title: currentPanel.title,
             parent: hostWindow,
             width: inspectorPanelWidth,
             height: panelHeight,
             gap: panelGap,
-            content: AnyView(inspectorCard(inspectorPanel))
+            content: AnyView(inspectorCard(currentPanel))
         )
     }
 

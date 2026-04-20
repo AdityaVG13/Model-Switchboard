@@ -72,7 +72,8 @@ Best default for quantized GGUF models on Apple Silicon.
 Typical fields:
 
 - `RUNTIME=llama.cpp`
-- `MODEL_PATH` or `MODEL_FILE`
+- `MODEL_PATH` or `MODEL_FILE` with `MODEL_ROOT`
+- `SERVER_BIN` or `LLAMA_SERVER_BIN` if `llama-server` is not already on `PATH`
 - `PORT`
 - `REQUEST_MODEL`
 - `SERVER_MODEL_ID`
@@ -84,8 +85,21 @@ Typical fields:
 
 - `RUNTIME=mlx`
 - `MODEL_DIR` or `MODEL_REPO`
+- `SERVER_BIN` or `MLX_SERVER_BIN` if `mlx_lm.server` is not already on `PATH`
 - `PORT`
 - `REQUEST_MODEL`
+
+### `rvllm-mlx`
+Best when you want to launch an OpenAI-compatible MLX server from a dedicated binary.
+
+Typical fields:
+
+- `RUNTIME=rvllm-mlx`
+- `SERVER_BIN`
+- `MODEL_DIR`
+- `PORT`
+- `REQUEST_MODEL`
+- `SERVER_MODEL_ID`
 
 ### `custom` or `command`
 Best when the model is started by some other launcher or wrapper.
@@ -106,6 +120,12 @@ Typical JSON example:
 ```
 
 Keep the schema stable. Path layout can vary by repo.
+
+The reference macOS launcher is intentionally strict:
+
+- it does not guess Homebrew paths, repo-local runtime builds, or personal directories
+- binaries come from the profile manifest or `PATH`
+- model locations come from the profile manifest
 
 ## How detection works
 
@@ -137,6 +157,7 @@ For Apple Silicon local inference, common stacks are:
 
 - `llama.cpp` with Metal
 - `MLX` / `mlx_lm.server`
+- `rvllm-mlx`
 
 Other tools usually fit into one of these buckets:
 

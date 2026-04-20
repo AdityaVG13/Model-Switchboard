@@ -28,5 +28,9 @@ let package = Package(
             name: "ModelSwitchboardCoreTests",
             dependencies: ["ModelSwitchboardCore"]
         ),
+        .testTarget(
+            name: "ModelSwitchboardAppTests",
+            dependencies: ["ModelSwitchboardApp"]
+        ),
     ]
 )

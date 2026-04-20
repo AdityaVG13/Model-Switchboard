@@ -4,7 +4,7 @@ set -euo pipefail
 
 WORK_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROFILE_DIR="$WORK_DIR/model-profiles"
-MODEL_PROFILE="${MODEL_PROFILE:-qwen35-a3b}"
+MODEL_PROFILE="${MODEL_PROFILE:-}"
 PROFILE_PATH="${MODEL_PROFILE_PATH:-}"
 AGL_VENV="$WORK_DIR/.venv-agentlightning"
 AGL_PYTHON="$AGL_VENV/bin/python"
@@ -15,6 +15,10 @@ log() { printf '[INFO] %s\n' "$*"; }
 warn() { printf '[WARN] %s\n' "$*"; }
 die() { printf '[ERR] %s\n' "$*"; exit 1; }
 
+if [ -z "$PROFILE_PATH" ] && [ -z "$MODEL_PROFILE" ]; then
+    die "Set MODEL_PROFILE or MODEL_PROFILE_PATH before launching a profile"
+fi
+
 if [ -z "$PROFILE_PATH" ]; then
     if [ -f "$PROFILE_DIR/${MODEL_PROFILE}.env" ]; then
         PROFILE_PATH="$PROFILE_DIR/${MODEL_PROFILE}.env"
@@ -23,6 +27,11 @@ if [ -z "$PROFILE_PATH" ]; then
     else
         die "Unknown MODEL_PROFILE=$MODEL_PROFILE (expected $PROFILE_DIR/${MODEL_PROFILE}.env or .json)"
     fi
+fi
+
+if [ -z "$MODEL_PROFILE" ]; then
+    MODEL_PROFILE="$(basename "$PROFILE_PATH")"
+    MODEL_PROFILE="${MODEL_PROFILE%.*}"
 fi
 
 load_json_profile() {
@@ -67,33 +76,12 @@ calc_threads() {
     fi
 }
 
-detect_model_root() {
-    local candidate
-    local local_model_root="$WORK_DIR/../models"
-    for candidate in \
-        "${MODEL_ROOT_HINT:-}" \
-        "$local_model_root" \
-        "$HOME/AI/models"
-    do
-        if [ -n "$candidate" ] && [ -d "$candidate" ]; then
-            printf '%s\n' "$candidate"
-            return 0
-        fi
-    done
-    printf '%s\n' "$local_model_root"
-}
-
 resolve_llama_server() {
     local candidate
     for candidate in \
+        "${SERVER_BIN:-}" \
         "${LLAMA_SERVER_BIN:-}" \
-        "$WORK_DIR/runtime/llama.cpp-apple/build/bin/llama-server" \
-        "/opt/homebrew/bin/llama-server" \
-        "/usr/local/bin/llama-server" \
-        "/opt/homebrew/bin/llama.cpp-server" \
-        "/usr/local/bin/llama.cpp-server" \
-        "$HOME/Developer/llama.cpp/build/bin/llama-server" \
-        "$HOME/Developer/llama.cpp/build/bin/llama.cpp-server"
+        "${LLAMA_CPP_SERVER_BIN:-}"
     do
         if [ -n "$candidate" ] && [ -x "$candidate" ]; then
             printf '%s\n' "$candidate"
@@ -114,8 +102,9 @@ resolve_llama_server() {
 resolve_mlx_server() {
     local candidate
     for candidate in \
+        "${SERVER_BIN:-}" \
         "${MLX_SERVER_BIN:-}" \
-        "$WORK_DIR/.venv-mlx-lm/bin/mlx_lm.server"
+        "${MLX_LM_SERVER_BIN:-}"
     do
         if [ -n "$candidate" ] && [ -x "$candidate" ]; then
             printf '%s\n' "$candidate"
@@ -126,6 +115,20 @@ resolve_mlx_server() {
         command -v mlx_lm.server
         return 0
     fi
+    return 1
+}
+
+resolve_rvllm_mlx_server() {
+    local candidate
+    for candidate in \
+        "${SERVER_BIN:-}" \
+        "${RVLLM_MLX_SERVER_BIN:-}"
+    do
+        if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
     return 1
 }
 
@@ -241,7 +244,6 @@ install_agentlightning() {
     warn "Agent Lightning install skipped"
 }
 
-MODEL_ROOT="${MODEL_ROOT:-$(detect_model_root)}"
 THREADS="${THREADS:-$(calc_threads)}"
 THREADS_BATCH="${THREADS_BATCH:-$THREADS}"
 HOST="${HOST:-127.0.0.1}"
@@ -266,12 +268,14 @@ PID_PATH="$RUN_DIR/${MODEL_PROFILE}.pid"
 if [ "$RUNTIME" = "llama.cpp" ]; then
     MODEL_PATH="${MODEL_PATH:-}"
     if [ -z "$MODEL_PATH" ]; then
+        [ -n "${MODEL_FILE:-}" ] || die "MODEL_PATH or MODEL_FILE is required for $MODEL_PROFILE"
+        [ -n "${MODEL_ROOT:-}" ] || die "MODEL_ROOT is required when MODEL_FILE is used for $MODEL_PROFILE"
         MODEL_PATH="$MODEL_ROOT/$MODEL_FILE"
     fi
     if [ ! -f "$MODEL_PATH" ]; then
         die "Model file not found: $MODEL_PATH"
     fi
-    LLAMA_SERVER="$(resolve_llama_server)" || die 'llama-server not found; run build-llama-cpp-apple.sh first'
+    LLAMA_SERVER="$(resolve_llama_server)" || die 'llama-server not found; set SERVER_BIN or LLAMA_SERVER_BIN in the profile, or add llama-server to PATH'
 
     if wait_for_profile_ready "$HEALTHCHECK_MODE" "$HEALTHCHECK_URL" "$SERVER_MODEL_ID" 1; then
         log "Model server already responding on $HEALTHCHECK_URL"
@@ -326,7 +330,7 @@ elif [ "$RUNTIME" = "mlx" ]; then
         MODEL_SOURCE="${MODEL_REPO:-}"
     fi
     [ -n "$MODEL_SOURCE" ] || die "No MODEL_DIR or MODEL_REPO configured for $MODEL_PROFILE"
-    MLX_SERVER="$(resolve_mlx_server)" || die 'mlx_lm.server not found; install mlx-lm first'
+    MLX_SERVER="$(resolve_mlx_server)" || die 'mlx_lm.server not found; set SERVER_BIN or MLX_SERVER_BIN in the profile, or add mlx_lm.server to PATH'
 
     if wait_for_profile_ready "$HEALTHCHECK_MODE" "$HEALTHCHECK_URL" "$SERVER_MODEL_ID" 1; then
         log "MLX server already responding on $HEALTHCHECK_URL"
@@ -351,6 +355,28 @@ elif [ "$RUNTIME" = "mlx" ]; then
         if ! wait_for_profile_ready "$HEALTHCHECK_MODE" "$HEALTHCHECK_URL" "$SERVER_MODEL_ID" 180; then
             tail -n 120 "$LOG_PATH" || true
             die "MLX server failed to become ready for $MODEL_PROFILE"
+        fi
+    fi
+elif [ "$RUNTIME" = "rvllm-mlx" ]; then
+    MODEL_SOURCE="${MODEL_DIR:-}"
+    [ -n "$MODEL_SOURCE" ] || die "MODEL_DIR is required for rvllm-mlx profiles"
+    [ -d "$MODEL_SOURCE" ] || die "MODEL_DIR not found: $MODEL_SOURCE"
+    RVLLM_MLX_SERVER="$(resolve_rvllm_mlx_server)" || die 'rvllm-mlx server not found; set SERVER_BIN in the profile'
+
+    if wait_for_profile_ready "$HEALTHCHECK_MODE" "$HEALTHCHECK_URL" "$SERVER_MODEL_ID" 1; then
+        log "rvllm-mlx server already responding on $HEALTHCHECK_URL"
+    else
+        log "Starting rvllm-mlx profile $MODEL_PROFILE"
+        cmd=(
+            "$RVLLM_MLX_SERVER"
+            --model-dir "$MODEL_SOURCE"
+            --host "$HOST"
+            --port "$PORT"
+        )
+        spawn_detached "$LOG_PATH" "$PID_PATH" "${cmd[@]}" >/dev/null
+        if ! wait_for_profile_ready "$HEALTHCHECK_MODE" "$HEALTHCHECK_URL" "$SERVER_MODEL_ID" 180; then
+            tail -n 120 "$LOG_PATH" || true
+            die "rvllm-mlx server failed to become ready for $MODEL_PROFILE"
         fi
     fi
 elif [ "$RUNTIME" = "custom" ] || [ "$RUNTIME" = "command" ]; then

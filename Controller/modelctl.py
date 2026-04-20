@@ -761,6 +761,26 @@ def pid_command(pid: int | None) -> str | None:
         return None
 
 
+def pid_matches_profile(pid: int | None, name: str, env: ProfileEnv) -> bool:
+    command = pid_command(pid)
+    if not command:
+        return False
+
+    normalized_command = command.lower()
+    markers = {
+        name,
+        env.get("PROFILE_NAME"),
+        env.get("MODEL_ALIAS"),
+        env.get("REQUEST_MODEL"),
+        env.get("SERVER_MODEL_ID"),
+        env.get("MODEL_PATH"),
+        env.get("MODEL_DIR"),
+        env.get("MODEL_FILE"),
+        env.get("MODEL_REPO"),
+    }
+    return any(marker and marker.lower() in normalized_command for marker in markers)
+
+
 def pid_rss_mb(pid: int | None) -> float | None:
     if not pid:
         return None
@@ -821,13 +841,15 @@ def probe_health(env: ProfileEnv, timeout: float = 1.5) -> tuple[bool, list[str]
 
 
 def status_for_profile(name: str, env: ProfileEnv) -> ModelProfileStatusPayload:
+    ready, server_ids = probe_health(env)
     pid = read_pid(name)
     if pid and not process_alive(pid):
         pid_path(name).unlink(missing_ok=True)
         pid = None
     if not pid:
-        pid = port_listener_pid(endpoint_port(env))
-    ready, server_ids = probe_health(env)
+        fallback_pid = port_listener_pid(endpoint_port(env))
+        if fallback_pid and (ready or pid_matches_profile(fallback_pid, name, env)):
+            pid = fallback_pid
     return {
         "profile": name,
         "display_name": env["DISPLAY_NAME"],
@@ -1097,53 +1119,49 @@ def start_benchmark(
     return benchmark_status()
 
 
-def detect_model_root(env: ProfileEnv) -> pathlib.Path:
-    local_model_root = BASE / "../models"
-    candidates = [
-        env.get("MODEL_ROOT"),
-        env.get("MODEL_ROOT_HINT"),
-        str(local_model_root),
-        str(pathlib.Path.home() / "AI/models"),
-    ]
-    for candidate in candidates:
-        if candidate and pathlib.Path(candidate).is_dir():
-            return pathlib.Path(candidate)
-    return pathlib.Path(local_model_root)
-
-
-def resolve_llama_server_bin() -> str | None:
-    candidates = [
-        os.environ.get("LLAMA_SERVER_BIN"),
-        str(BASE / "runtime/llama.cpp-apple/build/bin/llama-server"),
-        "/opt/homebrew/bin/llama-server",
-        "/usr/local/bin/llama-server",
-        "/opt/homebrew/bin/llama.cpp-server",
-        "/usr/local/bin/llama.cpp-server",
-        str(pathlib.Path.home() / "Developer/llama.cpp/build/bin/llama-server"),
-        str(pathlib.Path.home() / "Developer/llama.cpp/build/bin/llama.cpp-server"),
-    ]
+def resolve_executable(*candidates: str | None) -> str | None:
     for candidate in candidates:
         if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
             return candidate
-    return shutil.which("llama-server") or shutil.which("llama.cpp-server")
+    return None
 
 
-def resolve_mlx_server_bin() -> str | None:
-    candidates = [
-        os.environ.get("MLX_SERVER_BIN"),
-        str(BASE / ".venv-mlx-lm/bin/mlx_lm.server"),
-    ]
-    for candidate in candidates:
-        if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-            return candidate
-    return shutil.which("mlx_lm.server")
+def resolve_llama_server_bin(env: ProfileEnv | None = None) -> str | None:
+    env = env or {}
+    return (
+        resolve_executable(
+            env.get("SERVER_BIN"),
+            env.get("LLAMA_SERVER_BIN"),
+            env.get("LLAMA_CPP_SERVER_BIN"),
+            os.environ.get("SERVER_BIN"),
+            os.environ.get("LLAMA_SERVER_BIN"),
+            os.environ.get("LLAMA_CPP_SERVER_BIN"),
+        )
+        or shutil.which("llama-server")
+        or shutil.which("llama.cpp-server")
+    )
+
+
+def resolve_mlx_server_bin(env: ProfileEnv | None = None) -> str | None:
+    env = env or {}
+    return (
+        resolve_executable(
+            env.get("SERVER_BIN"),
+            env.get("MLX_SERVER_BIN"),
+            env.get("MLX_LM_SERVER_BIN"),
+            os.environ.get("SERVER_BIN"),
+            os.environ.get("MLX_SERVER_BIN"),
+            os.environ.get("MLX_LM_SERVER_BIN"),
+        )
+        or shutil.which("mlx_lm.server")
+    )
 
 
 def model_path_for_profile(env: ProfileEnv) -> pathlib.Path | None:
     if env.get("MODEL_PATH"):
         return pathlib.Path(env["MODEL_PATH"])
-    if env.get("MODEL_FILE"):
-        return detect_model_root(env) / env["MODEL_FILE"]
+    if env.get("MODEL_FILE") and env.get("MODEL_ROOT"):
+        return pathlib.Path(env["MODEL_ROOT"]) / env["MODEL_FILE"]
     return None
 
 
@@ -1190,15 +1208,15 @@ def diagnose_profile(name: str, env: ProfileEnv) -> ProfileDiagnosticPayload:
         errors.append("missing REQUEST_MODEL")
 
     if runtime == "llama.cpp":
-        if not resolve_llama_server_bin():
+        if not resolve_llama_server_bin(env):
             errors.append("llama-server not found")
         model_path = model_path_for_profile(env)
         if not model_path:
-            errors.append("missing MODEL_PATH or MODEL_FILE")
+            errors.append("missing MODEL_PATH or MODEL_FILE with MODEL_ROOT")
         elif not model_path.exists():
             errors.append(f"model file not found: {model_path}")
     elif runtime == "mlx":
-        if not resolve_mlx_server_bin():
+        if not resolve_mlx_server_bin(env):
             errors.append("mlx_lm.server not found")
         model_dir = env.get("MODEL_DIR")
         model_repo = env.get("MODEL_REPO")
@@ -1207,6 +1225,19 @@ def diagnose_profile(name: str, env: ProfileEnv) -> ProfileDiagnosticPayload:
                 errors.append(f"MODEL_DIR not found: {model_dir}")
         elif not model_repo:
             errors.append("missing MODEL_DIR or MODEL_REPO")
+    elif runtime == "rvllm-mlx":
+        server_bin = env.get("SERVER_BIN")
+        if not server_bin:
+            errors.append("missing SERVER_BIN")
+        elif not pathlib.Path(server_bin).exists():
+            errors.append(f"SERVER_BIN not found: {server_bin}")
+        elif not os.access(server_bin, os.X_OK):
+            errors.append(f"SERVER_BIN is not executable: {server_bin}")
+        model_dir = env.get("MODEL_DIR")
+        if not model_dir:
+            errors.append("missing MODEL_DIR")
+        elif not pathlib.Path(model_dir).exists():
+            errors.append(f"MODEL_DIR not found: {model_dir}")
     elif runtime in {"custom", "command"}:
         if not env.get("START_COMMAND"):
             errors.append("missing START_COMMAND")

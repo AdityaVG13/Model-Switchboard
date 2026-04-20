@@ -22,7 +22,7 @@ struct HelpView: View {
                     title: "Profile Setup",
                     bullets: [
                         "Each profile should define a stable profile name, runtime, host, port, request model ID, and the command needed to launch the server.",
-                        "For `llama.cpp`, set `MODEL_PATH` or `MODEL_FILE`. For MLX, set `MODEL_DIR` or `MODEL_REPO`. For custom launchers, use `START_COMMAND` and a health check.",
+                        "For `llama.cpp`, set `MODEL_PATH` or `MODEL_FILE` with `MODEL_ROOT`, plus `SERVER_BIN` if `llama-server` is not already on `PATH`. For MLX, set `MODEL_DIR` or `MODEL_REPO`, plus `SERVER_BIN` if needed. For custom launchers, use `START_COMMAND` and a health check.",
                         "Keep one centralized profile folder and treat it as the source of truth. ModelSwitchboard reads whatever the controller reports, so the app stays model-agnostic.",
                         "If you add new profiles, refresh the app after the controller picks them up."
                     ]
