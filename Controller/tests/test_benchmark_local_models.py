@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -98,6 +99,56 @@ class BenchmarkLocalModelsTests(unittest.TestCase):
             markdown = md_path.read_text()
             self.assertIn("Controller/benchmark-results/", markdown)
             self.assertIn("interactive-latency", markdown)
+
+    def test_finalize_stream_result_rejects_empty_response_without_usage(self) -> None:
+        result = MODULE.finalize_stream_result(
+            pieces=[],
+            usage={},
+            started=10.0,
+            first_token_at=None,
+            finished=10.001,
+        )
+
+        self.assertEqual(result["usage_source"], "error")
+        self.assertEqual(result["decode_tokens_per_sec"], None)
+        self.assertIn("empty streamed response", result["error"])
+
+    def test_finalize_stream_result_uses_estimated_tokens_only_when_content_exists(self) -> None:
+        result = MODULE.finalize_stream_result(
+            pieces=["hello world"],
+            usage={},
+            started=10.0,
+            first_token_at=10.1,
+            finished=10.3,
+        )
+
+        self.assertEqual(result["usage_source"], "estimated")
+        self.assertGreater(result["completion_tokens"], 0)
+        self.assertGreater(result["decode_tokens_per_sec"], 0)
+
+    def test_run_case_appends_non_stream_diagnostic_for_empty_stream(self) -> None:
+        with mock.patch.object(
+            MODULE,
+            "stream_chat",
+            return_value=MODULE.failed_result("empty streamed response without token usage"),
+        ), mock.patch.object(
+            MODULE,
+            "non_stream_chat_diagnostic",
+            return_value='non-stream HTTP 500: rope_dynamic: "Only one of base or freqs can have a value."',
+        ):
+            result = MODULE.run_case(
+                "http://127.0.0.1:8080/v1",
+                "gemma-4-31b-it-4bit-mlx",
+                "Reply with READY only.",
+                temperature=0.0,
+                max_tokens=24,
+                timeout=30.0,
+                retries=0,
+            )
+
+        self.assertEqual(result["usage_source"], "error")
+        self.assertIn("empty streamed response without token usage", result["error"])
+        self.assertIn("rope_dynamic", result["error"])
 
 
 if __name__ == "__main__":

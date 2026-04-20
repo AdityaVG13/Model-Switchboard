@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.3] - 2026-04-19
+
+### Added
+- Added a footer benchmark viewer shortcut in Plus so the latest benchmark panel can be reopened without rerunning a job.
+- Added regression coverage for inspector close/reopen timing, benchmark timestamp parsing, profile display ordering, and controller benchmark result validation.
+
+### Changed
+- Sorted profile cards deterministically by live state first, then local endpoint order for inactive profiles, so the app no longer reshuffles idle models across refreshes.
+- Reformatted benchmark timestamps into readable local date/time output instead of exposing raw ISO strings in the panel.
+
+### Fixed
+- Fixed the side-panel lifecycle so closing Benchmark, Settings, or Help no longer requires defocusing the app before reopening another panel.
+- Reduced inspector close jitter by deferring host-window refocus until the panel hide transition has actually completed.
+- Prevented empty benchmark streams from being scored as fake ultra-high throughput and attached the underlying non-stream error to failed benchmark results for diagnosis.
+
 ## [1.0.2] - 2026-04-17
 
 ### Added

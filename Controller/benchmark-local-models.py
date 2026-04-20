@@ -34,6 +34,19 @@ def estimated_tokens(text: str) -> int:
     return max(1, round(len(text.encode("utf-8")) / 4))
 
 
+def chat_request_payload(model: str, prompt: str, *, temperature: float, max_tokens: int, stream: bool) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "stream": stream,
+    }
+    if stream:
+        payload["stream_options"] = {"include_usage": True}
+    return payload
+
+
 LONG_CONTEXT_BLOCK = """
 The local-model operator notebook includes practical guidance gathered from real inference sessions:
 - TTFT is dominated by prefill, not decode, on long prompts.
@@ -180,14 +193,13 @@ PROMPT_SUITES: dict[str, list[PromptSpec]] = {
 
 
 def stream_chat(base: str, model: str, prompt: str, *, temperature: float, max_tokens: int, timeout: float) -> StreamResult:
-    payload = {
-        "model": model,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-        "stream": True,
-        "stream_options": {"include_usage": True},
-    }
+    payload = chat_request_payload(
+        model,
+        prompt,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        stream=True,
+    )
     request = urllib.request.Request(
         f"{base}/chat/completions",
         data=json.dumps(payload).encode(),
@@ -243,9 +255,38 @@ def stream_chat(base: str, model: str, prompt: str, *, temperature: float, max_t
         raise RuntimeError(f"HTTP {exc.code}: {detail or exc.reason}") from exc
 
     finished = time.perf_counter()
+    return finalize_stream_result(
+        pieces=pieces,
+        usage=usage,
+        started=started,
+        first_token_at=first_token_at,
+        finished=finished,
+    )
+
+
+def finalize_stream_result(
+    *,
+    pieces: list[str],
+    usage: dict[str, int],
+    started: float,
+    first_token_at: float | None,
+    finished: float,
+) -> StreamResult:
     content = "".join(pieces)
-    completion_tokens = usage.get("completion_tokens", estimated_tokens(content))
     prompt_tokens = usage.get("prompt_tokens")
+    completion_tokens = usage.get("completion_tokens")
+
+    if completion_tokens is None:
+        if not content.strip():
+            return failed_result("empty streamed response without token usage")
+        completion_tokens = estimated_tokens(content)
+        usage_source = "estimated"
+    else:
+        usage_source = "server"
+
+    if completion_tokens <= 0:
+        return failed_result("stream completed without completion tokens")
+
     ttft_ms = round(((first_token_at or finished) - started) * 1000, 1)
     total_ms = round((finished - started) * 1000, 1)
     gen_window = max(0.001, finished - (first_token_at or started))
@@ -259,7 +300,7 @@ def stream_chat(base: str, model: str, prompt: str, *, temperature: float, max_t
         "decode_tokens_per_sec": decode_tps,
         "e2e_tokens_per_sec": e2e_tps,
         "content": content,
-        "usage_source": "server" if "completion_tokens" in usage else "estimated",
+        "usage_source": usage_source,
     }
 
 
@@ -278,12 +319,50 @@ def failed_result(error: str) -> StreamResult:
     }
 
 
+def non_stream_chat_diagnostic(
+    base: str,
+    model: str,
+    prompt: str,
+    *,
+    temperature: float,
+    max_tokens: int,
+    timeout: float,
+) -> str | None:
+    payload = chat_request_payload(
+        model,
+        prompt,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        stream=False,
+    )
+    request = urllib.request.Request(
+        f"{base}/chat/completions",
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            body = response.read().decode("utf-8", errors="ignore").strip()
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore").strip()
+        return f"non-stream HTTP {exc.code}: {detail or exc.reason}"
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        return f"non-stream request failed: {exc}"
+
+    if not body:
+        return "non-stream response was empty"
+    preview = body.replace("\n", " ").strip()
+    if len(preview) > 220:
+        preview = preview[:220].rstrip() + "…"
+    return f"non-stream response: {preview}"
+
+
 
 def run_case(base: str, model: str, prompt: str, *, temperature: float, max_tokens: int, timeout: float, retries: int = 2) -> StreamResult:
     last_error = ""
     for attempt in range(retries + 1):
         try:
-            return stream_chat(
+            result = stream_chat(
                 base,
                 model,
                 prompt,
@@ -291,6 +370,21 @@ def run_case(base: str, model: str, prompt: str, *, temperature: float, max_toke
                 max_tokens=max_tokens,
                 timeout=timeout,
             )
+            if (
+                result.get("usage_source") == "error"
+                and result.get("error") == "empty streamed response without token usage"
+            ):
+                diagnostic = non_stream_chat_diagnostic(
+                    base,
+                    model,
+                    prompt,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    timeout=timeout,
+                )
+                if diagnostic:
+                    result["error"] = f"{result['error']}; {diagnostic}"
+            return result
         except (RuntimeError, urllib.error.URLError, TimeoutError, OSError) as exc:
             last_error = str(exc)
             if attempt < retries:

@@ -110,3 +110,18 @@ private func drainMainQueue() async {
     #expect(reopenedPanel.isVisible)
     #expect(staleHideCompletionCount == 0)
 }
+
+@MainActor
+@Test func benchmarkTimestampFormattingParsesFractionalISO8601Values() {
+    let raw = "2026-04-20T03:24:29.335018+00:00"
+
+    #expect(BenchmarksPanelView.parsedGeneratedAt(raw) != nil)
+    #expect(BenchmarksPanelView.formattedGeneratedAt(raw) != raw)
+}
+
+@MainActor
+@Test func benchmarkTimestampFormattingFallsBackForInvalidValues() {
+    #expect(BenchmarksPanelView.parsedGeneratedAt(nil) == nil)
+    #expect(BenchmarksPanelView.formattedGeneratedAt(nil) == "Unknown")
+    #expect(BenchmarksPanelView.formattedGeneratedAt("not-a-date") == "not-a-date")
+}

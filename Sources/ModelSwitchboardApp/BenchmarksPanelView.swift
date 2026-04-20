@@ -53,7 +53,7 @@ struct BenchmarksPanelView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Suite: \(suiteLabel(latest.suite))")
                         .font(.footnote.weight(.semibold))
-                    Text("Generated: \(formattedGeneratedAt(latest.generatedAt))")
+                    Text("Generated: \(Self.formattedGeneratedAt(latest.generatedAt))")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -238,13 +238,30 @@ struct BenchmarksPanelView: View {
             .localizedCapitalized
     }
 
-    private func formattedGeneratedAt(_ value: String?) -> String {
-        guard let value, !value.isEmpty else { return "Unknown" }
-        let iso = ISO8601DateFormatter()
-        if let date = iso.date(from: value) {
-            return date.formatted(date: .abbreviated, time: .standard)
+    static func formattedGeneratedAt(_ value: String?) -> String {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+            return "Unknown"
         }
-        return value
+        guard let date = parsedGeneratedAt(value) else {
+            return value
+        }
+        return date.formatted(date: .abbreviated, time: .standard)
+    }
+
+    static func parsedGeneratedAt(_ value: String?) -> Date? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+            return nil
+        }
+
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractional.date(from: value) {
+            return date
+        }
+
+        let basic = ISO8601DateFormatter()
+        basic.formatOptions = [.withInternetDateTime]
+        return basic.date(from: value)
     }
 
     private func ms(_ value: Double?) -> String {
