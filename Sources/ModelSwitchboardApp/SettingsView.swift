@@ -5,12 +5,16 @@ struct SettingsView: View {
     @Binding var controllerBaseURL: String
     let profilesDirectory: String?
     let controllerRoot: String?
+    let doctorReport: DoctorReport?
     let profileDiagnostics: [ProfileDiagnostic]
+    let isRunningControllerDoctor: Bool
     @ObservedObject var launchAtLoginManager: LaunchAtLoginManager
     let openProfilesDirectory: () -> Void
     let openControllerRoot: () -> Void
+    let runControllerDoctor: () -> Void
     let reconnect: () -> Void
     private let defaultControllerBaseURL = "http://127.0.0.1:8877"
+    private let scrollContentTrailingPadding: CGFloat = 22
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
@@ -58,6 +62,41 @@ struct SettingsView: View {
                             .foregroundStyle(.orange)
                             .fixedSize(horizontal: false, vertical: true)
                     }
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Controller Doctor")
+                        .font(.caption.bold())
+
+                    Text("Run the controller doctor to re-check controller reachability, launch-agent status, and every profile manifest against the live adapter rules.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if let doctorReport {
+                        doctorSummaryCard(doctorReport)
+                    } else {
+                        Text("No doctor report loaded yet. Run it once after the controller comes up.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Button(action: runControllerDoctor) {
+                        if isRunningControllerDoctor {
+                            HStack(spacing: 6) {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text("Running Controller Doctor")
+                            }
+                        } else {
+                            Label("Run Controller Doctor", systemImage: "stethoscope")
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(isRunningControllerDoctor)
                 }
 
                 Divider()
@@ -135,7 +174,7 @@ struct SettingsView: View {
                     .buttonStyle(.borderedProminent)
                 }
             }
-            .padding(.trailing, 14)
+            .padding(.trailing, scrollContentTrailingPadding)
             .padding(.bottom, 8)
         }
         .scrollIndicators(.visible)
@@ -184,6 +223,32 @@ struct SettingsView: View {
             }
 
             Text(diagnostic.baseURL)
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.22), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func doctorSummaryCard(_ report: DoctorReport) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label(
+                report.controller.reachable ? "Controller reachable" : "Controller unreachable",
+                systemImage: report.controller.reachable ? "checkmark.circle.fill" : "xmark.circle.fill"
+            )
+            .font(.caption)
+            .foregroundStyle(report.controller.reachable ? .green : .red)
+
+            Label(
+                report.launchAgent.running ? "Launch agent running" : "Launch agent not running",
+                systemImage: report.launchAgent.running ? "bolt.circle.fill" : "bolt.slash.circle.fill"
+            )
+            .font(.caption)
+            .foregroundStyle(report.launchAgent.running ? .green : .orange)
+
+            Text(report.controller.url)
                 .font(.caption.monospaced())
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)

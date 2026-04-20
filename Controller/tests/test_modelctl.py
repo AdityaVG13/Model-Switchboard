@@ -4,6 +4,7 @@ import importlib.util
 import os
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -20,6 +21,12 @@ SPEC = importlib.util.spec_from_file_location("modelctl", MODULE_PATH)
 assert SPEC and SPEC.loader
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
+
+
+def reserve_local_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
 
 
 class ModelCtlTests(unittest.TestCase):
@@ -155,6 +162,7 @@ class ModelCtlTests(unittest.TestCase):
             tmp_path = Path(tmpdir)
             script_path = tmp_path / "start-model-mac.sh"
             shutil.copy2(ROOT / "start-model-mac.sh", script_path)
+            port = reserve_local_port()
 
             model_dir = tmp_path / "model"
             model_dir.mkdir()
@@ -219,7 +227,7 @@ class ModelCtlTests(unittest.TestCase):
                       "SERVER_BIN": "{server_bin}",
                       "MODEL_DIR": "{model_dir}",
                       "HOST": "127.0.0.1",
-                      "PORT": "18080",
+                      "PORT": "{port}",
                       "REQUEST_MODEL": "supergemma-local",
                       "SERVER_MODEL_ID": "supergemma-local",
                       "MODEL_ALIAS": "{log_alias}"

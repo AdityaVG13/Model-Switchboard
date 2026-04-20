@@ -492,10 +492,15 @@ struct MenuBarContentView: View {
                 controllerBaseURL: $controllerBaseURL,
                 profilesDirectory: store.profilesDirectory,
                 controllerRoot: store.resolvedControllerRoot,
+                doctorReport: store.doctorReport,
                 profileDiagnostics: store.diagnosticsNeedingAttention,
+                isRunningControllerDoctor: store.isRunningControllerDoctor,
                 launchAtLoginManager: launchAtLoginManager,
                 openProfilesDirectory: store.openProfilesDirectory,
                 openControllerRoot: store.openControllerRoot,
+                runControllerDoctor: {
+                    Task { await store.refreshDoctorReport() }
+                },
                 reconnect: reconnect
             )
         case .benchmarks:
@@ -508,7 +513,10 @@ struct MenuBarContentView: View {
                 }
             )
         case .help:
-            HelpView()
+            HelpView(
+                exampleProfilesDirectory: store.resolvedExampleProfilesDirectory,
+                openExampleProfilesDirectory: store.openExampleProfilesDirectory
+            )
         }
     }
 

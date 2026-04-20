@@ -2,7 +2,10 @@ import SwiftUI
 import ModelSwitchboardCore
 
 struct HelpView: View {
+    let exampleProfilesDirectory: String?
+    let openExampleProfilesDirectory: () -> Void
     private let features = AppFeatures.current
+    private let scrollContentTrailingPadding: CGFloat = 22
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
@@ -47,12 +50,14 @@ struct HelpView: View {
                     ]
                 )
 
+                exampleProfilesSection
+
                 section(
                     title: "Power User Extras",
                     bullets: powerUserBullets
                 )
             }
-            .padding(.trailing, 14)
+            .padding(.trailing, scrollContentTrailingPadding)
             .padding(.bottom, 8)
         }
         .scrollIndicators(.visible)
@@ -90,6 +95,35 @@ struct HelpView: View {
                         .font(.footnote)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var exampleProfilesSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Example Profiles")
+                .font(.caption.bold())
+                .foregroundStyle(.secondary)
+
+            Text("Use the bundled example manifests as clean starting points for `llama.cpp`, MLX, and `rvllm-mlx` profiles. Copy one, rename it, then fill in your own model path, server binary, and runtime-specific flags.")
+                .font(.footnote)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let exampleProfilesDirectory, !exampleProfilesDirectory.isEmpty {
+                Text(exampleProfilesDirectory)
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.quaternary.opacity(0.22), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                Button("Open Example Profiles", action: openExampleProfilesDirectory)
+            } else {
+                Text("The controller root is not available yet, so the bundled example-profile folder cannot be resolved.")
+                    .font(.footnote)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }

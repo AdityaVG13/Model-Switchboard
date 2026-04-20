@@ -101,6 +101,7 @@ struct BenchmarksPanelView: View {
         let maxTableHeight: CGFloat = 320
         let interRowSpacing: CGFloat = 4
         let contentPadding: CGFloat = 10
+        let scrollbarGutter: CGFloat = displayRows.count > 7 ? 14 : 0
         let desiredHeight = min(
             maxTableHeight,
             max(
@@ -126,6 +127,7 @@ struct BenchmarksPanelView: View {
                         }
                     }
                     .padding(.vertical, 4)
+                    .padding(.trailing, scrollbarGutter)
                 }
                 .frame(height: desiredHeight)
                 .scrollIndicators(.visible)

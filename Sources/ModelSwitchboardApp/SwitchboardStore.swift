@@ -17,12 +17,14 @@ final class SwitchboardStore {
     let features: AppFeatures
     var statuses: [ModelProfileStatus] = []
     var benchmark: BenchmarkStatus?
+    var doctorReport: DoctorReport?
     var profileDiagnostics: [ProfileDiagnostic] = []
     var integrations: [ControllerIntegration] = []
     var profilesDirectory: String?
     var controllerRoot: String?
     var lastError: String?
     var isRefreshing = false
+    var isRunningControllerDoctor = false
     var lastUpdated: Date?
     var pendingProfileActions: [String: String] = [:]
     var pendingGlobalActions: Set<String> = []
@@ -146,8 +148,7 @@ final class SwitchboardStore {
             apply(payload: payload)
             cachePayload(payload, context: "refresh")
             if let report = try? await doctorTask {
-                let diagnostics = report.profiles
-                profileDiagnostics = diagnostics.sorted(by: Self.compareDiagnostics)
+                apply(doctorReport: report)
             }
             lastError = nil
             lastUpdated = Date()
@@ -159,6 +160,21 @@ final class SwitchboardStore {
                 lastError = "Controller unavailable. Showing cached state."
                 return
             }
+            lastError = error.localizedDescription
+        }
+    }
+
+    func refreshDoctorReport() async {
+        if isRunningControllerDoctor { return }
+        isRunningControllerDoctor = true
+        defer { isRunningControllerDoctor = false }
+
+        do {
+            let report = try await client.fetchDoctorReport()
+            apply(doctorReport: report)
+            lastError = nil
+        } catch {
+            if isBenignCancellation(error) { return }
             lastError = error.localizedDescription
         }
     }
@@ -274,6 +290,11 @@ final class SwitchboardStore {
         NSWorkspace.shared.open(URL(fileURLWithPath: target))
     }
 
+    func openExampleProfilesDirectory() {
+        guard let target = resolvedExampleProfilesDirectory else { return }
+        NSWorkspace.shared.open(URL(fileURLWithPath: target))
+    }
+
     var resolvedControllerRoot: String? {
         if let controllerRoot, !controllerRoot.isEmpty {
             return controllerRoot
@@ -283,6 +304,18 @@ final class SwitchboardStore {
         return URL(fileURLWithPath: profilesDirectory)
             .deletingLastPathComponent()
             .path
+    }
+
+    var resolvedExampleProfilesDirectory: String? {
+        let preferredTargets = [
+            profilesDirectory.map { URL(fileURLWithPath: $0).appendingPathComponent("examples").path },
+            resolvedControllerRoot.map { URL(fileURLWithPath: $0).appendingPathComponent("model-profiles/examples").path },
+        ]
+
+        for target in preferredTargets.compactMap({ $0 }) where FileManager.default.fileExists(atPath: target) {
+            return target
+        }
+        return nil
     }
 
     var autoRefreshPolicy: AutoRefreshPolicy {
@@ -372,6 +405,11 @@ final class SwitchboardStore {
         integrations = features.supportsIntegrations ? payload.integrations : []
         profilesDirectory = payload.profilesDirectory
         controllerRoot = payload.controllerRoot
+    }
+
+    private func apply(doctorReport: DoctorReport) {
+        self.doctorReport = doctorReport
+        profileDiagnostics = doctorReport.profiles.sorted(by: Self.compareDiagnostics)
     }
 
     var diagnosticsNeedingAttention: [ProfileDiagnostic] {
