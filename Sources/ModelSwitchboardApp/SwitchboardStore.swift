@@ -469,7 +469,7 @@ final class SwitchboardStore {
         return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
     }
 
-    private static func compareDiagnostics(lhs: ProfileDiagnostic, rhs: ProfileDiagnostic) -> Bool {
+    nonisolated private static func compareDiagnostics(lhs: ProfileDiagnostic, rhs: ProfileDiagnostic) -> Bool {
         let lhsSeverity = lhs.errors.isEmpty ? (lhs.warnings.isEmpty ? 0 : 1) : 2
         let rhsSeverity = rhs.errors.isEmpty ? (rhs.warnings.isEmpty ? 0 : 1) : 2
         if lhsSeverity != rhsSeverity { return lhsSeverity > rhsSeverity }
