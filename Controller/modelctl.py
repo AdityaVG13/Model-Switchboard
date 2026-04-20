@@ -1400,6 +1400,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
             write_status_cache(payload)
             self._send_json(payload)
             return
+        if self.path == "/api/doctor":
+            self._send_json(doctor_report())
+            return
         if self.path == "/api/benchmark/status":
             self._send_json(benchmark_status())
             return

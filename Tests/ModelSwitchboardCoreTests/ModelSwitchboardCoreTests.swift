@@ -69,6 +69,49 @@ import Testing
     #expect(payload.benchmark?.latest?.rows.first?.decodeTokensPerSec == 119.63)
 }
 
+@Test func decodesDoctorReport() throws {
+    let json = #"""
+    {
+      "controller": {
+        "url": "http://127.0.0.1:8877/api/status",
+        "reachable": true,
+        "profiles": 3,
+        "integrations": 1
+      },
+      "launch_agent": {
+        "plist_path": "/Users/example/Library/LaunchAgents/io.modelswitchboard.controller.plist",
+        "installed": true,
+        "running": true
+      },
+      "integrations": [],
+      "profiles_dir": "/Users/example/.model-switchboard/model-profiles",
+      "controller_root": "/Users/example/.model-switchboard",
+      "profiles": [
+        {
+          "profile": "example-mlx",
+          "display_name": "Example MLX Model",
+          "runtime": "mlx",
+          "errors": ["missing MODEL_DIR or MODEL_REPO"],
+          "warnings": ["base_url is empty; endpoint health checks may fail"],
+          "running": false,
+          "ready": false,
+          "pid": null,
+          "base_url": ""
+        }
+      ]
+    }
+    """#
+
+    let report = try JSONDecoder().decode(DoctorReport.self, from: Data(json.utf8))
+
+    #expect(report.controller.reachable)
+    #expect(report.launchAgent.running)
+    #expect(report.profilesDirectory == "/Users/example/.model-switchboard/model-profiles")
+    #expect(report.profiles.count == 1)
+    #expect(report.profiles[0].errors == ["missing MODEL_DIR or MODEL_REPO"])
+    #expect(report.profiles[0].warnings == ["base_url is empty; endpoint health checks may fail"])
+}
+
 @Test func summaryChoosesBenchmarkLabel() {
     let payload = ControllerStatusPayload(
         statuses: [

@@ -17,6 +17,7 @@ final class SwitchboardStore {
     let features: AppFeatures
     var statuses: [ModelProfileStatus] = []
     var benchmark: BenchmarkStatus?
+    var profileDiagnostics: [ProfileDiagnostic] = []
     var integrations: [ControllerIntegration] = []
     var profilesDirectory: String?
     var controllerRoot: String?
@@ -138,9 +139,16 @@ final class SwitchboardStore {
         isRefreshing = true
         defer { isRefreshing = false }
         do {
-            let payload = try await client.fetchStatus()
+            let client = try self.client
+            async let statusTask = client.fetchStatus()
+            async let doctorTask = client.fetchDoctorReport()
+            let payload = try await statusTask
             apply(payload: payload)
             cachePayload(payload, context: "refresh")
+            if let report = try? await doctorTask {
+                let diagnostics = report.profiles
+                profileDiagnostics = diagnostics.sorted(by: Self.compareDiagnostics)
+            }
             lastError = nil
             lastUpdated = Date()
         } catch {
@@ -366,6 +374,10 @@ final class SwitchboardStore {
         controllerRoot = payload.controllerRoot
     }
 
+    var diagnosticsNeedingAttention: [ProfileDiagnostic] {
+        profileDiagnostics.filter { !$0.errors.isEmpty || !$0.warnings.isEmpty }
+    }
+
     private func loadCachedState() {
         guard let cached = ControllerStatusCache.load() else { return }
         apply(payload: cached.payload)
@@ -421,5 +433,12 @@ final class SwitchboardStore {
         if error is CancellationError { return true }
         let nsError = error as NSError
         return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
+    }
+
+    private static func compareDiagnostics(lhs: ProfileDiagnostic, rhs: ProfileDiagnostic) -> Bool {
+        let lhsSeverity = lhs.errors.isEmpty ? (lhs.warnings.isEmpty ? 0 : 1) : 2
+        let rhsSeverity = rhs.errors.isEmpty ? (rhs.warnings.isEmpty ? 0 : 1) : 2
+        if lhsSeverity != rhsSeverity { return lhsSeverity > rhsSeverity }
+        return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
     }
 }

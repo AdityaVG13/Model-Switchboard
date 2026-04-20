@@ -5,6 +5,7 @@ struct SettingsView: View {
     @Binding var controllerBaseURL: String
     let profilesDirectory: String?
     let controllerRoot: String?
+    let profileDiagnostics: [ProfileDiagnostic]
     @ObservedObject var launchAtLoginManager: LaunchAtLoginManager
     let openProfilesDirectory: () -> Void
     let openControllerRoot: () -> Void
@@ -56,6 +57,29 @@ struct SettingsView: View {
                             .font(.footnote)
                             .foregroundStyle(.orange)
                             .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Profile Validation")
+                        .font(.caption.bold())
+
+                    Text("These checks come from the controller doctor report. Fix these profile errors before expecting `Activate` or health checks to behave correctly.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if profileDiagnostics.isEmpty {
+                        Text("No profile errors or warnings on the latest controller refresh.")
+                            .font(.footnote)
+                            .foregroundStyle(.green)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        ForEach(profileDiagnostics) { diagnostic in
+                            profileDiagnosticCard(diagnostic)
+                        }
                     }
                 }
 
@@ -134,5 +158,38 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(.quaternary.opacity(0.22), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
+    }
+
+    private func profileDiagnosticCard(_ diagnostic: ProfileDiagnostic) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(diagnostic.displayName)
+                .font(.footnote.weight(.semibold))
+
+            if !diagnostic.errors.isEmpty {
+                ForEach(diagnostic.errors, id: \.self) { error in
+                    Label(error, systemImage: "xmark.octagon.fill")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            if !diagnostic.warnings.isEmpty {
+                ForEach(diagnostic.warnings, id: \.self) { warning in
+                    Label(warning, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Text(diagnostic.baseURL)
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.22), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }

@@ -195,6 +195,120 @@ public struct BenchmarkStatus: Codable, Equatable, Sendable {
     }
 }
 
+public struct ProfileDiagnostic: Codable, Equatable, Identifiable, Sendable {
+    public let profile: String
+    public let displayName: String
+    public let runtime: String
+    public let errors: [String]
+    public let warnings: [String]
+    public let running: Bool
+    public let ready: Bool
+    public let pid: Int?
+    public let baseURL: String
+
+    public var id: String { profile }
+
+    public init(
+        profile: String,
+        displayName: String,
+        runtime: String,
+        errors: [String],
+        warnings: [String],
+        running: Bool,
+        ready: Bool,
+        pid: Int?,
+        baseURL: String
+    ) {
+        self.profile = profile
+        self.displayName = displayName
+        self.runtime = runtime
+        self.errors = errors
+        self.warnings = warnings
+        self.running = running
+        self.ready = ready
+        self.pid = pid
+        self.baseURL = baseURL
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case profile
+        case displayName = "display_name"
+        case runtime
+        case errors
+        case warnings
+        case running
+        case ready
+        case pid
+        case baseURL = "base_url"
+    }
+}
+
+public struct ControllerHeartbeat: Codable, Equatable, Sendable {
+    public let url: String
+    public let reachable: Bool
+    public let profiles: Int
+    public let integrations: Int
+
+    public init(url: String, reachable: Bool, profiles: Int, integrations: Int) {
+        self.url = url
+        self.reachable = reachable
+        self.profiles = profiles
+        self.integrations = integrations
+    }
+}
+
+public struct LaunchAgentStatus: Codable, Equatable, Sendable {
+    public let plistPath: String
+    public let installed: Bool
+    public let running: Bool
+
+    public init(plistPath: String, installed: Bool, running: Bool) {
+        self.plistPath = plistPath
+        self.installed = installed
+        self.running = running
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case plistPath = "plist_path"
+        case installed
+        case running
+    }
+}
+
+public struct DoctorReport: Codable, Equatable, Sendable {
+    public let controller: ControllerHeartbeat
+    public let launchAgent: LaunchAgentStatus
+    public let integrations: [ControllerIntegration]
+    public let profilesDirectory: String?
+    public let controllerRoot: String?
+    public let profiles: [ProfileDiagnostic]
+
+    public init(
+        controller: ControllerHeartbeat,
+        launchAgent: LaunchAgentStatus,
+        integrations: [ControllerIntegration],
+        profilesDirectory: String?,
+        controllerRoot: String?,
+        profiles: [ProfileDiagnostic]
+    ) {
+        self.controller = controller
+        self.launchAgent = launchAgent
+        self.integrations = integrations
+        self.profilesDirectory = profilesDirectory
+        self.controllerRoot = controllerRoot
+        self.profiles = profiles
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case controller
+        case launchAgent = "launch_agent"
+        case integrations
+        case profilesDirectory = "profiles_dir"
+        case controllerRoot = "controller_root"
+        case profiles
+    }
+}
+
 public struct ControllerSourcePaths: Equatable, Sendable {
     public let profilesDirectory: String?
     public let controllerRoot: String?

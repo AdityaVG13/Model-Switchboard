@@ -64,6 +64,8 @@ The example adapter accepts both:
 
 Use `.env` for shell-style configuration. Use `.json` for structured, tool-agnostic config.
 
+Strict example manifests live under `Controller/model-profiles/examples/`.
+
 ## Supported runtime styles
 
 ### `llama.cpp`

@@ -492,6 +492,7 @@ struct MenuBarContentView: View {
                 controllerBaseURL: $controllerBaseURL,
                 profilesDirectory: store.profilesDirectory,
                 controllerRoot: store.resolvedControllerRoot,
+                profileDiagnostics: store.diagnosticsNeedingAttention,
                 launchAtLoginManager: launchAtLoginManager,
                 openProfilesDirectory: store.openProfilesDirectory,
                 openControllerRoot: store.openControllerRoot,
