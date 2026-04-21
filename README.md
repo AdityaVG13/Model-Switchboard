@@ -8,7 +8,7 @@
 ***Flip between local LLM runtimes from your menu bar.***
 **One click to activate. One click to stop everything.**
 
-[![Version](https://img.shields.io/badge/version-1.0.3-blue?style=for-the-badge)](VERSION)
+[![Version](https://img.shields.io/badge/version-1.0.4-blue?style=for-the-badge)](VERSION)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/macOS-14%2B-lightgrey?style=for-the-badge&logo=apple&logoColor=white)](#requirements)
 [![Swift](https://img.shields.io/badge/swift-6.0-orange?style=for-the-badge&logo=swift&logoColor=white)](Package.swift)
@@ -131,6 +131,8 @@ SERVER_MODEL_ID=qwen35-local
 ```
 
 **3. Open the menu bar icon.** Your profile appears. Click **`Activate`**.
+
+Every profile must resolve to a unique endpoint. Reusing the same `HOST:PORT` or `BASE_URL` across two profiles is a configuration error, and the controller doctor will flag it.
 
 > Using your own runtime or launcher? Any backend that honors the [controller contract](SETUP.md#controller-api-contract) works. MLX, Ollama, vLLM, and custom-command examples live in [SETUP.md](SETUP.md).
 

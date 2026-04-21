@@ -107,6 +107,177 @@ class ModelCtlTests(unittest.TestCase):
         self.assertTrue(status["ready"])
         self.assertEqual(status["server_ids"], ["supergemma-local"])
 
+    def test_profile_endpoint_conflicts_normalize_loopback_hosts(self) -> None:
+        profiles = {
+            "qwen35-a3b": {
+                "PROFILE_NAME": "qwen35-a3b",
+                "DISPLAY_NAME": "Qwen 3.5 35B",
+                "REQUEST_MODEL": "qwen35-local",
+                "HOST": "127.0.0.1",
+                "PORT": "8080",
+            },
+            "supergemma31b-rvllm-mlx": {
+                "PROFILE_NAME": "supergemma31b-rvllm-mlx",
+                "DISPLAY_NAME": "SuperGemma 31B",
+                "REQUEST_MODEL": "supergemma-local",
+                "HOST": "localhost",
+                "PORT": "8080",
+            },
+            "gemma3-mlx": {
+                "PROFILE_NAME": "gemma3-mlx",
+                "DISPLAY_NAME": "Gemma 3 MLX",
+                "REQUEST_MODEL": "gemma3-local",
+                "HOST": "127.0.0.1",
+                "PORT": "8081",
+            },
+        }
+
+        conflicts = MODULE.profile_endpoint_conflicts(profiles)
+
+        self.assertEqual(
+            conflicts["qwen35-a3b"],
+            ("localhost:8080", ["supergemma31b-rvllm-mlx"]),
+        )
+        self.assertEqual(
+            conflicts["supergemma31b-rvllm-mlx"],
+            ("localhost:8080", ["qwen35-a3b"]),
+        )
+        self.assertNotIn("gemma3-mlx", conflicts)
+
+    def test_status_snapshot_disables_port_fallback_for_conflicted_profiles(self) -> None:
+        profiles = {
+            "qwen35-a3b": {
+                "PROFILE_NAME": "qwen35-a3b",
+                "DISPLAY_NAME": "Qwen 3.5 35B",
+                "REQUEST_MODEL": "qwen35-local",
+                "HOST": "127.0.0.1",
+                "PORT": "8080",
+            },
+            "supergemma31b-rvllm-mlx": {
+                "PROFILE_NAME": "supergemma31b-rvllm-mlx",
+                "DISPLAY_NAME": "SuperGemma 31B",
+                "REQUEST_MODEL": "supergemma-local",
+                "HOST": "localhost",
+                "PORT": "8080",
+            },
+            "gemma3-mlx": {
+                "PROFILE_NAME": "gemma3-mlx",
+                "DISPLAY_NAME": "Gemma 3 MLX",
+                "REQUEST_MODEL": "gemma3-local",
+                "HOST": "127.0.0.1",
+                "PORT": "8081",
+            },
+        }
+        captured: dict[str, bool] = {}
+
+        def fake_status_for_profile(name: str, env: dict[str, str], *, allow_port_fallback: bool = True) -> dict[str, object]:
+            captured[name] = allow_port_fallback
+            return {
+                "profile": name,
+                "display_name": env["DISPLAY_NAME"],
+                "runtime": env.get("RUNTIME", "llama.cpp"),
+                "host": env.get("HOST", "127.0.0.1"),
+                "port": env.get("PORT", ""),
+                "base_url": MODULE.base_url(env),
+                "request_model": env["REQUEST_MODEL"],
+                "server_model_id": env.get("SERVER_MODEL_ID", env["REQUEST_MODEL"]),
+                "pid": None,
+                "running": False,
+                "ready": False,
+                "server_ids": [],
+                "rss_mb": None,
+                "command": None,
+                "log_path": "/tmp/test.log",
+            }
+
+        with (
+            mock.patch.object(MODULE, "load_profiles", return_value=profiles),
+            mock.patch.object(MODULE, "status_for_profile", side_effect=fake_status_for_profile),
+        ):
+            statuses = MODULE.status_snapshot()
+
+        self.assertEqual([item["profile"] for item in statuses], ["gemma3-mlx", "qwen35-a3b", "supergemma31b-rvllm-mlx"])
+        self.assertTrue(captured["gemma3-mlx"])
+        self.assertFalse(captured["qwen35-a3b"])
+        self.assertFalse(captured["supergemma31b-rvllm-mlx"])
+
+    def test_doctor_report_flags_duplicate_endpoint_profiles(self) -> None:
+        profiles = {
+            "qwen35-a3b": {
+                "PROFILE_NAME": "qwen35-a3b",
+                "DISPLAY_NAME": "Qwen 3.5 35B",
+                "REQUEST_MODEL": "qwen35-local",
+                "HOST": "127.0.0.1",
+                "PORT": "8080",
+            },
+            "supergemma31b-rvllm-mlx": {
+                "PROFILE_NAME": "supergemma31b-rvllm-mlx",
+                "DISPLAY_NAME": "SuperGemma 31B",
+                "REQUEST_MODEL": "supergemma-local",
+                "HOST": "localhost",
+                "PORT": "8080",
+            },
+        }
+        live_status = {
+            "running": False,
+            "ready": False,
+            "pid": None,
+            "base_url": "http://127.0.0.1:8080/v1",
+        }
+
+        with (
+            mock.patch.object(MODULE, "load_profiles", return_value=profiles),
+            mock.patch.object(MODULE, "controller_status", return_value={"url": "http://127.0.0.1:8877/api/status", "reachable": True, "profiles": 2, "integrations": 0}),
+            mock.patch.object(MODULE, "launch_agent_status", return_value={"plist_path": "/tmp/io.modelswitchboard.controller.plist", "installed": True, "running": True}),
+            mock.patch.object(MODULE, "integration_status", return_value=[]),
+            mock.patch.object(MODULE, "status_for_profile", return_value=live_status),
+        ):
+            report = MODULE.doctor_report()
+
+        diagnostics = {item["profile"]: item for item in report["profiles"]}
+        self.assertIn(
+            "duplicate endpoint localhost:8080 is also configured for profile supergemma31b-rvllm-mlx",
+            diagnostics["qwen35-a3b"]["errors"],
+        )
+        self.assertIn(
+            "duplicate endpoint localhost:8080 is also configured for profile qwen35-a3b",
+            diagnostics["supergemma31b-rvllm-mlx"]["errors"],
+        )
+
+    def test_switch_profile_rejects_duplicate_endpoint_assignment(self) -> None:
+        profiles = {
+            "qwen35-a3b": {
+                "PROFILE_NAME": "qwen35-a3b",
+                "DISPLAY_NAME": "Qwen 3.5 35B",
+                "REQUEST_MODEL": "qwen35-local",
+                "HOST": "127.0.0.1",
+                "PORT": "8080",
+            },
+            "supergemma31b-rvllm-mlx": {
+                "PROFILE_NAME": "supergemma31b-rvllm-mlx",
+                "DISPLAY_NAME": "SuperGemma 31B",
+                "REQUEST_MODEL": "supergemma-local",
+                "HOST": "localhost",
+                "PORT": "8080",
+            },
+        }
+
+        with (
+            mock.patch.object(MODULE, "load_profiles", return_value=profiles),
+            mock.patch.object(MODULE, "status_snapshot", return_value=[]),
+            mock.patch.object(MODULE, "stop_profile") as stop_profile,
+            mock.patch.object(MODULE, "start_profile") as start_profile,
+        ):
+            with self.assertRaises(MODULE.ProfileConflictError) as ctx:
+                MODULE.switch_profile("supergemma31b-rvllm-mlx")
+
+        self.assertEqual(
+            str(ctx.exception),
+            "Cannot activate supergemma31b-rvllm-mlx: endpoint localhost:8080 is also configured for profile qwen35-a3b. Each profile must use a unique HOST:PORT or BASE_URL.",
+        )
+        stop_profile.assert_not_called()
+        start_profile.assert_not_called()
+
     def test_diagnose_profile_accepts_valid_rvllm_mlx_profile(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)

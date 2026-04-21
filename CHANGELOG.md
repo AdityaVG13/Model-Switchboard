@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.4] - 2026-04-20
+
+### Added
+- Added controller doctor validation for duplicate profile endpoints so conflicting `HOST:PORT` or `BASE_URL` assignments are called out before activation.
+- Added controller regression coverage for loopback endpoint normalization, conflict reporting, and activation refusal.
+
+### Changed
+- Documented the unique-endpoint requirement in the setup docs so profile authors do not accidentally point two models at the same listener.
+
+### Fixed
+- Blocked `Activate`, `Start`, and `Restart` when a profile shares an endpoint with another profile.
+- Prevented conflicted profiles from borrowing the same port listener PID and appearing to co-activate in the UI.
+
 ## [1.0.3] - 2026-04-19
 
 ### Added

@@ -66,6 +66,8 @@ Use `.env` for shell-style configuration. Use `.json` for structured, tool-agnos
 
 Strict example manifests live under `Controller/model-profiles/examples/`.
 
+Every profile must resolve to a unique endpoint. If two profiles share the same `HOST:PORT` or `BASE_URL`, activation and status attribution become ambiguous, so the controller doctor treats that as a profile error.
+
 ## Supported runtime styles
 
 ### `llama.cpp`

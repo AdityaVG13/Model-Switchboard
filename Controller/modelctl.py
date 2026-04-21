@@ -51,6 +51,11 @@ LAUNCH_AGENT_LABEL = "io.modelswitchboard.controller"
 LAUNCH_AGENT_PLIST = pathlib.Path.home() / "Library/LaunchAgents" / f"{LAUNCH_AGENT_LABEL}.plist"
 STATUS_CACHE_PATH = pathlib.Path.home() / "Library/Caches/io.modelswitchboard/controller-status.json"
 
+
+class ProfileConflictError(RuntimeError):
+    """Raised when two or more profiles resolve to the same endpoint."""
+
+
 class ControllerRequest(TypedDict, total=False):
     profile: str
     profiles: list[str]
@@ -745,6 +750,64 @@ def endpoint_port(env: ProfileEnv) -> str:
     return str(parsed.port or "")
 
 
+def normalized_endpoint_host(host: str) -> str:
+    normalized = host.strip().lower().strip("[]")
+    if normalized in {"127.0.0.1", "localhost", "::1"}:
+        return "localhost"
+    return normalized
+
+
+def endpoint_identity(env: ProfileEnv) -> tuple[str, str] | None:
+    port = endpoint_port(env).strip()
+    if not port:
+        return None
+    host = normalized_endpoint_host(endpoint_host(env))
+    if not host:
+        return None
+    return host, port
+
+
+def profile_endpoint_conflicts(profiles: dict[str, ProfileEnv]) -> dict[str, tuple[str, list[str]]]:
+    groups: dict[tuple[str, str], list[str]] = {}
+    for name, env in sorted(profiles.items()):
+        identity = endpoint_identity(env)
+        if not identity:
+            continue
+        groups.setdefault(identity, []).append(name)
+
+    conflicts: dict[str, tuple[str, list[str]]] = {}
+    for (host, port), names in groups.items():
+        if len(names) < 2:
+            continue
+        ordered_names = sorted(names, key=str.lower)
+        endpoint = f"{host}:{port}"
+        for name in ordered_names:
+            conflicts[name] = (endpoint, [other for other in ordered_names if other != name])
+    return conflicts
+
+
+def format_endpoint_conflict(endpoint: str, other_profiles: list[str]) -> str:
+    label = "profile" if len(other_profiles) == 1 else "profiles"
+    peers = ", ".join(other_profiles)
+    return f"endpoint {endpoint} is also configured for {label} {peers}"
+
+
+def ensure_unique_profile_endpoint(
+    name: str,
+    profiles: dict[str, ProfileEnv],
+    *,
+    action: str,
+) -> None:
+    conflict = profile_endpoint_conflicts(profiles).get(name)
+    if not conflict:
+        return
+    endpoint, other_profiles = conflict
+    detail = format_endpoint_conflict(endpoint, other_profiles)
+    raise ProfileConflictError(
+        f"Cannot {action} {name}: {detail}. Each profile must use a unique HOST:PORT or BASE_URL."
+    )
+
+
 def read_pid(profile_name: str) -> int | None:
     path = pid_path(profile_name)
     if not path.exists():
@@ -856,13 +919,18 @@ def probe_health(env: ProfileEnv, timeout: float = 1.5) -> tuple[bool, list[str]
     return bool(server_ids), server_ids
 
 
-def status_for_profile(name: str, env: ProfileEnv) -> ModelProfileStatusPayload:
+def status_for_profile(
+    name: str,
+    env: ProfileEnv,
+    *,
+    allow_port_fallback: bool = True,
+) -> ModelProfileStatusPayload:
     ready, server_ids = probe_health(env)
     pid = read_pid(name)
     if pid and not process_alive(pid):
         pid_path(name).unlink(missing_ok=True)
         pid = None
-    if not pid:
+    if not pid and allow_port_fallback:
         fallback_pid = port_listener_pid(endpoint_port(env))
         if fallback_pid and (ready or pid_matches_profile(fallback_pid, name, env)):
             pid = fallback_pid
@@ -887,8 +955,12 @@ def status_for_profile(name: str, env: ProfileEnv) -> ModelProfileStatusPayload:
 
 def status_snapshot(selected: list[str] | None = None) -> list[ModelProfileStatusPayload]:
     profiles = load_profiles()
+    conflicts = profile_endpoint_conflicts(profiles)
     names = selected or sorted(profiles)
-    return [status_for_profile(name, profiles[name]) for name in names]
+    return [
+        status_for_profile(name, profiles[name], allow_port_fallback=name not in conflicts)
+        for name in names
+    ]
 
 
 def status_payload(selected: list[str] | None = None) -> ControllerStatusPayload:
@@ -961,7 +1033,10 @@ def print_status(selected: list[str] | None = None, *, as_json: bool = False) ->
 
 
 def start_profile(name: str) -> None:
-    require_profile(name)
+    profiles = load_profiles()
+    if name not in profiles:
+        raise SystemExit(f"Unknown profile: {name}")
+    ensure_unique_profile_endpoint(name, profiles, action="start")
     env = os.environ.copy()
     env["MODEL_PROFILE"] = name
     result = run(["bash", str(START_SCRIPT)], env=env)
@@ -1003,6 +1078,10 @@ def stop_profile(name: str) -> None:
 
 
 def restart_profile(name: str) -> None:
+    profiles = load_profiles()
+    if name not in profiles:
+        raise SystemExit(f"Unknown profile: {name}")
+    ensure_unique_profile_endpoint(name, profiles, action="restart")
     stop_profile(name)
     start_profile(name)
 
@@ -1045,6 +1124,7 @@ def switch_profile(name: str) -> None:
     profiles = load_profiles()
     if name not in profiles:
         raise SystemExit(f"Unknown profile: {name}")
+    ensure_unique_profile_endpoint(name, profiles, action="activate")
     for item in status_snapshot():
         if item["profile"] != name and item["running"]:
             stop_profile(item["profile"])
@@ -1213,7 +1293,12 @@ def controller_status() -> ControllerHeartbeatPayload:
         return {"url": url, "reachable": False, "profiles": 0, "integrations": 0}
 
 
-def diagnose_profile(name: str, env: ProfileEnv) -> ProfileDiagnosticPayload:
+def diagnose_profile(
+    name: str,
+    env: ProfileEnv,
+    *,
+    endpoint_conflict: tuple[str, list[str]] | None = None,
+) -> ProfileDiagnosticPayload:
     runtime = env.get("RUNTIME", "llama.cpp")
     errors: list[str] = []
     warnings: list[str] = []
@@ -1266,9 +1351,12 @@ def diagnose_profile(name: str, env: ProfileEnv) -> ProfileDiagnosticPayload:
         warnings.append("base_url is empty; endpoint health checks may fail")
     if healthcheck_mode(env) == "disabled":
         warnings.append("healthcheck disabled; ready state cannot be verified")
+    if endpoint_conflict:
+        endpoint, other_profiles = endpoint_conflict
+        errors.append(f"duplicate {format_endpoint_conflict(endpoint, other_profiles)}")
 
     try:
-        live = status_for_profile(name, env)
+        live = status_for_profile(name, env, allow_port_fallback=endpoint_conflict is None)
     except Exception as exc:  # noqa: BLE001
         live = {
             "running": False,
@@ -1294,7 +1382,11 @@ def diagnose_profile(name: str, env: ProfileEnv) -> ProfileDiagnosticPayload:
 
 def doctor_report() -> DoctorReportPayload:
     profiles = load_profiles()
-    diagnostics = [diagnose_profile(name, env) for name, env in sorted(profiles.items())]
+    conflicts = profile_endpoint_conflicts(profiles)
+    diagnostics = [
+        diagnose_profile(name, env, endpoint_conflict=conflicts.get(name))
+        for name, env in sorted(profiles.items())
+    ]
     return {
         "controller": controller_status(),
         "launch_agent": launch_agent_status(),
@@ -1608,7 +1700,10 @@ def main() -> None:
         return
 
     if args.command == "switch":
-        switch_profile(args.profile)
+        try:
+            switch_profile(args.profile)
+        except ProfileConflictError as exc:
+            raise SystemExit(str(exc)) from exc
         return
 
     if args.command == "benchmark":
@@ -1634,12 +1729,15 @@ def main() -> None:
         raise SystemExit("No profiles selected")
 
     for name in selected:
-        if args.command == "start":
-            start_profile(name)
-        elif args.command == "stop":
-            stop_profile(name)
-        elif args.command == "restart":
-            restart_profile(name)
+        try:
+            if args.command == "start":
+                start_profile(name)
+            elif args.command == "stop":
+                stop_profile(name)
+            elif args.command == "restart":
+                restart_profile(name)
+        except ProfileConflictError as exc:
+            raise SystemExit(str(exc)) from exc
 
 
 if __name__ == "__main__":
