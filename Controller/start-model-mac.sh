@@ -15,6 +15,45 @@ log() { printf '[INFO] %s\n' "$*"; }
 warn() { printf '[WARN] %s\n' "$*"; }
 die() { printf '[ERR] %s\n' "$*"; exit 1; }
 
+expand_user_path() {
+    local path="$1"
+    case "$path" in
+        "~")
+            printf '%s\n' "$HOME"
+            ;;
+        "~/"*)
+            printf '%s/%s\n' "$HOME" "${path#~/}"
+            ;;
+        *)
+            printf '%s\n' "$path"
+            ;;
+    esac
+}
+
+detect_model_root() {
+    local candidate
+    for candidate in "${MODEL_ROOT:-}" "${MODEL_ROOT_HINT:-}"; do
+        if [ -n "$candidate" ]; then
+            expand_user_path "$candidate"
+            return 0
+        fi
+    done
+
+    candidate="$HOME/AI/models"
+    if [ -d "$candidate" ]; then
+        printf '%s\n' "$candidate"
+        return 0
+    fi
+
+    candidate="$WORK_DIR/../models"
+    if [ -d "$candidate" ]; then
+        printf '%s\n' "$candidate"
+        return 0
+    fi
+
+    return 1
+}
+
 if [ -z "$PROFILE_PATH" ] && [ -z "$MODEL_PROFILE" ]; then
     die "Set MODEL_PROFILE or MODEL_PROFILE_PATH before launching a profile"
 fi
@@ -269,8 +308,9 @@ if [ "$RUNTIME" = "llama.cpp" ]; then
     MODEL_PATH="${MODEL_PATH:-}"
     if [ -z "$MODEL_PATH" ]; then
         [ -n "${MODEL_FILE:-}" ] || die "MODEL_PATH or MODEL_FILE is required for $MODEL_PROFILE"
-        [ -n "${MODEL_ROOT:-}" ] || die "MODEL_ROOT is required when MODEL_FILE is used for $MODEL_PROFILE"
-        MODEL_PATH="$MODEL_ROOT/$MODEL_FILE"
+        MODEL_ROOT_RESOLVED="$(detect_model_root || true)"
+        [ -n "$MODEL_ROOT_RESOLVED" ] || die "MODEL_FILE requires MODEL_ROOT, MODEL_ROOT_HINT, ~/AI/models, or ../models for $MODEL_PROFILE"
+        MODEL_PATH="$MODEL_ROOT_RESOLVED/$MODEL_FILE"
     fi
     if [ ! -f "$MODEL_PATH" ]; then
         die "Model file not found: $MODEL_PATH"
@@ -309,6 +349,12 @@ if [ "$RUNTIME" = "llama.cpp" ]; then
         fi
         if [ -n "${REASONING_BUDGET:-}" ]; then
             cmd+=(--reasoning-budget "$REASONING_BUDGET")
+        fi
+        if [ -n "${CHAT_TEMPLATE_KWARGS:-}" ]; then
+            cmd+=(--chat-template-kwargs "$CHAT_TEMPLATE_KWARGS")
+        fi
+        if [ -n "${CACHE_RAM:-}" ]; then
+            cmd+=(--cache-ram "$CACHE_RAM")
         fi
         if [ "${USE_MMAP:-1}" = "1" ]; then
             cmd+=(--mmap)

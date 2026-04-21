@@ -298,10 +298,23 @@ This repo builds DMGs locally; public releases should be signed and notarized.
 Included:
 
 - `Scripts/release-preflight.sh`
+- `Scripts/bump-version.py`
 - `Scripts/sign-and-notarize-dmg.sh`
 - `.github/workflows/release.yml`
 
-The release workflow signs, notarizes, verifies, and uploads both editions on tag push. Required repo secrets:
+The release workflow signs, notarizes, verifies, and uploads both editions when either:
+
+- a `v*` tag is pushed
+- a commit on `main` changes `VERSION`
+
+That means the normal maintainer flow can be:
+
+```bash
+python3 Scripts/bump-version.py patch   # or minor / major / x.y.z
+git push origin main
+```
+
+GitHub Actions will create or update the matching `v<version>` release for that commit. Required repo secrets:
 
 - `APPLE_CERTIFICATE_P12_BASE64`
 - `APPLE_CERTIFICATE_PASSWORD`

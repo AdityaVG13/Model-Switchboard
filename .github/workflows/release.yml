@@ -3,8 +3,21 @@ name: release
 on:
   workflow_dispatch:
   push:
+    branches:
+      - "main"
     tags:
       - "v*"
+    paths:
+      - "VERSION"
+      - "README.md"
+      - "CHANGELOG.md"
+      - "project.yml"
+      - ".github/workflows/release.yml"
+      - "Scripts/release-preflight.sh"
+      - "Scripts/sign-and-notarize-dmg.sh"
+      - "Scripts/verify-distribution.sh"
+      - "Scripts/verify-installed-app.sh"
+      - "Scripts/bump-version.py"
 
 jobs:
   build-release:
@@ -15,17 +28,47 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release target
+        id: release_meta
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          VERSION="$(tr -d '[:space:]' < VERSION)"
+          TAG="v$VERSION"
+          SHOULD_RELEASE="true"
+          REASON="manual dispatch or tag push"
+
+          if [ "${GITHUB_EVENT_NAME}" = "push" ] && [ "${REF_TYPE}" != "tag" ]; then
+            REASON="VERSION changed on main"
+            if [ -n "${BEFORE_SHA:-}" ] && [ "${BEFORE_SHA}" != "0000000000000000000000000000000000000000" ] && git diff --quiet "$BEFORE_SHA" "$GITHUB_SHA" -- VERSION; then
+              SHOULD_RELEASE="false"
+              REASON="VERSION unchanged on branch push"
+            fi
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "should_release=$SHOULD_RELEASE" >> "$GITHUB_OUTPUT"
+          echo "reason=$REASON" >> "$GITHUB_OUTPUT"
+          echo "Release decision: $SHOULD_RELEASE ($REASON)"
 
       - name: Select latest Xcode
+        if: steps.release_meta.outputs.should_release == 'true'
         run: |
           latest_xcode="$(ls -d /Applications/Xcode*.app | sort -V | tail -n 1)"
           sudo xcode-select -s "$latest_xcode/Contents/Developer"
           xcodebuild -version
 
       - name: Install xcodegen
+        if: steps.release_meta.outputs.should_release == 'true'
         run: brew install xcodegen
 
       - name: Run release preflight
+        if: steps.release_meta.outputs.should_release == 'true'
         env:
           MSW_PREFLIGHT_SKIP_BUILDS: "1"
         run: |
@@ -33,6 +76,7 @@ jobs:
           ./Scripts/release-preflight.sh
 
       - name: Prepare temporary keychain
+        if: steps.release_meta.outputs.should_release == 'true'
         env:
           APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -57,6 +101,7 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$RUNNER_TEMP/modelswitchboard.keychain-db"
 
       - name: Write App Store Connect API key
+        if: steps.release_meta.outputs.should_release == 'true'
         env:
           APPLE_NOTARY_API_KEY_P8_BASE64: ${{ secrets.APPLE_NOTARY_API_KEY_P8_BASE64 }}
         run: |
@@ -69,6 +114,7 @@ jobs:
           echo "APPLE_NOTARY_API_KEY_PATH=$API_KEY_PATH" >> "$GITHUB_ENV"
 
       - name: Build, sign, and notarize DMGs
+        if: steps.release_meta.outputs.should_release == 'true'
         env:
           APPLE_DEVELOPER_IDENTITY: ${{ secrets.APPLE_DEVELOPER_IDENTITY }}
           APPLE_NOTARY_API_KEY_PATH: ${{ env.APPLE_NOTARY_API_KEY_PATH }}
@@ -84,11 +130,15 @@ jobs:
           shasum -a 256 "dist/Model-Switchboard-Plus-$(tr -d '[:space:]' < VERSION).dmg" > "dist/Model-Switchboard-Plus-$(tr -d '[:space:]' < VERSION).dmg.sha256"
 
       - name: Upload release assets
+        if: steps.release_meta.outputs.should_release == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release_meta.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.release_meta.outputs.version }}
+          REF_TYPE: ${{ github.ref_type }}
         run: |
-          VERSION="$(tr -d '[:space:]' < VERSION)"
-          TAG="v$VERSION"
+          VERSION="$RELEASE_VERSION"
+          TAG="$RELEASE_TAG"
           FILES=(
             "dist/Model-Switchboard-$VERSION.dmg"
             "dist/Model-Switchboard-Plus-$VERSION.dmg"
@@ -104,5 +154,9 @@ jobs:
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "${FILES[@]}" --clobber
           else
-            gh release create "$TAG" "${FILES[@]}" --title "$TAG" --generate-notes
+            CREATE_ARGS=("$TAG" "${FILES[@]}" --title "$TAG" --generate-notes)
+            if [ "$REF_TYPE" != "tag" ]; then
+              CREATE_ARGS+=(--target "$GITHUB_SHA")
+            fi
+            gh release create "${CREATE_ARGS[@]}"
           fi

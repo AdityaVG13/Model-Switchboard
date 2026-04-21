@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.5] - 2026-04-20
+
+### Added
+- Added `Scripts/bump-version.py` plus release-automation tests so version bumps update the repo consistently instead of hand-editing release files.
+
+### Changed
+- Updated `.github/workflows/release.yml` so a version bump pushed to `main` now builds, notarizes, and publishes the GitHub release automatically, while preserving manual and tag-driven releases.
+- Documented the automated maintainer release flow in `README.md` and `SETUP.md`.
+
+### Fixed
+- Fixed local llama.cpp profile resolution so `MODEL_FILE` now works with `MODEL_ROOT_HINT`, `~/AI/models`, and `../models` fallbacks instead of requiring `MODEL_ROOT`.
+- Passed through llama.cpp `CHAT_TEMPLATE_KWARGS` and `CACHE_RAM`, which restores Qwen no-think setups without forcing `RUNTIME=custom`.
+- Added `--root` support to the controller installer so LaunchAgent installs can target any controller checkout without plist hand-edits.
+
 ## [1.0.4] - 2026-04-20
 
 ### Added

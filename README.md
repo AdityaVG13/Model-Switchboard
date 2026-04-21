@@ -8,7 +8,7 @@
 ***Flip between local LLM runtimes from your menu bar.***
 **One click to activate. One click to stop everything.**
 
-[![Version](https://img.shields.io/badge/version-1.0.4-blue?style=for-the-badge)](VERSION)
+[![Version](https://img.shields.io/badge/version-1.0.5-blue?style=for-the-badge)](VERSION)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/macOS-14%2B-lightgrey?style=for-the-badge&logo=apple&logoColor=white)](#requirements)
 [![Swift](https://img.shields.io/badge/swift-6.0-orange?style=for-the-badge&logo=swift&logoColor=white)](Package.swift)
@@ -95,6 +95,14 @@ Tap **`Export CSV`** and you have a portable report. Every run lands as both JSO
 - `Model-Switchboard-Plus-<version>.dmg` (Plus)
 
 Open, drag to `Applications`, launch.
+
+Maintainers can cut the next release with:
+
+```bash
+python3 Scripts/bump-version.py patch
+```
+
+Push that version-bump commit to `main` and GitHub Actions will build, notarize, and publish the release automatically.
 
 **From source.**
 
@@ -190,6 +198,13 @@ Before opening a PR:
 
 ```bash
 swift test && ./Scripts/check-cycles.py && ./Scripts/build-app.sh
+```
+
+For maintainers, release prep is scriptable instead of hand-editing version files:
+
+```bash
+python3 Scripts/bump-version.py patch   # or minor / major / x.y.z
+./Scripts/release-preflight.sh
 ```
 
 ---

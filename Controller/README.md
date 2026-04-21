@@ -26,10 +26,7 @@ This directory contains the local control plane used by the app.
 
 The controller reads profiles from `model-profiles`. Each profile defines launch and endpoint settings. The app remains model-agnostic because it only calls the controller API.
 
-If you want to keep profiles elsewhere, either:
-
-1. Run the controller from a working directory that contains your profile set.
-2. Adapt the controller to accept an external profile directory override.
+For llama.cpp profiles, `MODEL_PATH` still wins when set. If you prefer `MODEL_FILE`, the controller now resolves model roots in this order: `MODEL_ROOT`, `MODEL_ROOT_HINT`, `~/AI/models`, then `../models` relative to `Controller/`.
 
 ## Benchmark harness
 
@@ -54,6 +51,12 @@ All outputs are written to `Controller/benchmark-results/`. The app reads `lates
 ```bash
 cd Controller
 bash install-model-switchboard-controller.sh
+```
+
+To install the LaunchAgent for a different controller checkout, pass `--root`:
+
+```bash
+bash install-model-switchboard-controller.sh --root /absolute/path/to/Controller
 ```
 
 That installs a per-user LaunchAgent that exposes the controller at `http://127.0.0.1:8877`.

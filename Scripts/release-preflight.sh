@@ -25,6 +25,7 @@ pass "version format"
 require_file "Scripts/sign-and-notarize-dmg.sh"
 require_file "Scripts/verify-distribution.sh"
 require_file "Scripts/verify-installed-app.sh"
+require_file "Scripts/bump-version.py"
 require_file ".github/workflows/release.yml"
 require_file "README.md"
 require_file "project.yml"
@@ -33,6 +34,7 @@ pass "required release files"
 
 require_executable "Scripts/build-app.sh"
 require_executable "Scripts/build-dmg.sh"
+require_executable "Scripts/bump-version.py"
 require_executable "Scripts/check-cycles.py"
 require_executable "Scripts/sign-and-notarize-dmg.sh"
 require_executable "Scripts/verify-distribution.sh"
@@ -72,6 +74,14 @@ if [[ "${MSW_PREFLIGHT_SKIP_TESTS:-0}" != "1" ]]; then
   note "running dependency cycle check"
   ./Scripts/check-cycles.py
   pass "dependency cycle check"
+
+  note "running release automation tests"
+  if command -v uv >/dev/null 2>&1; then
+    uv run python3 -m unittest discover -s Scripts/tests -p 'test_*.py'
+  else
+    python3 -m unittest discover -s Scripts/tests -p 'test_*.py'
+  fi
+  pass "release automation tests"
 
   note "running controller unit tests"
   if command -v uv >/dev/null 2>&1; then

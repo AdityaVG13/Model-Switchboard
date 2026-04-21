@@ -1253,11 +1253,38 @@ def resolve_mlx_server_bin(env: ProfileEnv | None = None) -> str | None:
     )
 
 
-def model_path_for_profile(env: ProfileEnv) -> pathlib.Path | None:
-    if env.get("MODEL_PATH"):
-        return pathlib.Path(env["MODEL_PATH"])
-    if env.get("MODEL_FILE") and env.get("MODEL_ROOT"):
-        return pathlib.Path(env["MODEL_ROOT"]) / env["MODEL_FILE"]
+def expand_profile_path(value: str) -> pathlib.Path:
+    return pathlib.Path(os.path.expanduser(value))
+
+
+def detect_model_root(env: ProfileEnv, *, base: pathlib.Path = BASE) -> pathlib.Path | None:
+    configured_root = env.get("MODEL_ROOT", "").strip()
+    if configured_root:
+        return expand_profile_path(configured_root)
+
+    configured_hint = env.get("MODEL_ROOT_HINT", "").strip()
+    if configured_hint:
+        return expand_profile_path(configured_hint)
+
+    for candidate in (pathlib.Path.home() / "AI" / "models", base.parent / "models"):
+        if candidate.is_dir():
+            return candidate
+
+    return None
+
+
+def model_path_for_profile(env: ProfileEnv, *, base: pathlib.Path = BASE) -> pathlib.Path | None:
+    configured_path = env.get("MODEL_PATH", "").strip()
+    if configured_path:
+        return expand_profile_path(configured_path)
+
+    model_file = env.get("MODEL_FILE", "").strip()
+    if not model_file:
+        return None
+
+    model_root = detect_model_root(env, base=base)
+    if model_root:
+        return model_root / model_file
     return None
 
 
@@ -1313,7 +1340,10 @@ def diagnose_profile(
             errors.append("llama-server not found")
         model_path = model_path_for_profile(env)
         if not model_path:
-            errors.append("missing MODEL_PATH or MODEL_FILE with MODEL_ROOT")
+            errors.append(
+                "missing MODEL_PATH or MODEL_FILE with a model root "
+                "(MODEL_ROOT, MODEL_ROOT_HINT, ~/AI/models, or ../models)"
+            )
         elif not model_path.exists():
             errors.append(f"model file not found: {model_path}")
     elif runtime == "mlx":

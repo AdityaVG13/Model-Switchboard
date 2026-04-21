@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
+import plistlib
 import shutil
 import signal
 import socket
@@ -30,12 +32,50 @@ def reserve_local_port() -> int:
 
 
 class ModelCtlTests(unittest.TestCase):
-    def test_model_path_for_profile_requires_explicit_model_root_for_model_file(self) -> None:
-        env_without_root = {"MODEL_FILE": "demo.gguf"}
-        env_with_root = {"MODEL_FILE": "demo.gguf", "MODEL_ROOT": "/models"}
+    def test_model_path_for_profile_supports_model_root_hint(self) -> None:
+        env = {"MODEL_FILE": "demo.gguf", "MODEL_ROOT_HINT": "/hinted-models"}
 
-        self.assertIsNone(MODULE.model_path_for_profile(env_without_root))
-        self.assertEqual(MODULE.model_path_for_profile(env_with_root), Path("/models/demo.gguf"))
+        self.assertEqual(MODULE.model_path_for_profile(env), Path("/hinted-models/demo.gguf"))
+
+    def test_model_path_for_profile_prefers_explicit_model_path(self) -> None:
+        env = {
+            "MODEL_PATH": "/direct/model.gguf",
+            "MODEL_FILE": "demo.gguf",
+            "MODEL_ROOT": "/models",
+            "MODEL_ROOT_HINT": "/hinted-models",
+        }
+
+        self.assertEqual(MODULE.model_path_for_profile(env), Path("/direct/model.gguf"))
+
+    def test_diagnose_profile_reports_model_root_hint_fallbacks_when_model_path_is_missing(self) -> None:
+        env = {
+            "PROFILE_NAME": "broken-llama",
+            "DISPLAY_NAME": "Broken Llama",
+            "RUNTIME": "llama.cpp",
+            "MODEL_FILE": "missing.gguf",
+            "REQUEST_MODEL": "broken-llama",
+        }
+
+        with (
+            mock.patch.object(MODULE, "resolve_llama_server_bin", return_value="/usr/local/bin/llama-server"),
+            mock.patch.object(MODULE, "model_path_for_profile", return_value=None),
+            mock.patch.object(
+                MODULE,
+                "status_for_profile",
+                return_value={
+                    "running": False,
+                    "ready": False,
+                    "pid": None,
+                    "base_url": "http://127.0.0.1:8080/v1",
+                },
+            ),
+        ):
+            report = MODULE.diagnose_profile("broken-llama", env)
+
+        self.assertIn(
+            "missing MODEL_PATH or MODEL_FILE with a model root (MODEL_ROOT, MODEL_ROOT_HINT, ~/AI/models, or ../models)",
+            report["errors"],
+        )
 
     def test_resolve_llama_server_bin_prefers_profile_config_before_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -426,6 +466,284 @@ class ModelCtlTests(unittest.TestCase):
 
             pid = int(pid_path.read_text().strip())
             os.kill(pid, signal.SIGTERM)
+
+    def test_start_model_script_resolves_model_root_hint_and_passes_llama_args(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            script_path = tmp_path / "start-model-mac.sh"
+            shutil.copy2(ROOT / "start-model-mac.sh", script_path)
+            port = reserve_local_port()
+
+            model_root = tmp_path / "hinted-models"
+            model_root.mkdir()
+            model_path = model_root / "qwen.gguf"
+            model_path.write_bytes(b"GGUF")
+
+            capture_path = tmp_path / "llama-args.json"
+            server_bin = tmp_path / "fake-llama-server"
+            server_bin.write_text(
+                textwrap.dedent(
+                    """\
+                    #!/usr/bin/env python3
+                    import argparse
+                    import json
+                    import os
+                    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+                    parser = argparse.ArgumentParser(allow_abbrev=False)
+                    parser.add_argument("--model", required=True)
+                    parser.add_argument("--alias", required=True)
+                    parser.add_argument("--host", default="127.0.0.1")
+                    parser.add_argument("--port", type=int, required=True)
+                    parser.add_argument("--ctx-size")
+                    parser.add_argument("--parallel")
+                    parser.add_argument("--threads")
+                    parser.add_argument("--threads-batch")
+                    parser.add_argument("--n-gpu-layers")
+                    parser.add_argument("--batch-size")
+                    parser.add_argument("--ubatch-size")
+                    parser.add_argument("--cache-type-k")
+                    parser.add_argument("--cache-type-v")
+                    parser.add_argument("--flash-attn")
+                    parser.add_argument("--reasoning")
+                    parser.add_argument("--fit")
+                    parser.add_argument("--fit-target")
+                    parser.add_argument("--fit-ctx")
+                    parser.add_argument("--reasoning-format")
+                    parser.add_argument("--reasoning-budget")
+                    parser.add_argument("--chat-template-kwargs")
+                    parser.add_argument("--cache-ram")
+                    parser.add_argument("--metrics", action="store_true")
+                    parser.add_argument("--cont-batching", action="store_true")
+                    parser.add_argument("--mmap", action="store_true")
+                    parser.add_argument("--no-mmap", action="store_true")
+                    parser.add_argument("--mlock", action="store_true")
+                    args = parser.parse_args()
+
+                    capture_path = os.environ["ARG_CAPTURE_PATH"]
+                    with open(capture_path, "w", encoding="utf-8") as fp:
+                        json.dump(vars(args), fp)
+
+                    class Handler(BaseHTTPRequestHandler):
+                        def do_GET(self):
+                            if self.path != "/v1/models":
+                                self.send_response(404)
+                                self.end_headers()
+                                return
+                            payload = json.dumps({"data": [{"id": args.alias}]}).encode()
+                            self.send_response(200)
+                            self.send_header("Content-Type", "application/json")
+                            self.send_header("Content-Length", str(len(payload)))
+                            self.end_headers()
+                            self.wfile.write(payload)
+
+                        def log_message(self, format, *args):
+                            return
+
+                    ThreadingHTTPServer((args.host, args.port), Handler).serve_forever()
+                    """
+                )
+            )
+            server_bin.chmod(0o755)
+
+            agl_python = tmp_path / ".venv-agentlightning" / "bin" / "python"
+            agl_python.parent.mkdir(parents=True)
+            agl_python.write_text(
+                textwrap.dedent(
+                    """\
+                    #!/bin/sh
+                    exit 0
+                    """
+                )
+            )
+            agl_python.chmod(0o755)
+
+            profile_path = tmp_path / "qwen-llama.env"
+            profile_path.write_text(
+                textwrap.dedent(
+                    f"""\
+                    DISPLAY_NAME='Qwen GGUF'
+                    RUNTIME=llama.cpp
+                    SERVER_BIN={server_bin}
+                    MODEL_FILE=qwen.gguf
+                    MODEL_ROOT_HINT={model_root}
+                    HOST=127.0.0.1
+                    PORT={port}
+                    REQUEST_MODEL=qwen-local
+                    SERVER_MODEL_ID=qwen-local
+                    MODEL_ALIAS=qwen-local
+                    CONTEXT_SIZE=4096
+                    N_PARALLEL=1
+                    GPU_LAYERS=99
+                    BATCH_SIZE=128
+                    UBATCH_SIZE=64
+                    CACHE_TYPE_K=f16
+                    CACHE_TYPE_V=f16
+                    FLASH_ATTN=1
+                    REASONING=off
+                    FIT=0
+                    FIT_TARGET=0
+                    FIT_CTX=0
+                    REASONING_FORMAT=deepseek
+                    REASONING_BUDGET=0
+                    CHAT_TEMPLATE_KWARGS='{{"enable_thinking":false}}'
+                    CACHE_RAM=4096
+                    export ARG_CAPTURE_PATH={capture_path}
+                    """
+                )
+            )
+
+            env = os.environ.copy()
+            env["MODEL_PROFILE"] = "qwen-llama"
+            env["MODEL_PROFILE_PATH"] = str(profile_path)
+
+            result = subprocess.run(
+                ["bash", str(script_path)],
+                cwd=tmp_path,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+
+            pid_path = tmp_path / "run" / "qwen-llama.pid"
+            self.assertIn("runtime=llama.cpp", result.stdout)
+            self.assertTrue(pid_path.exists())
+
+            captured_args = json.loads(capture_path.read_text())
+            self.assertEqual(captured_args["model"], str(model_path))
+            self.assertEqual(captured_args["chat_template_kwargs"], '{"enable_thinking":false}')
+            self.assertEqual(captured_args["cache_ram"], "4096")
+
+            pid = int(pid_path.read_text().strip())
+            os.kill(pid, signal.SIGTERM)
+
+    def test_start_model_script_reports_clear_error_when_model_root_cannot_be_resolved(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            controller_dir = tmp_path / "Controller"
+            controller_dir.mkdir()
+            script_path = controller_dir / "start-model-mac.sh"
+            shutil.copy2(ROOT / "start-model-mac.sh", script_path)
+
+            profile_path = controller_dir / "broken.env"
+            profile_path.write_text(
+                textwrap.dedent(
+                    """\
+                    DISPLAY_NAME='Broken GGUF'
+                    RUNTIME=llama.cpp
+                    MODEL_FILE=missing.gguf
+                    """
+                )
+            )
+
+            env = os.environ.copy()
+            env["HOME"] = str(tmp_path / "home")
+            env["MODEL_PROFILE"] = "broken"
+            env["MODEL_PROFILE_PATH"] = str(profile_path)
+
+            result = subprocess.run(
+                ["bash", str(script_path)],
+                cwd=controller_dir,
+                env=env,
+                text=True,
+                capture_output=True,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "MODEL_FILE requires MODEL_ROOT, MODEL_ROOT_HINT, ~/AI/models, or ../models",
+                result.stderr or result.stdout,
+            )
+
+    def test_install_controller_script_supports_root_override(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            install_dir = tmp_path / "installer"
+            install_dir.mkdir()
+            script_path = install_dir / "install-model-switchboard-controller.sh"
+            shutil.copy2(ROOT / "install-model-switchboard-controller.sh", script_path)
+
+            selected_root = tmp_path / "selected-root"
+            selected_root.mkdir()
+            (selected_root / "ModelSwitchboardController.swift").write_text("print(\"ok\")\n")
+
+            fake_bin = tmp_path / "fake-bin"
+            fake_bin.mkdir()
+
+            swiftc = fake_bin / "swiftc"
+            swiftc.write_text(
+                textwrap.dedent(
+                    """\
+                    #!/bin/sh
+                    while [ "$#" -gt 0 ]; do
+                      if [ "$1" = "-o" ]; then
+                        shift
+                        out="$1"
+                        shift
+                        src="$1"
+                        mkdir -p "$(dirname "$out")"
+                        printf '#!/bin/sh\nexit 0\n' > "$out"
+                        chmod +x "$out"
+                        printf '%s\n' "$src" > "${out}.src"
+                        exit 0
+                      fi
+                      shift
+                    done
+                    exit 1
+                    """
+                )
+            )
+            swiftc.chmod(0o755)
+
+            launchctl = fake_bin / "launchctl"
+            launchctl.write_text(
+                textwrap.dedent(
+                    """\
+                    #!/bin/sh
+                    exit 0
+                    """
+                )
+            )
+            launchctl.chmod(0o755)
+
+            home_dir = tmp_path / "home"
+            home_dir.mkdir()
+
+            env = os.environ.copy()
+            env["HOME"] = str(home_dir)
+            env["PATH"] = f"{fake_bin}:{env['PATH']}"
+
+            result = subprocess.run(
+                ["bash", str(script_path), "--root", str(selected_root)],
+                cwd=install_dir,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+
+            plist_path = home_dir / "Library" / "LaunchAgents" / "io.modelswitchboard.controller.plist"
+            self.assertIn(f"installed={plist_path}", result.stdout)
+            self.assertTrue(plist_path.exists())
+            self.assertTrue((selected_root / "bin" / "ModelSwitchboardController").exists())
+
+            with plist_path.open("rb") as fp:
+                plist = plistlib.load(fp)
+
+            self.assertEqual(
+                plist["ProgramArguments"],
+                [
+                    str(selected_root / "bin" / "ModelSwitchboardController"),
+                    "--root",
+                    str(selected_root),
+                    "--host",
+                    "127.0.0.1",
+                    "--port",
+                    "8877",
+                ],
+            )
+            self.assertEqual(plist["WorkingDirectory"], str(selected_root))
 
 
 if __name__ == "__main__":

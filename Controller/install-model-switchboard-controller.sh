@@ -1,12 +1,38 @@
 #!/usr/bin/env bash
 set -euo pipefail
-ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+die() {
+  printf 'error: %s\n' "$*" >&2
+  exit 1
+}
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$SCRIPT_DIR"
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --root)
+      shift
+      [ "$#" -gt 0 ] || die "--root requires a path"
+      ROOT_DIR="$1"
+      ;;
+    *)
+      die "unknown argument: $1"
+      ;;
+  esac
+  shift
+done
+
+ROOT_DIR="$(cd "$ROOT_DIR" && pwd)"
 LABEL="io.modelswitchboard.controller"
 PLIST_DST="$HOME/Library/LaunchAgents/${LABEL}.plist"
 LAUNCHER_SRC="$ROOT_DIR/ModelSwitchboardController.swift"
 LAUNCHER_BIN="$ROOT_DIR/bin/ModelSwitchboardController"
 USER_UID="$(id -u)"
 DOMAIN="gui/${USER_UID}"
+
+[ -f "$LAUNCHER_SRC" ] || die "launcher source not found: $LAUNCHER_SRC"
+
 mkdir -p "$HOME/Library/LaunchAgents"
 mkdir -p "$ROOT_DIR/bin"
 
