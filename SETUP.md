@@ -207,9 +207,9 @@ The current adapter keeps `.env` support for backward compatibility.
 
 Design choices that keep the app light:
 
-- the menu refresh loop stops when the menu window disappears
+- the controller refresh loop uses an adaptive low-frequency cadence instead of aggressive constant polling
 - the visible footer clock only updates while the menu is open
-- the menu bar hover text is computed from current status, not from a resident background worker
+- the menu bar hover text is derived from the same lightweight controller snapshot the shell uses
 - the widget refreshes on a simple timeline instead of running its own always-on helper
 
 Most memory/thermal load should remain in runtimes, not the operator UI.

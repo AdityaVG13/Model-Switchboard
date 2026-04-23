@@ -39,10 +39,16 @@ struct ModelSwitchboardApp: App {
                 }
         } label: {
             LeverSwitchIcon(
-                hasReadyModels: store.summary.readyProfiles > 0,
-                hasRunningModels: store.summary.runningProfiles > 0,
+                hasReadyModels: store.displayedReadyProfiles > 0,
+                hasRunningModels: store.displayedRunningProfiles > 0,
                 size: 18
             )
+            .task {
+                statusItem?.button?.toolTip = store.menuBarHelp
+            }
+            .onChange(of: store.menuBarHelp) { _, newValue in
+                statusItem?.button?.toolTip = newValue
+            }
         }
         .menuBarExtraAccess(isPresented: $isMenuPresented) { item in
             statusItem = item

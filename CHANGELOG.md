@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.6] - 2026-04-23
+
+### Added
+- Added app regression coverage for fresh, stale, and cached controller snapshots so the menu bar state stays honest when localhost models stop out of band.
+
+### Changed
+- Kept controller auto-refresh running for the lifetime of the app instead of only while the menu is open.
+- Tightened active-runtime refresh cadence from 30 seconds to 10 seconds and documented the always-resident lightweight polling model in `SETUP.md`.
+
+### Fixed
+- Stopped stale or cached localhost status from showing live running and ready counts in the menu bar.
+- Marked stale running profiles as `STALE` instead of `RUNNING` until the next successful refresh, and updated the status-item tooltip to match.
+
 ## [1.0.5] - 2026-04-20
 
 ### Added

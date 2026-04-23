@@ -11,6 +11,21 @@ final class SwitchboardStore {
         static let lastActiveProfilesKey = "modelswitchboard.last-active-profiles"
         static let benchmarkCooldownKey = "modelswitchboard.last-benchmark-started-at"
         static let benchmarkCooldownSeconds: TimeInterval = 300
+        static let statusStaleThresholdSeconds: TimeInterval = 45
+    }
+
+    enum StatusFreshness: Equatable {
+        case fresh
+        case stale
+        case cached
+        case error
+    }
+
+    enum ProfileBadgeState: Equatable {
+        case pending(String)
+        case running
+        case stale
+        case notRunning
     }
 
     var controllerBaseURL: String
@@ -36,12 +51,15 @@ final class SwitchboardStore {
     private var refreshTask: Task<Void, Never>?
     private static let logger = Logger(subsystem: "io.modelswitchboard.app", category: "switchboard-store")
 
-    init(controllerBaseURL: String, features: AppFeatures = .current) {
+    init(controllerBaseURL: String, features: AppFeatures = .current, autoStartRefresh: Bool = true) {
         self.controllerBaseURL = controllerBaseURL
         self.features = features
         loadLastActiveProfiles()
         loadBenchmarkCooldownState()
         loadCachedState()
+        if autoStartRefresh {
+            startAutoRefresh()
+        }
     }
 
     private var currentPayload: ControllerStatusPayload {
@@ -58,16 +76,77 @@ final class SwitchboardStore {
         DashboardSummary(payload: currentPayload)
     }
 
+    var displayedRunningProfiles: Int {
+        displayedRunningProfiles(relativeTo: .now)
+    }
+
+    var displayedReadyProfiles: Int {
+        displayedReadyProfiles(relativeTo: .now)
+    }
+
     var sortedStatuses: [ModelProfileStatus] {
         statuses.sorted(by: ModelProfileStatus.compareForDisplay)
     }
 
     var menuBarHelp: String {
-        let running = sortedStatuses.filter(\.running)
-        guard !running.isEmpty else {
-            return "No local models running"
+        menuBarHelp(relativeTo: .now)
+    }
+
+    func menuBarHelp(relativeTo now: Date) -> String {
+        switch statusFreshness(relativeTo: now) {
+        case .cached:
+            return "Cached local model state may be stale. Refresh to verify live status."
+        case .stale:
+            return "Local model status is stale. Refresh to verify live status."
+        case .error where !statuses.isEmpty:
+            return "Local model status is unavailable. Refresh to verify live status."
+        case .error, .fresh:
+            let running = sortedStatuses.filter(\.running)
+            guard !running.isEmpty else {
+                return "No local models running"
+            }
+            return "Running: " + running.map(\.displayName).joined(separator: ", ")
         }
-        return "Running: " + running.map(\.displayName).joined(separator: ", ")
+    }
+
+    func statusFreshness(relativeTo now: Date) -> StatusFreshness {
+        if let lastError, !lastError.isEmpty {
+            if !statuses.isEmpty {
+                if lastError.localizedCaseInsensitiveContains("cached") {
+                    return .cached
+                }
+                return .stale
+            }
+            return .error
+        }
+
+        guard let lastUpdated else {
+            return .error
+        }
+
+        if now.timeIntervalSince(lastUpdated) > Constants.statusStaleThresholdSeconds {
+            return .stale
+        }
+
+        return .fresh
+    }
+
+    func displayedRunningProfiles(relativeTo now: Date) -> Int {
+        statusFreshness(relativeTo: now) == .fresh ? summary.runningProfiles : 0
+    }
+
+    func displayedReadyProfiles(relativeTo now: Date) -> Int {
+        statusFreshness(relativeTo: now) == .fresh ? summary.readyProfiles : 0
+    }
+
+    func profileBadgeState(for profile: ModelProfileStatus, relativeTo now: Date) -> ProfileBadgeState {
+        if let pending = pendingLabel(for: profile.profile) {
+            return .pending(pending)
+        }
+        if profile.running && statusFreshness(relativeTo: now) != .fresh {
+            return .stale
+        }
+        return profile.running ? .running : .notRunning
     }
 
     var canReopenLastActive: Bool {

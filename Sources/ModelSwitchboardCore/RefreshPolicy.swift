@@ -9,7 +9,7 @@ public struct AutoRefreshPolicy: Equatable, Sendable {
     }
 
     public static let idleInterval: TimeInterval = 600
-    public static let activeRuntimeInterval: TimeInterval = 30
+    public static let activeRuntimeInterval: TimeInterval = 10
     public static let benchmarkingInterval: TimeInterval = 10
     public static let pendingActionInterval: TimeInterval = 5
 

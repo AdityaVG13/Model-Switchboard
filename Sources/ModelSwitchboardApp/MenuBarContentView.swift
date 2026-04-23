@@ -75,7 +75,6 @@ struct MenuBarContentView: View {
             synchronizeInspectorWindow()
         }
         .task {
-            store.startAutoRefresh()
             if features.supportsBenchmarks {
                 systemMetrics.start()
             } else {
@@ -85,7 +84,6 @@ struct MenuBarContentView: View {
             synchronizeInspectorWindow()
         }
         .onDisappear {
-            store.stopAutoRefresh()
             systemMetrics.stop()
             inspectorController.hide()
             inspectorCoordinator.reset()
@@ -143,8 +141,8 @@ struct MenuBarContentView: View {
     private var header: some View {
         HStack(alignment: .top, spacing: 12) {
             LeverSwitchIcon(
-                hasReadyModels: store.summary.readyProfiles > 0,
-                hasRunningModels: store.summary.runningProfiles > 0,
+                hasReadyModels: store.displayedReadyProfiles > 0,
+                hasRunningModels: store.displayedRunningProfiles > 0,
                 size: 34
             )
 
@@ -152,7 +150,7 @@ struct MenuBarContentView: View {
                 Text(features.appDisplayName)
                     .font(.title2.bold())
                 HStack(spacing: 10) {
-                    Label("\(store.summary.readyProfiles)/\(store.summary.totalProfiles) ready", systemImage: "bolt.fill")
+                    Label("\(store.displayedReadyProfiles)/\(store.summary.totalProfiles) ready", systemImage: "bolt.fill")
                     Label("local control", systemImage: "switch.2")
                 }
                 .font(.caption)
@@ -291,20 +289,25 @@ struct MenuBarContentView: View {
     }
 
     private func statusBadge(_ profile: ModelProfileStatus) -> some View {
-        let tuple: (String, Color) = if let pending = store.pendingLabel(for: profile.profile) {
-            (pending, .orange)
-        } else if profile.running {
-            ("RUNNING", .green)
-        } else {
-            ("NOT RUNNING", .red)
-        }
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let tuple: (String, Color) = switch store.profileBadgeState(for: profile, relativeTo: context.date) {
+            case .pending(let pending):
+                (pending, .orange)
+            case .running:
+                ("RUNNING", .green)
+            case .stale:
+                ("STALE", .orange)
+            case .notRunning:
+                ("NOT RUNNING", .red)
+            }
 
-        return Text(tuple.0)
-            .font(.caption2.bold())
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(tuple.1.opacity(0.18), in: Capsule())
-            .foregroundStyle(tuple.1)
+            Text(tuple.0)
+                .font(.caption2.bold())
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(tuple.1.opacity(0.18), in: Capsule())
+                .foregroundStyle(tuple.1)
+        }
     }
 
     private var footer: some View {
@@ -521,21 +524,16 @@ struct MenuBarContentView: View {
     }
 
     private func footerState(relativeTo now: Date) -> (label: String, color: Color)? {
-        if let lastError = store.lastError {
-            if lastError.localizedCaseInsensitiveContains("cached") {
-                return ("CACHED", .orange)
-            }
-            return ("ERROR", .red)
-        }
-
-        guard let lastUpdated = store.lastUpdated else { return nil }
-        let elapsed = max(0, Int(now.timeIntervalSince(lastUpdated)))
-
-        if elapsed > 45 {
+        switch store.statusFreshness(relativeTo: now) {
+        case .cached:
+            return ("CACHED", .orange)
+        case .stale:
             return ("STALE", .orange)
+        case .error:
+            return ("ERROR", .red)
+        case .fresh:
+            return nil
         }
-
-        return nil
     }
 
     private func clampPanelWidth(_ value: Double) -> Double {
