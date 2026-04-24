@@ -12,6 +12,12 @@ final class SwitchboardStore {
         static let benchmarkCooldownKey = "modelswitchboard.last-benchmark-started-at"
         static let benchmarkCooldownSeconds: TimeInterval = 300
         static let statusStaleThresholdSeconds: TimeInterval = 45
+        static let loopbackEndpointProbeFastIntervalSeconds: TimeInterval = 2
+        static let loopbackEndpointProbeSteadyIntervalSeconds: TimeInterval = 5
+        static let loopbackEndpointProbeIdleIntervalSeconds: TimeInterval = 15
+        static let loopbackEndpointProbeSuppressionSeconds: TimeInterval = 4
+        static let loopbackEndpointProbeFastWindowSeconds: TimeInterval = 30
+        static let loopbackEndpointProbeTimeoutSeconds: TimeInterval = 1
     }
 
     enum StatusFreshness: Equatable {
@@ -27,6 +33,8 @@ final class SwitchboardStore {
         case stale
         case notRunning
     }
+
+    typealias LoopbackEndpointProbe = ([ModelProfileStatus]) async -> Set<String>
 
     var controllerBaseURL: String
     let features: AppFeatures
@@ -49,11 +57,25 @@ final class SwitchboardStore {
     var activeBenchmarkProfiles: [String] = []
 
     private var refreshTask: Task<Void, Never>?
+    private var loopbackEndpointProbeTask: Task<Void, Never>?
+    private var loopbackEndpointProbeSession: URLSession?
+    private var loopbackEndpointProbeFastUntil: Date
+    private var loopbackEndpointProbeSuppressedUntil: Date?
+    private let usesCustomLoopbackEndpointProbe: Bool
+    private let loopbackEndpointProbe: LoopbackEndpointProbe
     private static let logger = Logger(subsystem: "io.modelswitchboard.app", category: "switchboard-store")
 
-    init(controllerBaseURL: String, features: AppFeatures = .current, autoStartRefresh: Bool = true) {
+    init(
+        controllerBaseURL: String,
+        features: AppFeatures = .current,
+        autoStartRefresh: Bool = true,
+        loopbackEndpointProbe: LoopbackEndpointProbe? = nil
+    ) {
         self.controllerBaseURL = controllerBaseURL
         self.features = features
+        self.loopbackEndpointProbeFastUntil = Date().addingTimeInterval(Constants.loopbackEndpointProbeFastWindowSeconds)
+        self.usesCustomLoopbackEndpointProbe = loopbackEndpointProbe != nil
+        self.loopbackEndpointProbe = loopbackEndpointProbe ?? { _ in [] }
         loadLastActiveProfiles()
         loadBenchmarkCooldownState()
         loadCachedState()
@@ -188,6 +210,7 @@ final class SwitchboardStore {
 
     func startAutoRefresh() {
         refreshTask?.cancel()
+        startLoopbackEndpointProbe()
         refreshTask = Task { [weak self] in
             guard let self else { return }
             await self.refresh()
@@ -209,6 +232,10 @@ final class SwitchboardStore {
     func stopAutoRefresh() {
         refreshTask?.cancel()
         refreshTask = nil
+        loopbackEndpointProbeTask?.cancel()
+        loopbackEndpointProbeTask = nil
+        loopbackEndpointProbeSession?.invalidateAndCancel()
+        loopbackEndpointProbeSession = nil
     }
 
     func refresh() async {
@@ -222,6 +249,7 @@ final class SwitchboardStore {
             let payload = try await statusTask
             apply(payload: payload)
             cachePayload(payload, context: "refresh")
+            await probeLoopbackEndpointsIfNeeded()
             if let report = try? await doctorTask {
                 apply(doctorReport: report)
             }
@@ -296,6 +324,7 @@ final class SwitchboardStore {
     func stopAll() async {
         guard pendingGlobalActions.insert("stop-all").inserted else { return }
         defer { pendingGlobalActions.remove("stop-all") }
+        noteManagedLoopbackTransition()
         rememberLastActiveProfiles(from: statuses)
         statuses = statuses.map { $0.updating(running: false, ready: false) }
         await run { try await $0.stopAll() }
@@ -331,6 +360,7 @@ final class SwitchboardStore {
         let profiles = lastActiveProfiles
         guard pendingGlobalActions.insert("reopen-last").inserted else { return }
         defer { pendingGlobalActions.remove("reopen-last") }
+        noteManagedLoopbackTransition()
 
         for profile in profiles {
             pendingProfileActions[profile] = "STARTING"
@@ -428,6 +458,56 @@ final class SwitchboardStore {
         return pendingGlobalActions.contains(where: { $0.hasPrefix("bench-") })
     }
 
+    func shouldProbeLoopbackEndpoints(relativeTo now: Date = .now) -> Bool {
+        !loopbackEndpointProbeCandidates.isEmpty && !isLoopbackEndpointProbeSuppressed(relativeTo: now)
+    }
+
+    func nextLoopbackEndpointProbeInterval(relativeTo now: Date = .now) -> TimeInterval {
+        guard !loopbackEndpointProbeCandidates.isEmpty else {
+            return Constants.loopbackEndpointProbeIdleIntervalSeconds
+        }
+        if let suppressedUntil = loopbackEndpointProbeSuppressedUntil, suppressedUntil > now {
+            return max(0.5, suppressedUntil.timeIntervalSince(now))
+        }
+        if now < loopbackEndpointProbeFastUntil {
+            return Constants.loopbackEndpointProbeFastIntervalSeconds
+        }
+        return Constants.loopbackEndpointProbeSteadyIntervalSeconds
+    }
+
+    func armLoopbackEndpointProbeFastWindow(relativeTo now: Date = .now) {
+        loopbackEndpointProbeFastUntil = now.addingTimeInterval(Constants.loopbackEndpointProbeFastWindowSeconds)
+    }
+
+    func suppressLoopbackEndpointProbe(relativeTo now: Date = .now) {
+        loopbackEndpointProbeSuppressedUntil = now.addingTimeInterval(Constants.loopbackEndpointProbeSuppressionSeconds)
+    }
+
+    func probeLoopbackEndpointsIfNeeded(relativeTo now: Date = .now) async {
+        guard !isRefreshing else { return }
+        guard shouldProbeLoopbackEndpoints(relativeTo: now) else { return }
+
+        let candidates = loopbackEndpointProbeCandidates
+        guard !candidates.isEmpty else { return }
+
+        let unreachableProfiles: Set<String>
+        if usesCustomLoopbackEndpointProbe {
+            unreachableProfiles = await loopbackEndpointProbe(candidates)
+        } else {
+            if loopbackEndpointProbeSession == nil {
+                loopbackEndpointProbeSession = Self.makeLoopbackEndpointProbeSession()
+            }
+            guard let session = loopbackEndpointProbeSession else { return }
+            unreachableProfiles = await Self.detectUnreachableLoopbackProfiles(in: candidates, using: session)
+        }
+        guard !unreachableProfiles.isEmpty else { return }
+
+        statuses = statuses.map { status in
+            guard unreachableProfiles.contains(status.profile) else { return status }
+            return status.markingEndpointUnavailable()
+        }
+    }
+
     private func run(_ action: @escaping (ControllerClient) async throws -> ControllerActionResponse) async {
         do {
             let client = try self.client
@@ -457,6 +537,7 @@ final class SwitchboardStore {
         action: @escaping (ControllerClient) async throws -> ControllerActionResponse
     ) async {
         guard pendingProfileActions[profile] == nil else { return }
+        noteManagedLoopbackTransition()
         pendingProfileActions[profile] = label
         optimisticUpdate()
         defer { pendingProfileActions.removeValue(forKey: profile) }
@@ -489,6 +570,15 @@ final class SwitchboardStore {
 
     var diagnosticsNeedingAttention: [ProfileDiagnostic] {
         profileDiagnostics.filter { !$0.errors.isEmpty || !$0.warnings.isEmpty }
+    }
+
+    private var loopbackEndpointProbeCandidates: [ModelProfileStatus] {
+        statuses.filter { status in
+            status.running &&
+                status.ready &&
+                status.usesLoopbackEndpoint &&
+                pendingProfileActions[status.profile] == nil
+        }
     }
 
     private func loadCachedState() {
@@ -527,6 +617,38 @@ final class SwitchboardStore {
         UserDefaults.standard.set(now.timeIntervalSince1970, forKey: Constants.benchmarkCooldownKey)
     }
 
+    private func startLoopbackEndpointProbe() {
+        loopbackEndpointProbeTask?.cancel()
+        loopbackEndpointProbeSession = loopbackEndpointProbeSession ?? Self.makeLoopbackEndpointProbeSession()
+        loopbackEndpointProbeTask = Task { [weak self] in
+            guard let self else { return }
+            await self.probeLoopbackEndpointsIfNeeded()
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: .seconds(self.nextLoopbackEndpointProbeInterval()))
+                } catch {
+                    if isBenignCancellation(error) { break }
+                    Self.logger.error("Loopback endpoint probe sleep failed: \(String(describing: error), privacy: .public)")
+                    break
+                }
+                if Task.isCancelled { break }
+                await self.probeLoopbackEndpointsIfNeeded()
+            }
+        }
+    }
+
+    private func noteManagedLoopbackTransition(relativeTo now: Date = .now) {
+        armLoopbackEndpointProbeFastWindow(relativeTo: now)
+        suppressLoopbackEndpointProbe(relativeTo: now)
+    }
+
+    private func isLoopbackEndpointProbeSuppressed(relativeTo now: Date) -> Bool {
+        if let suppressedUntil = loopbackEndpointProbeSuppressedUntil, suppressedUntil > now {
+            return true
+        }
+        return false
+    }
+
     private func rememberLastActiveProfiles(from sourceStatuses: [ModelProfileStatus]) {
         let runningProfiles = sourceStatuses
             .filter(\.running)
@@ -548,10 +670,89 @@ final class SwitchboardStore {
         return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
     }
 
+    nonisolated private static func makeLoopbackEndpointProbeSession() -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = Constants.loopbackEndpointProbeTimeoutSeconds
+        configuration.timeoutIntervalForResource = Constants.loopbackEndpointProbeTimeoutSeconds
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.waitsForConnectivity = false
+        return URLSession(configuration: configuration)
+    }
+
+    nonisolated private static func detectUnreachableLoopbackProfiles(
+        in statuses: [ModelProfileStatus],
+        using session: URLSession
+    ) async -> Set<String> {
+        var unreachableProfiles: Set<String> = []
+        for status in statuses {
+            guard let request = loopbackProbeRequest(for: status) else { continue }
+            do {
+                _ = try await session.data(for: request)
+            } catch {
+                if isLoopbackConnectionRefused(error) {
+                    unreachableProfiles.insert(status.profile)
+                }
+            }
+        }
+        return unreachableProfiles
+    }
+
+    nonisolated private static func loopbackProbeRequest(for status: ModelProfileStatus) -> URLRequest? {
+        guard let baseURL = URL(string: status.baseURL) else { return nil }
+        var request = URLRequest(url: baseURL)
+        request.httpMethod = "HEAD"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.timeoutInterval = Constants.loopbackEndpointProbeTimeoutSeconds
+        return request
+    }
+
+    nonisolated private static func isLoopbackConnectionRefused(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCannotConnectToHost {
+            return true
+        }
+        if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? NSError,
+           underlying.domain == NSPOSIXErrorDomain,
+           underlying.code == ECONNREFUSED {
+            return true
+        }
+        return false
+    }
+
     nonisolated private static func compareDiagnostics(lhs: ProfileDiagnostic, rhs: ProfileDiagnostic) -> Bool {
         let lhsSeverity = lhs.errors.isEmpty ? (lhs.warnings.isEmpty ? 0 : 1) : 2
         let rhsSeverity = rhs.errors.isEmpty ? (rhs.warnings.isEmpty ? 0 : 1) : 2
         if lhsSeverity != rhsSeverity { return lhsSeverity > rhsSeverity }
         return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
+    }
+}
+
+private extension ModelProfileStatus {
+    func markingEndpointUnavailable() -> Self {
+        Self(
+            profile: profile,
+            displayName: displayName,
+            runtime: runtime,
+            host: host,
+            port: port,
+            baseURL: baseURL,
+            requestModel: requestModel,
+            serverModelID: serverModelID,
+            pid: nil,
+            running: false,
+            ready: false,
+            serverIDs: [],
+            rssMB: nil,
+            command: command,
+            logPath: logPath
+        )
+    }
+
+    var usesLoopbackEndpoint: Bool {
+        if let endpointHost = URL(string: baseURL)?.host?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+            return endpointHost == "127.0.0.1" || endpointHost == "localhost" || endpointHost == "::1"
+        }
+        let normalizedHost = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalizedHost == "127.0.0.1" || normalizedHost == "localhost" || normalizedHost == "::1"
     }
 }
