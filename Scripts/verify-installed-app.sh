@@ -407,6 +407,7 @@ wait_for_app_process_absent() {
 }
 
 launch_app() {
+  pkill -x "$APP_BINARY_NAME" || true
   pkill -f "$APP_PATH/Contents/MacOS/$APP_BINARY_NAME" || true
   sleep 1
   for _ in {1..5}; do
@@ -422,9 +423,14 @@ launch_app() {
 }
 
 open_menu() {
+  local pid
   for _ in {1..8}; do
-    run_osascript "tell application \"$APP_BINARY_NAME\" to activate" 2 0.2 >/dev/null || true
-    run_osascript "tell application \"System Events\" to tell process \"$APP_BINARY_NAME\" to click menu bar item 1 of menu bar 2" 2 0.2 >/dev/null || true
+    pid="$(app_pid 2>/dev/null || true)"
+    [[ -n "$pid" ]] || sleep 0.2
+    run_osascript "tell application id \"$APP_BUNDLE_ID\" to activate" 2 0.2 >/dev/null || true
+    if [[ -n "$pid" ]]; then
+      run_osascript "tell application \"System Events\" to tell (first process whose unix id is $pid) to click menu bar item 1 of menu bar 2" 2 0.2 >/dev/null || true
+    fi
     for _ in {1..20}; do
       if [[ -n "$(MSW_APP_NAME="$APP_NAME" "$WORK_DIR/msw_window_bounds" '' | awk -F'|' '$1=="" {print $0}' | head -n 1)" ]]; then
         sleep 0.35
@@ -695,6 +701,50 @@ PY
   "$WORK_DIR/msw_click" "$cx" "$cy"
 }
 
+try_ocr_click_window() {
+  local window_title="$1"
+  local screenshot="$2"
+  local query="$3"
+  local bounds line x y px py cx cy
+
+  if [[ -n "$window_title" ]]; then
+    bounds="$(window_bounds "$window_title")"
+  else
+    bounds="$(main_window_bounds)"
+  fi
+  [[ -n "$bounds" ]] || return 1
+
+  take_window_shot "$window_title" "$screenshot"
+  line="$("$WORK_DIR/msw_ocr" "$screenshot" "$query")" || return 1
+  x="$(echo "$bounds" | awk -F'|' '{print $2}')"
+  y="$(echo "$bounds" | awk -F'|' '{print $3}')"
+  px="$(echo "$line" | awk -F'|' '{print $1}')"
+  py="$(echo "$line" | awk -F'|' '{print $2}')"
+  cx="$(python3 - <<PY
+print(float("$x") + ($px / float("$SCREEN_SCALE")))
+PY
+)"
+  cy="$(python3 - <<PY
+print(float("$y") + ($py / float("$SCREEN_SCALE")))
+PY
+)"
+  "$WORK_DIR/msw_click" "$cx" "$cy"
+}
+
+press_open_menu_button() {
+  local desc="$1"
+  local index="${2:-1}"
+  local label="${3:-$(safe_label "$desc")}"
+  local screenshot
+
+  if press_button "$desc" "$index" 2>/dev/null; then
+    return 0
+  fi
+
+  screenshot="$WORK_DIR/${label}.png"
+  try_ocr_click_window "" "$screenshot" "$desc" || fail "button missing: $desc"
+}
+
 press_menu_button() {
   local desc="$1"
   local index="${2:-1}"
@@ -708,8 +758,7 @@ press_menu_button() {
       return 0
     fi
     screenshot="$WORK_DIR/${label}-${attempt}.png"
-    take_shot "$screenshot"
-    if try_ocr_click "$screenshot" "$desc"; then
+    if try_ocr_click_window "" "$screenshot" "$desc"; then
       return 0
     fi
     sleep 0.5
@@ -718,19 +767,38 @@ press_menu_button() {
   fail "button missing: $desc"
 }
 
-open_settings_panel() {
+open_settings_panel_from_current_menu() {
   local label="${1:-settings}"
   local screenshot
 
+  press_open_menu_button Settings 1 "${label}-settings"
+  sleep 1
+  if ! wait_for_inspector_present; then
+    screenshot="$WORK_DIR/${label}-settings-retry.png"
+    try_ocr_click_window "" "$screenshot" Settings || fail "button missing: Settings"
+    wait_for_inspector_present || fail "settings sidebar missing"
+  fi
+}
+
+close_settings_panel_from_current_menu() {
+  local label="${1:-settings-close}"
+  local screenshot
+
+  press_open_menu_button Settings 1 "${label}-settings"
+  sleep 0.3
+  if ! wait_for_inspector_absent; then
+    screenshot="$WORK_DIR/${label}-settings-retry.png"
+    try_ocr_click_window "" "$screenshot" Settings || fail "button missing: Settings"
+    wait_for_inspector_absent || fail "settings toggle close"
+  fi
+}
+
+open_settings_panel() {
+  local label="${1:-settings}"
+
   launch_app
   open_menu
-  if ! press_button Settings 2>/dev/null; then
-    screenshot="$WORK_DIR/${label}-settings.png"
-    take_shot "$screenshot"
-    try_ocr_click "$screenshot" Settings || fail "button missing: Settings"
-  fi
-  sleep 1
-  wait_for_inspector_present || fail "settings sidebar missing"
+  open_settings_panel_from_current_menu "$label"
 }
 
 press_settings_button() {
@@ -864,8 +932,7 @@ MAIN_BEFORE_RIGHT="$(python3 - <<PY
 print(float("$MAIN_BEFORE_X") + float("$MAIN_BEFORE_W"))
 PY
 )"
-press_button Settings
-wait_for_inspector_present || fail "settings sidebar missing"
+open_settings_panel_from_current_menu initial-settings
 sleep 0.3
 MAIN_AFTER_SETTINGS="$(main_window_bounds)"
 MAIN_AFTER_SETTINGS_X="$(echo "$MAIN_AFTER_SETTINGS" | awk -F'|' '{print $2}')"
@@ -889,12 +956,17 @@ if ! ocr_expect "$SETTINGS_SHOT" "Controller Base URL"; then
 fi
 pass "settings side panel"
 
-press_button Settings
-wait_for_inspector_absent || fail "settings toggle close"
+close_settings_panel_from_current_menu initial-settings-close
 pass "settings toggle close"
 
 press_menu_button Help
-wait_for_inspector_present || fail "help sidebar missing"
+if ! wait_for_inspector_present; then
+  launch_app
+  open_menu
+  HELP_SHOT="$WORK_DIR/help-retry.png"
+  try_ocr_click_window "" "$HELP_SHOT" Help || fail "button missing: Help"
+  wait_for_inspector_present || fail "help sidebar missing"
+fi
 sleep 0.3
 MAIN_AFTER_HELP="$(main_window_bounds)"
 MAIN_AFTER_HELP_Y="$(echo "$MAIN_AFTER_HELP" | awk -F'|' '{print $3}')"
