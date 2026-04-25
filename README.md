@@ -142,7 +142,7 @@ SERVER_MODEL_ID=qwen35-local
 
 Every profile must resolve to a unique endpoint. Reusing the same `HOST:PORT` or `BASE_URL` across two profiles is a configuration error, and the controller doctor will flag it.
 
-> Using your own runtime or launcher? Any backend that honors the [controller contract](SETUP.md#controller-api-contract) works. MLX, Ollama, vLLM, and custom-command examples live in [SETUP.md](SETUP.md).
+> Using your own runtime or launcher? Any OpenAI-compatible endpoint works. The controller has adapters and tags for MLX, Ollama, vLLM, SGLang, TGI, llama-cpp-python, rVLLM MLX, external endpoints, and generic binaries. See [runtime support](Controller/RUNTIME_SUPPORT.md).
 
 ## Status labels
 

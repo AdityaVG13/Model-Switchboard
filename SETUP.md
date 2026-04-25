@@ -105,16 +105,25 @@ Typical fields:
 - `REQUEST_MODEL`
 - `SERVER_MODEL_ID`
 
-### `custom` or `command`
-Best when the model is started by some other launcher or wrapper.
+### Universal launchers
+Best when the model is owned by another runtime, desktop app, daemon, or wrapper.
 
-Typical JSON example:
+Model Switchboard now uses three launch modes:
+
+- `adapter`: known runtimes where the controller builds the command (`llama.cpp`, `mlx`, `rvllm-mlx`, `ollama`, `vllm`, `sglang`, `tgi`, `llama-cpp-python`).
+- `command`: profile-owned `START_COMMAND`, optional `STOP_COMMAND`, and readiness.
+- `external`: an already-running OpenAI-compatible endpoint such as LM Studio, Jan, LocalAI, or a manually launched server.
+
+Every profile status includes `runtime_label`, `runtime_tags`, and `launch_mode`. Add custom tags with `RUNTIME_TAGS="coding q8 long-context"`.
+
+Generic JSON example:
 
 ```json
 {
   "DISPLAY_NAME": "My Custom Server",
-  "RUNTIME": "custom",
+  "RUNTIME": "command",
   "START_COMMAND": "/absolute/path/to/start-my-server.sh",
+  "STOP_COMMAND": "curl -fsS -X POST http://127.0.0.1:8099/shutdown || true",
   "BASE_URL": "http://127.0.0.1:8099/v1",
   "HEALTHCHECK_MODE": "http-200",
   "HEALTHCHECK_URL": "http://127.0.0.1:8099/health",
@@ -122,6 +131,22 @@ Typical JSON example:
   "SERVER_MODEL_ID": "my-local-model"
 }
 ```
+
+Generic binary example for runtimes without a first-class adapter:
+
+```json
+{
+  "DISPLAY_NAME": "Any Local Server",
+  "RUNTIME": "tabbyapi",
+  "SERVER_BIN": "/absolute/path/to/server",
+  "SERVER_ARGS_JSON": ["--host", "127.0.0.1", "--port", "5000", "--model", "/models/model"],
+  "BASE_URL": "http://127.0.0.1:5000/v1",
+  "REQUEST_MODEL": "local-model",
+  "SERVER_MODEL_ID": "local-model"
+}
+```
+
+See [Controller/RUNTIME_SUPPORT.md](Controller/RUNTIME_SUPPORT.md) for the full runtime matrix and examples.
 
 Keep the schema stable. Path layout can vary by repo.
 
