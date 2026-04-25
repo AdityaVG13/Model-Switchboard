@@ -35,6 +35,8 @@ final class SwitchboardStore {
     }
 
     typealias LoopbackEndpointProbe = ([ModelProfileStatus]) async -> Set<String>
+    typealias ControllerClientFactory = (String) throws -> ControllerClient
+    typealias CachePayloadWriter = (ControllerStatusPayload, String) -> Void
 
     var controllerBaseURL: String
     let features: AppFeatures
@@ -63,19 +65,25 @@ final class SwitchboardStore {
     private var loopbackEndpointProbeSuppressedUntil: Date?
     private let usesCustomLoopbackEndpointProbe: Bool
     private let loopbackEndpointProbe: LoopbackEndpointProbe
+    private let controllerClientFactory: ControllerClientFactory
+    private let cachePayloadWriter: CachePayloadWriter
     private static let logger = Logger(subsystem: "io.modelswitchboard.app", category: "switchboard-store")
 
     init(
         controllerBaseURL: String,
         features: AppFeatures = .current,
         autoStartRefresh: Bool = true,
-        loopbackEndpointProbe: LoopbackEndpointProbe? = nil
+        loopbackEndpointProbe: LoopbackEndpointProbe? = nil,
+        controllerClientFactory: @escaping ControllerClientFactory = { try ControllerClient(baseURLString: $0) },
+        cachePayloadWriter: CachePayloadWriter? = nil
     ) {
         self.controllerBaseURL = controllerBaseURL
         self.features = features
         self.loopbackEndpointProbeFastUntil = Date().addingTimeInterval(Constants.loopbackEndpointProbeFastWindowSeconds)
         self.usesCustomLoopbackEndpointProbe = loopbackEndpointProbe != nil
         self.loopbackEndpointProbe = loopbackEndpointProbe ?? { _ in [] }
+        self.controllerClientFactory = controllerClientFactory
+        self.cachePayloadWriter = cachePayloadWriter ?? Self.writeCachePayload
         loadLastActiveProfiles()
         loadBenchmarkCooldownState()
         loadCachedState()
@@ -433,7 +441,7 @@ final class SwitchboardStore {
     }
 
     private var client: ControllerClient {
-        get throws { try ControllerClient(baseURLString: controllerBaseURL) }
+        get throws { try controllerClientFactory(controllerBaseURL) }
     }
 
     func isBusy(profile: String) -> Bool {
@@ -592,6 +600,10 @@ final class SwitchboardStore {
     }
 
     private func cachePayload(_ payload: ControllerStatusPayload, context: String) {
+        cachePayloadWriter(payload, context)
+    }
+
+    private static func writeCachePayload(_ payload: ControllerStatusPayload, context: String) {
         do {
             try ControllerStatusCache.write(payload)
         } catch {
