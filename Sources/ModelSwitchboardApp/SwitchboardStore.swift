@@ -603,11 +603,12 @@ final class SwitchboardStore {
         cachePayloadWriter(payload, context)
     }
 
-    private static func writeCachePayload(_ payload: ControllerStatusPayload, context: String) {
+    private nonisolated static func writeCachePayload(_ payload: ControllerStatusPayload, context: String) {
         do {
             try ControllerStatusCache.write(payload)
         } catch {
-            Self.logger.error("Cache write failed (\(context, privacy: .public)): \(String(describing: error), privacy: .public)")
+            let logger = Logger(subsystem: "io.modelswitchboard.app", category: "switchboard-store")
+            logger.error("Cache write failed (\(context, privacy: .public)): \(String(describing: error), privacy: .public)")
         }
     }
 
