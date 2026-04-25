@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.7] - 2026-04-24
+
+### Added
+- Added regression coverage for loopback endpoint fast-fail cadence, managed-action suppression, and remote-profile probe skipping.
+
+### Changed
+- Reworked the localhost fast-fail path to reuse a dedicated probe session, use a lightweight `HEAD` probe against the model base URL, and back off from a 2-second startup window to a steadier cadence over time.
+
+### Fixed
+- Dropped dead loopback model endpoints out of the UI faster without waiting for the next controller refresh tick.
+- Avoided redundant localhost probe churn immediately after app-driven start, stop, restart, activate, and stop-all actions.
+
 ## [1.0.6] - 2026-04-23
 
 ### Added
