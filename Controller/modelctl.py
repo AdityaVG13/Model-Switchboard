@@ -875,7 +875,9 @@ def pid_path(profile_name: str) -> pathlib.Path:
 
 
 def log_path(env: ProfileEnv) -> str:
-    return f"/tmp/{env.get('MODEL_ALIAS', env['PROFILE_NAME'])}.log"
+    raw_name = env.get("LOG_ALIAS") or env.get("MODEL_ALIAS") or env["PROFILE_NAME"]
+    safe_name = "".join(char if char.isalnum() or char in {"_", ".", "-"} else "_" for char in raw_name)
+    return f"/tmp/{safe_name}.log"
 
 
 def profile_working_directory(env: ProfileEnv) -> pathlib.Path | None:
