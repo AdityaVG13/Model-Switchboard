@@ -10,6 +10,9 @@ import Testing
           "profile": "qwen35-a3b",
           "display_name": "Qwen3.5 35B A3B Local (llama.cpp)",
           "runtime": "llama.cpp",
+          "runtime_label": "llama.cpp",
+          "runtime_tags": ["llama.cpp", "managed", "openai-compatible", "gguf", "metal"],
+          "launch_mode": "adapter",
           "host": "127.0.0.1",
           "port": "8080",
           "base_url": "http://127.0.0.1:8080/v1",
@@ -63,6 +66,9 @@ import Testing
     let payload = try JSONDecoder().decode(ControllerStatusPayload.self, from: Data(json.utf8))
     #expect(payload.statuses.count == 1)
     #expect(payload.statuses[0].displayName == "Qwen3.5 35B A3B Local (llama.cpp)")
+    #expect(payload.statuses[0].runtimeLabel == "llama.cpp")
+    #expect(payload.statuses[0].runtimeTags?.contains("openai-compatible") == true)
+    #expect(payload.statuses[0].launchMode == "adapter")
     #expect(payload.integrations.first?.id == "droid")
     #expect(payload.profilesDirectory == "/Users/example/controller/model-profiles")
     #expect(payload.controllerRoot == "/Users/example/controller")
@@ -91,6 +97,9 @@ import Testing
           "profile": "example-mlx",
           "display_name": "Example MLX Model",
           "runtime": "mlx",
+          "runtime_label": "MLX",
+          "runtime_tags": ["mlx", "managed", "openai-compatible", "apple-silicon"],
+          "launch_mode": "adapter",
           "errors": ["missing MODEL_DIR or MODEL_REPO"],
           "warnings": ["base_url is empty; endpoint health checks may fail"],
           "running": false,
@@ -108,6 +117,9 @@ import Testing
     #expect(report.launchAgent.running)
     #expect(report.profilesDirectory == "/Users/example/.model-switchboard/model-profiles")
     #expect(report.profiles.count == 1)
+    #expect(report.profiles[0].runtimeLabel == "MLX")
+    #expect(report.profiles[0].runtimeTags?.contains("apple-silicon") == true)
+    #expect(report.profiles[0].launchMode == "adapter")
     #expect(report.profiles[0].errors == ["missing MODEL_DIR or MODEL_REPO"])
     #expect(report.profiles[0].warnings == ["base_url is empty; endpoint health checks may fail"])
 }

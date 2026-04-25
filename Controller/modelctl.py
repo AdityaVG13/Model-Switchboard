@@ -66,6 +66,173 @@ class ControllerRequest(TypedDict, total=False):
     keep_running: bool
 
 
+class RuntimeSpec(TypedDict):
+    label: str
+    tags: list[str]
+    launch_mode: str
+
+
+RUNTIME_ALIASES = {
+    "llamacpp": "llama.cpp",
+    "llama-cpp": "llama.cpp",
+    "llama.cpp": "llama.cpp",
+    "mlx-lm": "mlx",
+    "mlx_lm": "mlx",
+    "rvllm": "rvllm-mlx",
+    "rvllm_mlx": "rvllm-mlx",
+    "rvllm-mlx": "rvllm-mlx",
+    "openai": "external",
+    "openai-compatible": "external",
+    "endpoint": "external",
+    "external": "external",
+    "custom": "command",
+    "command": "command",
+    "lmstudio": "lm-studio",
+    "lm-studio": "lm-studio",
+    "text-generation-inference": "tgi",
+    "huggingface-tgi": "tgi",
+    "text-generation-webui": "text-generation-webui",
+    "oobabooga": "text-generation-webui",
+    "llama-cpp-python": "llama-cpp-python",
+}
+
+
+RUNTIME_SPECS: dict[str, RuntimeSpec] = {
+    "llama.cpp": {
+        "label": "llama.cpp",
+        "tags": ["managed", "openai-compatible", "gguf", "metal", "apple-silicon"],
+        "launch_mode": "adapter",
+    },
+    "mlx": {
+        "label": "MLX",
+        "tags": ["managed", "openai-compatible", "mlx", "apple-silicon"],
+        "launch_mode": "adapter",
+    },
+    "rvllm-mlx": {
+        "label": "rVLLM MLX",
+        "tags": ["managed", "openai-compatible", "mlx", "continuous-batching", "apple-silicon"],
+        "launch_mode": "adapter",
+    },
+    "omlx": {
+        "label": "oMLX",
+        "tags": ["managed", "openai-compatible", "mlx", "agent-cache", "apple-silicon"],
+        "launch_mode": "adapter",
+    },
+    "ollama": {
+        "label": "Ollama",
+        "tags": ["daemon", "openai-compatible", "model-registry", "local"],
+        "launch_mode": "adapter",
+    },
+    "vllm": {
+        "label": "vLLM",
+        "tags": ["managed", "openai-compatible", "server", "continuous-batching"],
+        "launch_mode": "adapter",
+    },
+    "sglang": {
+        "label": "SGLang",
+        "tags": ["managed", "openai-compatible", "server", "radix-cache"],
+        "launch_mode": "adapter",
+    },
+    "tgi": {
+        "label": "Text Generation Inference",
+        "tags": ["managed", "openai-compatible", "server", "hugging-face"],
+        "launch_mode": "adapter",
+    },
+    "llama-cpp-python": {
+        "label": "llama-cpp-python",
+        "tags": ["managed", "openai-compatible", "gguf", "python"],
+        "launch_mode": "adapter",
+    },
+    "llamafile": {
+        "label": "llamafile",
+        "tags": ["managed", "openai-compatible", "gguf", "single-binary"],
+        "launch_mode": "adapter",
+    },
+    "koboldcpp": {
+        "label": "KoboldCpp",
+        "tags": ["managed", "openai-compatible", "gguf"],
+        "launch_mode": "adapter",
+    },
+    "tabbyapi": {
+        "label": "TabbyAPI",
+        "tags": ["managed", "openai-compatible", "exllamav2", "gptq"],
+        "launch_mode": "adapter",
+    },
+    "text-generation-webui": {
+        "label": "text-generation-webui",
+        "tags": ["managed", "openai-compatible", "launcher", "extensions"],
+        "launch_mode": "adapter",
+    },
+    "localai": {
+        "label": "LocalAI",
+        "tags": ["external", "openai-compatible", "multi-backend"],
+        "launch_mode": "external",
+    },
+    "lm-studio": {
+        "label": "LM Studio",
+        "tags": ["external", "openai-compatible", "desktop"],
+        "launch_mode": "external",
+    },
+    "jan": {
+        "label": "Jan",
+        "tags": ["external", "openai-compatible", "desktop"],
+        "launch_mode": "external",
+    },
+    "external": {
+        "label": "OpenAI-compatible endpoint",
+        "tags": ["external", "openai-compatible"],
+        "launch_mode": "external",
+    },
+    "command": {
+        "label": "Custom command",
+        "tags": ["managed", "custom", "openai-compatible"],
+        "launch_mode": "command",
+    },
+}
+
+
+def canonical_runtime(value: str | None) -> str:
+    raw = (value or "llama.cpp").strip()
+    normalized = raw.lower().replace("_", "-")
+    return RUNTIME_ALIASES.get(normalized, normalized)
+
+
+def runtime_spec(env: ProfileEnv) -> RuntimeSpec:
+    runtime = canonical_runtime(env.get("RUNTIME"))
+    if runtime in RUNTIME_SPECS:
+        spec = RUNTIME_SPECS[runtime]
+    else:
+        spec = {
+            "label": runtime,
+            "tags": ["managed", "custom"],
+            "launch_mode": "adapter",
+        }
+    if env.get("START_COMMAND"):
+        return {**spec, "launch_mode": "command"}
+    if env.get("LAUNCH_MODE"):
+        return {**spec, "launch_mode": env["LAUNCH_MODE"].strip().lower()}
+    return spec
+
+
+def split_tags(value: str | None) -> list[str]:
+    if not value:
+        return []
+    tags: list[str] = []
+    for part in value.replace(",", " ").split():
+        tag = part.strip().lower()
+        if tag and tag not in tags:
+            tags.append(tag)
+    return tags
+
+
+def runtime_tags(env: ProfileEnv) -> list[str]:
+    tags: list[str] = []
+    for tag in [canonical_runtime(env.get("RUNTIME")), *runtime_spec(env)["tags"], *split_tags(env.get("RUNTIME_TAGS") or env.get("TAGS"))]:
+        if tag and tag not in tags:
+            tags.append(tag)
+    return tags
+
+
 HTML_PAGE = r"""<!doctype html>
 <html lang="en">
 <head>
@@ -925,6 +1092,8 @@ def status_for_profile(
     *,
     allow_port_fallback: bool = True,
 ) -> ModelProfileStatusPayload:
+    runtime = canonical_runtime(env.get("RUNTIME"))
+    spec = runtime_spec(env)
     ready, server_ids = probe_health(env)
     pid = read_pid(name)
     if pid and not process_alive(pid):
@@ -937,7 +1106,10 @@ def status_for_profile(
     return {
         "profile": name,
         "display_name": env["DISPLAY_NAME"],
-        "runtime": env.get("RUNTIME", "llama.cpp"),
+        "runtime": runtime,
+        "runtime_label": spec["label"],
+        "runtime_tags": runtime_tags(env),
+        "launch_mode": spec["launch_mode"],
         "host": endpoint_host(env),
         "port": endpoint_port(env),
         "base_url": base_url(env),
@@ -1339,7 +1511,8 @@ def diagnose_profile(
     *,
     endpoint_conflict: tuple[str, list[str]] | None = None,
 ) -> ProfileDiagnosticPayload:
-    runtime = env.get("RUNTIME", "llama.cpp")
+    runtime = canonical_runtime(env.get("RUNTIME"))
+    spec = runtime_spec(env)
     errors: list[str] = []
     warnings: list[str] = []
 
@@ -1414,6 +1587,9 @@ def diagnose_profile(
         "profile": name,
         "display_name": env.get("DISPLAY_NAME", name),
         "runtime": runtime,
+        "runtime_label": spec["label"],
+        "runtime_tags": runtime_tags(env),
+        "launch_mode": spec["launch_mode"],
         "errors": errors,
         "warnings": warnings,
         "running": live.get("running", False),
@@ -1462,7 +1638,9 @@ def print_doctor(report: DoctorReportPayload) -> None:
         else:
             state = "ok"
         details = [
-            f"{item['display_name']} ({item['runtime']})",
+            f"{item['display_name']} ({item['runtime_label']})",
+            f"launch={item['launch_mode']}",
+            f"tags={','.join(item['runtime_tags']) or '-'}",
             f"running={item['running']}",
             f"ready={item['ready']}",
             f"pid={item['pid'] or '-'}",

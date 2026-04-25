@@ -14,7 +14,7 @@ class ControllerIntegrationPayload(TypedDict):
     description: str
 
 
-class ModelProfileStatusPayload(TypedDict):
+class ModelProfileStatusPayloadBase(TypedDict):
     profile: str
     display_name: str
     runtime: str
@@ -30,6 +30,10 @@ class ModelProfileStatusPayload(TypedDict):
     rss_mb: float | None
     command: str | None
     log_path: str
+class ModelProfileStatusPayload(ModelProfileStatusPayloadBase, total=False):
+    runtime_label: str
+    runtime_tags: list[str]
+    launch_mode: str
 
 
 class BenchmarkLatestRowPayload(TypedDict):
@@ -94,6 +98,9 @@ class ProfileDiagnosticPayload(TypedDict):
     profile: str
     display_name: str
     runtime: str
+    runtime_label: str
+    runtime_tags: list[str]
+    launch_mode: str
     errors: list[str]
     warnings: list[str]
     running: bool

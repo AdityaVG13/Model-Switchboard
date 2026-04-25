@@ -97,6 +97,28 @@ class ModelCtlTests(unittest.TestCase):
 
             self.assertEqual(MODULE.resolve_mlx_server_bin(env), str(server_bin))
 
+    def test_runtime_metadata_canonicalizes_aliases_and_adds_profile_tags(self) -> None:
+        env = {
+            "RUNTIME": "mlx_lm",
+            "RUNTIME_TAGS": "fast, coding agent",
+        }
+
+        self.assertEqual(MODULE.canonical_runtime(env["RUNTIME"]), "mlx")
+        self.assertEqual(MODULE.runtime_spec(env)["label"], "MLX")
+        self.assertEqual(
+            MODULE.runtime_tags(env),
+            ["mlx", "managed", "openai-compatible", "apple-silicon", "fast", "coding", "agent"],
+        )
+
+    def test_runtime_spec_treats_start_command_as_command_launch_mode(self) -> None:
+        env = {
+            "RUNTIME": "lmstudio",
+            "START_COMMAND": "/usr/local/bin/lms server start",
+        }
+
+        self.assertEqual(MODULE.canonical_runtime(env["RUNTIME"]), "lm-studio")
+        self.assertEqual(MODULE.runtime_spec(env)["launch_mode"], "command")
+
     def test_status_for_profile_ignores_unmatched_shared_port_listener(self) -> None:
         env = {
             "PROFILE_NAME": "qwen35-a3b",

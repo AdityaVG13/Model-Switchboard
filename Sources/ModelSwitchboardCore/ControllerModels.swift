@@ -38,6 +38,9 @@ public struct ModelProfileStatus: Codable, Identifiable, Equatable, Sendable {
     public let profile: String
     public let displayName: String
     public let runtime: String
+    public let runtimeLabel: String?
+    public let runtimeTags: [String]?
+    public let launchMode: String?
     public let host: String
     public let port: String
     public let baseURL: String
@@ -57,6 +60,9 @@ public struct ModelProfileStatus: Codable, Identifiable, Equatable, Sendable {
         profile: String,
         displayName: String,
         runtime: String,
+        runtimeLabel: String? = nil,
+        runtimeTags: [String]? = nil,
+        launchMode: String? = nil,
         host: String,
         port: String,
         baseURL: String,
@@ -73,6 +79,9 @@ public struct ModelProfileStatus: Codable, Identifiable, Equatable, Sendable {
         self.profile = profile
         self.displayName = displayName
         self.runtime = runtime
+        self.runtimeLabel = runtimeLabel
+        self.runtimeTags = runtimeTags
+        self.launchMode = launchMode
         self.host = host
         self.port = port
         self.baseURL = baseURL
@@ -91,6 +100,9 @@ public struct ModelProfileStatus: Codable, Identifiable, Equatable, Sendable {
         case profile
         case displayName = "display_name"
         case runtime
+        case runtimeLabel = "runtime_label"
+        case runtimeTags = "runtime_tags"
+        case launchMode = "launch_mode"
         case host
         case port
         case baseURL = "base_url"
@@ -255,6 +267,9 @@ public struct ProfileDiagnostic: Codable, Equatable, Identifiable, Sendable {
     public let profile: String
     public let displayName: String
     public let runtime: String
+    public let runtimeLabel: String?
+    public let runtimeTags: [String]?
+    public let launchMode: String?
     public let errors: [String]
     public let warnings: [String]
     public let running: Bool
@@ -268,6 +283,9 @@ public struct ProfileDiagnostic: Codable, Equatable, Identifiable, Sendable {
         profile: String,
         displayName: String,
         runtime: String,
+        runtimeLabel: String? = nil,
+        runtimeTags: [String]? = nil,
+        launchMode: String? = nil,
         errors: [String],
         warnings: [String],
         running: Bool,
@@ -278,6 +296,9 @@ public struct ProfileDiagnostic: Codable, Equatable, Identifiable, Sendable {
         self.profile = profile
         self.displayName = displayName
         self.runtime = runtime
+        self.runtimeLabel = runtimeLabel
+        self.runtimeTags = runtimeTags
+        self.launchMode = launchMode
         self.errors = errors
         self.warnings = warnings
         self.running = running
@@ -290,6 +311,9 @@ public struct ProfileDiagnostic: Codable, Equatable, Identifiable, Sendable {
         case profile
         case displayName = "display_name"
         case runtime
+        case runtimeLabel = "runtime_label"
+        case runtimeTags = "runtime_tags"
+        case launchMode = "launch_mode"
         case errors
         case warnings
         case running
