@@ -36,7 +36,7 @@ final class SwitchboardStore {
 
     typealias LoopbackEndpointProbe = ([ModelProfileStatus]) async -> Set<String>
     typealias ControllerClientFactory = (String) throws -> ControllerClient
-    typealias CachePayloadWriter = (ControllerStatusPayload, String) -> Void
+    typealias CachePayloadWriter = @MainActor (ControllerStatusPayload, String) -> Void
 
     var controllerBaseURL: String
     let features: AppFeatures
