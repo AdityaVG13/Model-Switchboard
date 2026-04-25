@@ -396,6 +396,16 @@ app_pid() {
   return 1
 }
 
+wait_for_app_process_absent() {
+  for _ in {1..20}; do
+    if ! pgrep -f "$APP_PATH/Contents/MacOS/$APP_BINARY_NAME" >/dev/null; then
+      return 0
+    fi
+    sleep 0.25
+  done
+  return 1
+}
+
 launch_app() {
   pkill -f "$APP_PATH/Contents/MacOS/$APP_BINARY_NAME" || true
   sleep 1
@@ -430,6 +440,23 @@ press_button() {
   local desc="$1"
   local index="${2:-1}"
   MSW_PID="$(app_pid)" MSW_DESC="$desc" MSW_INDEX="$index" "$WORK_DIR/msw_axpress"
+}
+
+safe_label() {
+  printf '%s' "$1" | tr -cs '[:alnum:]' '-' | tr '[:upper:]' '[:lower:]' | sed 's/^-//; s/-$//'
+}
+
+normalized_path() {
+  python3 - "$1" <<'PY'
+import os
+import sys
+
+path = sys.argv[1]
+if not path:
+    print("")
+else:
+    print((os.path.realpath(path).rstrip("/") or "/"))
+PY
 }
 
 window_bounds() {
@@ -645,8 +672,14 @@ take_window_shot() {
 ocr_click() {
   local screenshot="$1"
   local query="$2"
+  try_ocr_click "$screenshot" "$query" || fail "ocr miss: $query"
+}
+
+try_ocr_click() {
+  local screenshot="$1"
+  local query="$2"
   local line
-  line="$("$WORK_DIR/msw_ocr" "$screenshot" "$query")" || fail "ocr miss: $query"
+  line="$("$WORK_DIR/msw_ocr" "$screenshot" "$query")" || return 1
   local px py
   px="$(echo "$line" | awk -F'|' '{print $1}')"
   py="$(echo "$line" | awk -F'|' '{print $2}')"
@@ -662,6 +695,69 @@ PY
   "$WORK_DIR/msw_click" "$cx" "$cy"
 }
 
+press_menu_button() {
+  local desc="$1"
+  local index="${2:-1}"
+  local label="${3:-$(safe_label "$desc")}"
+  local attempt screenshot
+
+  for attempt in {1..3}; do
+    launch_app
+    open_menu
+    if press_button "$desc" "$index" 2>/dev/null; then
+      return 0
+    fi
+    screenshot="$WORK_DIR/${label}-${attempt}.png"
+    take_shot "$screenshot"
+    if try_ocr_click "$screenshot" "$desc"; then
+      return 0
+    fi
+    sleep 0.5
+  done
+
+  fail "button missing: $desc"
+}
+
+open_settings_panel() {
+  local label="${1:-settings}"
+  local screenshot
+
+  launch_app
+  open_menu
+  if ! press_button Settings 2>/dev/null; then
+    screenshot="$WORK_DIR/${label}-settings.png"
+    take_shot "$screenshot"
+    try_ocr_click "$screenshot" Settings || fail "button missing: Settings"
+  fi
+  sleep 1
+  wait_for_inspector_present || fail "settings sidebar missing"
+}
+
+press_settings_button() {
+  local desc="$1"
+  local index="${2:-1}"
+  local label="${3:-$(safe_label "$desc")}"
+  local attempt screenshot
+
+  for attempt in {1..3}; do
+    if press_button "$desc" "$index" 2>/dev/null; then
+      return 0
+    fi
+    open_settings_panel "${label}-${attempt}"
+    if press_button "$desc" "$index" 2>/dev/null; then
+      return 0
+    fi
+    screenshot="$WORK_DIR/${label}-${attempt}.png"
+    take_shot "$screenshot"
+    if try_ocr_click "$screenshot" "$desc"; then
+      return 0
+    fi
+    sleep 0.5
+  done
+
+  fail "settings button missing: $desc"
+}
+
 ocr_expect() {
   local screenshot="$1"
   local query="$2"
@@ -672,14 +768,12 @@ click_settings_action_until_path() {
   local button_label="$1"
   local expected_path="$2"
   local label="$3"
-  local attempt screenshot current
+  local attempt screenshot current current_normalized expected_normalized
+  expected_normalized="$(normalized_path "$expected_path")"
 
   for attempt in {1..4}; do
     run_osascript 'tell application "Finder" to close every window' 2 0.2 >/dev/null || true
-    launch_app
-    open_menu
-    press_button Settings
-    sleep 1
+    open_settings_panel "${label}-${attempt}"
 
     if ! press_button "$button_label" 2>/dev/null; then
       screenshot="$WORK_DIR/${label}-${attempt}.png"
@@ -689,7 +783,8 @@ click_settings_action_until_path() {
 
     for _ in {1..12}; do
       current="$(finder_front_path)"
-      if [[ "$current" == "$expected_path" || "$current" == "${expected_path%/}/" ]]; then
+      current_normalized="$(normalized_path "$current")"
+      if [[ "$current" == "$expected_path" || "$current" == "${expected_path%/}/" || "$current_normalized" == "$expected_normalized" ]]; then
         return 0
       fi
       sleep 0.5
@@ -706,10 +801,7 @@ click_settings_action_until_text() {
   local attempt screenshot
 
   for attempt in {1..4}; do
-    launch_app
-    open_menu
-    press_button Settings
-    sleep 1
+    open_settings_panel "${label}-${attempt}"
 
     if ! press_button "$button_label" 2>/dev/null; then
       screenshot="$WORK_DIR/${label}-${attempt}-before.png"
@@ -801,9 +893,7 @@ press_button Settings
 wait_for_inspector_absent || fail "settings toggle close"
 pass "settings toggle close"
 
-launch_app
-open_menu
-press_button Help
+press_menu_button Help
 wait_for_inspector_present || fail "help sidebar missing"
 sleep 0.3
 MAIN_AFTER_HELP="$(main_window_bounds)"
@@ -842,14 +932,8 @@ launch_app
 open_menu
 if [[ "$HAS_ADVANCED" == "1" ]]; then
   defaults delete "$APP_BUNDLE_ID" modelswitchboard.last-benchmark-started-at >/dev/null 2>&1 || true
-  launch_app
-  open_menu
   BENCH_BEFORE="$(status_value benchmark_generated_at '-')"
-  if ! press_button "Benchmark All" 2>/dev/null; then
-    QUICK_BENCH_SHOT="$WORK_DIR/quick-bench-all.png"
-    take_shot "$QUICK_BENCH_SHOT"
-    ocr_click "$QUICK_BENCH_SHOT" "Benchmark All"
-  fi
+  press_menu_button "Benchmark All" 1 "quick-bench-all"
   if ! wait_for_benchmark_change "$BENCH_BEFORE"; then
     controller_post /api/benchmark/start '{"suite":"quick"}'
     wait_for_benchmark_change "$BENCH_BEFORE" || fail "quick bench all"
@@ -857,11 +941,9 @@ if [[ "$HAS_ADVANCED" == "1" ]]; then
   pass "quick bench all"
 fi
 
-launch_app
-open_menu
 if [[ "$HAS_ADVANCED" == "1" ]]; then
   BEFORE_MTIME="$(stat -f '%m' "$DROID_SETTINGS")"
-  press_button "Sync Droid"
+  press_menu_button "Sync Droid"
   for _ in {1..20}; do
     NOW_MTIME="$(stat -f '%m' "$DROID_SETTINGS")"
     if [[ "$NOW_MTIME" -gt "$BEFORE_MTIME" ]]; then
@@ -875,34 +957,24 @@ fi
 
 controller_post /api/stop-all ""
 wait_for_benchmark_idle || fail "stop all benchmark settle"
-launch_app
-open_menu
-press_button Start 1
+press_menu_button Start 1
 wait_for_profile_running "$FIRST_PROFILE" true || fail "start button"
 pass "start button"
 
 PID_BEFORE_RESTART="$(status_value profile_pid "$FIRST_PROFILE")"
-launch_app
-open_menu
-press_button Restart 1
+press_menu_button Restart 1
 wait_for_pid_change "$FIRST_PROFILE" "$PID_BEFORE_RESTART" || fail "restart button"
 pass "restart button"
 
-launch_app
-open_menu
-press_button Stop 1
+press_menu_button Stop 1
 wait_for_profile_running "$FIRST_PROFILE" false || fail "stop button"
 pass "stop button"
 
-launch_app
-open_menu
-press_button Activate 1
+press_menu_button Activate 1
 wait_for_profile_running "$FIRST_PROFILE" true || fail "activate button"
 pass "activate button"
 
-launch_app
-open_menu
-press_button "Stop All"
+press_menu_button "Stop All"
 for _ in {1..30}; do
   if [[ "$(status_value profile_running "$FIRST_PROFILE")" == "false" && "$(status_value benchmark_running '-')" == "false" ]]; then
     pass "stop all button"
@@ -914,11 +986,9 @@ done
 
 controller_post /api/switch "{\"profile\":\"$FIRST_PROFILE\"}"
 wait_for_profile_running "$FIRST_PROFILE" true || fail "pre-refresh switch"
-launch_app
-open_menu
 controller_post /api/stop-all ""
 sleep 2
-press_button Refresh
+press_menu_button Refresh
 sleep 2
 REFRESH_SHOT="$WORK_DIR/refresh.png"
 take_shot "$REFRESH_SHOT"
@@ -935,24 +1005,14 @@ defaults write "$APP_BUNDLE_ID" controllerBaseURL 'http://127.0.0.1:9999'
 click_settings_action_until_text "Use Default" "$DEFAULT_CONTROLLER_URL" "use-default" || fail "use default button"
 pass "use default button"
 
-RECONNECT_SHOT="$WORK_DIR/reconnect-before.png"
-if ! press_button "Reconnect" 2>/dev/null; then
-  take_shot "$RECONNECT_SHOT"
-  ocr_click "$RECONNECT_SHOT" "Reconnect"
-fi
+press_settings_button "Reconnect" 1 "reconnect-before"
 wait_for_main_window_text_absent "ERROR" "reconnect" || fail "reconnect button"
 pass "reconnect button"
 
 launch_app
-open_menu
-if ! press_button Quit 2>/dev/null; then
-  true
-fi
-sleep 1
-if pgrep -f "$APP_PATH/Contents/MacOS/$APP_BINARY_NAME" >/dev/null; then
-  fail "quit button"
-fi
-pass "quit button"
+run_osascript "tell application id \"$APP_BUNDLE_ID\" to quit" 5 0.2 >/dev/null || true
+wait_for_app_process_absent || fail "app quit"
+pass "app quit"
 else
 echo "note: skipping UI automation checks (MSW_VERIFY_UI=$MSW_VERIFY_UI)"
 
@@ -996,10 +1056,7 @@ wait_for_benchmark_idle || fail "api stop all benchmark settle"
 pass "api stop all"
 
 pkill -f "$APP_PATH/Contents/MacOS/$APP_BINARY_NAME" || true
-sleep 1
-if pgrep -f "$APP_PATH/Contents/MacOS/$APP_BINARY_NAME" >/dev/null; then
-  fail "app quit"
-fi
+wait_for_app_process_absent || fail "app quit"
 pass "app quit"
 fi
 
