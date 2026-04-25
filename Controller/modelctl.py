@@ -798,13 +798,21 @@ HTML_PAGE = r"""<!doctype html>
 """
 
 
-def run(cmd: list[str], *, check: bool = True, capture: bool = True, env: ProfileEnv | None = None) -> subprocess.CompletedProcess[str]:
+def run(
+    cmd: list[str],
+    *,
+    check: bool = True,
+    capture: bool = True,
+    env: ProfileEnv | None = None,
+    cwd: pathlib.Path | None = None,
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         cmd,
         check=check,
         text=True,
         capture_output=capture,
         env=env,
+        cwd=cwd,
     )
 
 
@@ -868,6 +876,12 @@ def pid_path(profile_name: str) -> pathlib.Path:
 
 def log_path(env: ProfileEnv) -> str:
     return f"/tmp/{env.get('MODEL_ALIAS', env['PROFILE_NAME'])}.log"
+
+
+def profile_working_directory(env: ProfileEnv) -> pathlib.Path | None:
+    raw = env.get("WORKING_DIRECTORY") or env.get("WORKDIR") or ""
+    raw = raw.strip()
+    return expand_profile_path(raw) if raw else None
 
 
 def base_url(env: ProfileEnv) -> str:
@@ -1220,20 +1234,36 @@ def start_profile(name: str) -> None:
 
 
 
-def terminate_pid(pid: int, *, timeout: float = 12.0) -> None:
+def signal_process_tree(pid: int, sig: int) -> None:
     try:
-        os.kill(pid, signal.SIGTERM)
+        os.killpg(pid, sig)
+        return
+    except ProcessLookupError:
+        return
+    except OSError:
+        pass
+    try:
+        os.kill(pid, sig)
+    except ProcessLookupError:
+        return
     except OSError:
         return
+
+
+def terminate_pid(pid: int, *, timeout: float = 12.0) -> None:
+    signal_process_tree(pid, signal.SIGTERM)
     deadline = time.time() + timeout
     while time.time() < deadline:
         if not process_alive(pid):
             return
         time.sleep(0.5)
-    try:
-        os.kill(pid, signal.SIGKILL)
-    except OSError:
-        return
+    signal_process_tree(pid, signal.SIGKILL)
+
+
+def run_profile_shell(command: str, env: ProfileEnv) -> subprocess.CompletedProcess[str]:
+    merged_env = os.environ.copy()
+    merged_env.update(env)
+    return run(["bash", "-lc", command], env=merged_env, cwd=profile_working_directory(env))
 
 
 
@@ -1241,12 +1271,24 @@ def stop_profile(name: str) -> None:
     env = require_profile(name)
     status = status_for_profile(name, env)
     pid = status["pid"]
+    stop_command = env.get("STOP_COMMAND", "").strip()
+    stop_error: Exception | None = None
+    if stop_command:
+        try:
+            run_profile_shell(stop_command, env)
+        except Exception as exc:  # noqa: BLE001
+            stop_error = exc
     if not pid:
         pid_path(name).unlink(missing_ok=True)
+        if stop_error:
+            raise RuntimeError(f"STOP_COMMAND failed for {name}: {stop_error}") from stop_error
         print(f"[INFO] {name} already stopped")
         return
-    terminate_pid(pid)
+    if env.get("STOP_COMMAND_ONLY", "0") != "1":
+        terminate_pid(pid)
     pid_path(name).unlink(missing_ok=True)
+    if stop_error:
+        raise RuntimeError(f"STOP_COMMAND failed for {name}: {stop_error}") from stop_error
     print(f"[INFO] stopped {name} (pid {pid})")
 
 

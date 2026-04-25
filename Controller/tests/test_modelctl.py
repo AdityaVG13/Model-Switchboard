@@ -119,6 +119,55 @@ class ModelCtlTests(unittest.TestCase):
         self.assertEqual(MODULE.canonical_runtime(env["RUNTIME"]), "lm-studio")
         self.assertEqual(MODULE.runtime_spec(env)["launch_mode"], "command")
 
+    def test_terminate_pid_signals_process_group_before_process(self) -> None:
+        with (
+            mock.patch.object(MODULE.os, "killpg") as killpg,
+            mock.patch.object(MODULE.os, "kill") as kill_pid,
+            mock.patch.object(MODULE, "process_alive", return_value=False),
+        ):
+            MODULE.terminate_pid(4242)
+
+        killpg.assert_called_once_with(4242, signal.SIGTERM)
+        kill_pid.assert_not_called()
+
+    def test_stop_profile_runs_stop_command_without_pid(self) -> None:
+        env = {
+            "PROFILE_NAME": "external",
+            "DISPLAY_NAME": "External",
+            "REQUEST_MODEL": "external",
+            "STOP_COMMAND": "echo stop",
+        }
+        with (
+            mock.patch.object(MODULE, "require_profile", return_value=env),
+            mock.patch.object(MODULE, "status_for_profile", return_value={"pid": None}),
+            mock.patch.object(MODULE, "run_profile_shell") as run_profile_shell,
+            mock.patch.object(MODULE, "pid_path") as pid_path,
+        ):
+            pid_path.return_value.unlink.return_value = None
+            MODULE.stop_profile("external")
+
+        run_profile_shell.assert_called_once_with("echo stop", env)
+
+    def test_stop_profile_runs_stop_command_then_terminates_pid(self) -> None:
+        env = {
+            "PROFILE_NAME": "managed",
+            "DISPLAY_NAME": "Managed",
+            "REQUEST_MODEL": "managed",
+            "STOP_COMMAND": "echo stop",
+        }
+        with (
+            mock.patch.object(MODULE, "require_profile", return_value=env),
+            mock.patch.object(MODULE, "status_for_profile", return_value={"pid": 5151}),
+            mock.patch.object(MODULE, "run_profile_shell") as run_profile_shell,
+            mock.patch.object(MODULE, "terminate_pid") as terminate_pid,
+            mock.patch.object(MODULE, "pid_path") as pid_path,
+        ):
+            pid_path.return_value.unlink.return_value = None
+            MODULE.stop_profile("managed")
+
+        run_profile_shell.assert_called_once_with("echo stop", env)
+        terminate_pid.assert_called_once_with(5151)
+
     def test_status_for_profile_ignores_unmatched_shared_port_listener(self) -> None:
         env = {
             "PROFILE_NAME": "qwen35-a3b",
