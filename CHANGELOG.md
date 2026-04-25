@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.1.0] - 2026-04-25
+
+### Added
+- Added universal launcher support for local model profiles, including llama.cpp, MLX, vLLM, Ollama, OpenAI-compatible servers, custom commands, and runtime-specific metadata tags.
+- Added a live RAM utilization badge between CPU and GPU telemetry in the Plus menu header.
+- Added safe button-action stress coverage that can simulate 10,000 menu and inspector clicks without starting local models.
+
+### Changed
+- Moved controller-side install guidance and live-controller expectations toward the `~/AI/modelswitchboard` root with profile storage under `model-profiles`.
+- Expanded release and setup documentation around runtime selection, launcher tags, downloaded-DMG setup, and managed controller paths.
+
+### Fixed
+- Hardened model lifecycle shutdown, launcher log alias sanitization, and Droid sync compatibility on Python 3.9.
+- Stabilized installed-app verification against the migrated controller root and live Plus app expectations.
+
 ## [1.0.7] - 2026-04-24
 
 ### Added
