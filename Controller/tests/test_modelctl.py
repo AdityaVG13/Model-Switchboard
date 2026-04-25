@@ -489,6 +489,85 @@ class ModelCtlTests(unittest.TestCase):
             pid = int(pid_path.read_text().strip())
             os.kill(pid, signal.SIGTERM)
 
+    def test_start_model_script_supports_generic_server_bin_with_json_args(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            script_path = tmp_path / "start-model-mac.sh"
+            shutil.copy2(ROOT / "start-model-mac.sh", script_path)
+            port = reserve_local_port()
+            server_bin = tmp_path / "fake-tabbyapi-server"
+            server_bin.write_text(
+                textwrap.dedent(
+                    """\
+                    #!/usr/bin/env python3
+                    import argparse
+                    import json
+                    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+                    parser = argparse.ArgumentParser()
+                    parser.add_argument("--host", default="127.0.0.1")
+                    parser.add_argument("--port", type=int, required=True)
+                    parser.add_argument("--model-id", required=True)
+                    args = parser.parse_args()
+
+                    class Handler(BaseHTTPRequestHandler):
+                        def do_GET(self):
+                            if self.path != "/v1/models":
+                                self.send_response(404)
+                                self.end_headers()
+                                return
+                            payload = json.dumps({"data": [{"id": args.model_id}]}).encode()
+                            self.send_response(200)
+                            self.send_header("Content-Type", "application/json")
+                            self.send_header("Content-Length", str(len(payload)))
+                            self.end_headers()
+                            self.wfile.write(payload)
+                        def log_message(self, format, *args):
+                            return
+
+                    ThreadingHTTPServer((args.host, args.port), Handler).serve_forever()
+                    """
+                )
+            )
+            server_bin.chmod(0o755)
+            agl_python = tmp_path / ".venv-agentlightning" / "bin" / "python"
+            agl_python.parent.mkdir(parents=True)
+            agl_python.write_text("exit 0\n")
+            agl_python.chmod(0o755)
+            profile_path = tmp_path / "tabbyapi.json"
+            profile_path.write_text(
+                json.dumps(
+                    {
+                        "DISPLAY_NAME": "TabbyAPI Test",
+                        "RUNTIME": "tabbyapi",
+                        "SERVER_BIN": str(server_bin),
+                        "SERVER_ARGS_JSON": ["--host", "127.0.0.1", "--port", str(port), "--model-id", "tabby-local"],
+                        "HOST": "127.0.0.1",
+                        "PORT": str(port),
+                        "REQUEST_MODEL": "tabby-local",
+                        "SERVER_MODEL_ID": "tabby-local",
+                    }
+                )
+            )
+            env = os.environ.copy()
+            env["MODEL_PROFILE"] = "tabbyapi"
+            env["MODEL_PROFILE_PATH"] = str(profile_path)
+
+            result = subprocess.run(
+                ["bash", str(script_path)],
+                cwd=tmp_path,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+
+            pid_path = tmp_path / "run" / "tabbyapi.pid"
+            self.assertIn("runtime=tabbyapi", result.stdout)
+            self.assertTrue(pid_path.exists())
+            pid = int(pid_path.read_text().strip())
+            os.kill(pid, signal.SIGTERM)
+
     def test_start_model_script_resolves_model_root_hint_and_passes_llama_args(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)

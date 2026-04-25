@@ -91,6 +91,8 @@ for key, value in data.items():
         rendered = ""
     elif isinstance(value, bool):
         rendered = "1" if value else "0"
+    elif isinstance(value, (list, dict)):
+        rendered = json.dumps(value)
     else:
         rendered = str(value)
     print(f"export {key}={shlex.quote(rendered)}")
@@ -171,6 +173,120 @@ resolve_rvllm_mlx_server() {
     return 1
 }
 
+canonical_runtime() {
+    local raw normalized
+    raw="${1:-llama.cpp}"
+    normalized="$(printf '%s' "$raw" | tr '[:upper:]_' '[:lower:]-')"
+    case "$normalized" in
+        llamacpp|llama-cpp|llama.cpp)
+            printf '%s\n' "llama.cpp"
+            ;;
+        mlx-lm)
+            printf '%s\n' "mlx"
+            ;;
+        rvllm|rvllm-mlx)
+            printf '%s\n' "rvllm-mlx"
+            ;;
+        custom|command)
+            printf '%s\n' "command"
+            ;;
+        openai|openai-compatible|endpoint|external)
+            printf '%s\n' "external"
+            ;;
+        lmstudio|lm-studio)
+            printf '%s\n' "lm-studio"
+            ;;
+        text-generation-inference|huggingface-tgi)
+            printf '%s\n' "tgi"
+            ;;
+        oobabooga|text-generation-webui)
+            printf '%s\n' "text-generation-webui"
+            ;;
+        *)
+            printf '%s\n' "$normalized"
+            ;;
+    esac
+}
+
+runtime_default_port() {
+    case "$1" in
+        ollama)
+            printf '%s\n' "11434"
+            ;;
+        lm-studio)
+            printf '%s\n' "1234"
+            ;;
+        sglang)
+            printf '%s\n' "30000"
+            ;;
+        koboldcpp|text-generation-webui)
+            printf '%s\n' "5001"
+            ;;
+        tabbyapi)
+            printf '%s\n' "5000"
+            ;;
+        *)
+            printf '%s\n' "8080"
+            ;;
+    esac
+}
+
+resolve_first_executable() {
+    local candidate
+    for candidate in "$@"; do
+        if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+        if [ -n "$candidate" ] && command -v "$candidate" >/dev/null 2>&1; then
+            command -v "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+append_json_args() {
+    local raw_json="${1:-}"
+    [ -n "$raw_json" ] || return 0
+    local arg
+    while IFS= read -r arg; do
+        cmd+=("$arg")
+    done < <(python3 - "$raw_json" <<'PY'
+import json
+import sys
+
+raw = sys.argv[1]
+try:
+    data = json.loads(raw)
+except json.JSONDecodeError as exc:
+    raise SystemExit(f"SERVER_ARGS_JSON must be a JSON array: {exc}")
+if not isinstance(data, list):
+    raise SystemExit("SERVER_ARGS_JSON must be a JSON array")
+for item in data:
+    print(str(item))
+PY
+)
+}
+
+model_source_for_adapter() {
+    local source
+    for source in "${MODEL_ID:-}" "${MODEL_REPO:-}" "${MODEL_DIR:-}" "${MODEL_PATH:-}"; do
+        if [ -n "$source" ]; then
+            printf '%s\n' "$source"
+            return 0
+        fi
+    done
+    if [ -n "${MODEL_FILE:-}" ]; then
+        local root
+        root="$(detect_model_root || true)"
+        [ -n "$root" ] || return 1
+        printf '%s/%s\n' "$root" "$MODEL_FILE"
+        return 0
+    fi
+    return 1
+}
+
 spawn_detached() {
     local log_path="$1"
     local pid_path="$2"
@@ -184,6 +300,7 @@ import sys
 log_path = os.environ["DETACHED_LOG_PATH"]
 pid_path = os.environ["DETACHED_PID_PATH"]
 env = os.environ.copy()
+working_directory = env.get("WORKING_DIRECTORY") or env.get("WORKDIR") or None
 
 with open(log_path, "ab", buffering=0) as log_fp, open(os.devnull, "rb") as stdin_fp:
     proc = subprocess.Popen(
@@ -194,6 +311,7 @@ with open(log_path, "ab", buffering=0) as log_fp, open(os.devnull, "rb") as stdi
         start_new_session=True,
         close_fds=True,
         env=env,
+        cwd=working_directory,
     )
 pathlib.Path(pid_path).write_text(f"{proc.pid}\n")
 print(proc.pid)
@@ -283,10 +401,39 @@ install_agentlightning() {
     warn "Agent Lightning install skipped"
 }
 
+RUNTIME="$(canonical_runtime "${RUNTIME:-llama.cpp}")"
+REQUEST_MODEL="${REQUEST_MODEL:-${SERVER_MODEL_ID:-$MODEL_PROFILE}}"
+SERVER_MODEL_ID="${SERVER_MODEL_ID:-$REQUEST_MODEL}"
+MODEL_ALIAS="${MODEL_ALIAS:-$REQUEST_MODEL}"
+CONTEXT_SIZE="${CONTEXT_SIZE:-4096}"
+N_PARALLEL="${N_PARALLEL:-1}"
+GPU_LAYERS="${GPU_LAYERS:-999}"
+BATCH_SIZE="${BATCH_SIZE:-512}"
+UBATCH_SIZE="${UBATCH_SIZE:-512}"
+CACHE_TYPE_K="${CACHE_TYPE_K:-f16}"
+CACHE_TYPE_V="${CACHE_TYPE_V:-f16}"
+FLASH_ATTN="${FLASH_ATTN:-1}"
+REASONING="${REASONING:-none}"
+FIT="${FIT:-0}"
+FIT_TARGET="${FIT_TARGET:-0}"
+FIT_CTX="${FIT_CTX:-0}"
+TEMP="${TEMP:-0.7}"
+TOP_P="${TOP_P:-0.95}"
+MAX_TOKENS="${MAX_TOKENS:-2048}"
+PROMPT_CACHE_SIZE="${PROMPT_CACHE_SIZE:-4096}"
+PROMPT_CACHE_BYTES="${PROMPT_CACHE_BYTES:-0}"
+PROMPT_CONCURRENCY="${PROMPT_CONCURRENCY:-1}"
+DECODE_CONCURRENCY="${DECODE_CONCURRENCY:-1}"
+PREFILL_STEP_SIZE="${PREFILL_STEP_SIZE:-512}"
+CHAT_TEMPLATE_ARGS="${CHAT_TEMPLATE_ARGS:-{}}"
+SERVER_ARGS_JSON="${SERVER_ARGS_JSON:-}"
 THREADS="${THREADS:-$(calc_threads)}"
 THREADS_BATCH="${THREADS_BATCH:-$THREADS}"
 HOST="${HOST:-127.0.0.1}"
-PORT="${PORT:-8080}"
+if [ -z "${PORT:-}" ] && [ -z "${BASE_URL:-}" ]; then
+    PORT="$(runtime_default_port "$RUNTIME")"
+fi
+PORT="${PORT:-}"
 BASE_URL="${BASE_URL:-http://${HOST}:${PORT}/v1}"
 BASE_URL="${BASE_URL%/}"
 MODELS_URL="${MODEL_LIST_URL:-$BASE_URL/models}"
@@ -425,7 +572,99 @@ elif [ "$RUNTIME" = "rvllm-mlx" ]; then
             die "rvllm-mlx server failed to become ready for $MODEL_PROFILE"
         fi
     fi
-elif [ "$RUNTIME" = "custom" ] || [ "$RUNTIME" = "command" ]; then
+elif [ "$RUNTIME" = "ollama" ]; then
+    OLLAMA_BIN="$(resolve_first_executable "${SERVER_BIN:-}" "${OLLAMA_BIN:-}" ollama)" || die 'ollama not found; set SERVER_BIN or OLLAMA_BIN in the profile, or add ollama to PATH'
+
+    if wait_for_profile_ready "$HEALTHCHECK_MODE" "$HEALTHCHECK_URL" "${HEALTHCHECK_EXPECT_ID:-${SERVER_MODEL_ID:-}}" 1; then
+        log "Ollama already responding on $HEALTHCHECK_URL"
+    else
+        log "Starting Ollama profile $MODEL_PROFILE"
+        cmd=("$OLLAMA_BIN" serve)
+        append_json_args "$SERVER_ARGS_JSON"
+        spawn_detached "$LOG_PATH" "$PID_PATH" "${cmd[@]}" >/dev/null
+        if ! wait_for_profile_ready "$HEALTHCHECK_MODE" "$HEALTHCHECK_URL" "${HEALTHCHECK_EXPECT_ID:-${SERVER_MODEL_ID:-}}" 120; then
+            tail -n 120 "$LOG_PATH" || true
+            die "Ollama failed to become ready for $MODEL_PROFILE"
+        fi
+    fi
+elif [ "$RUNTIME" = "vllm" ]; then
+    MODEL_SOURCE="$(model_source_for_adapter || true)"
+    [ -n "$MODEL_SOURCE" ] || die "MODEL_REPO, MODEL_ID, MODEL_DIR, MODEL_PATH, or MODEL_FILE is required for vLLM profiles"
+    PYTHON_BIN="$(resolve_first_executable "${PYTHON_BIN:-}" python3 python)" || die 'python not found for vLLM profile'
+
+    if wait_for_profile_ready "$HEALTHCHECK_MODE" "$HEALTHCHECK_URL" "${HEALTHCHECK_EXPECT_ID:-${SERVER_MODEL_ID:-}}" 1; then
+        log "vLLM already responding on $HEALTHCHECK_URL"
+    else
+        log "Starting vLLM profile $MODEL_PROFILE"
+        cmd=("$PYTHON_BIN" -m "${VLLM_MODULE:-vllm.entrypoints.openai.api_server}" --model "$MODEL_SOURCE" --host "$HOST" --port "$PORT")
+        append_json_args "$SERVER_ARGS_JSON"
+        spawn_detached "$LOG_PATH" "$PID_PATH" "${cmd[@]}" >/dev/null
+        if ! wait_for_profile_ready "$HEALTHCHECK_MODE" "$HEALTHCHECK_URL" "${HEALTHCHECK_EXPECT_ID:-${SERVER_MODEL_ID:-}}" 240; then
+            tail -n 120 "$LOG_PATH" || true
+            die "vLLM failed to become ready for $MODEL_PROFILE"
+        fi
+    fi
+elif [ "$RUNTIME" = "sglang" ]; then
+    MODEL_SOURCE="$(model_source_for_adapter || true)"
+    [ -n "$MODEL_SOURCE" ] || die "MODEL_REPO, MODEL_ID, MODEL_DIR, MODEL_PATH, or MODEL_FILE is required for SGLang profiles"
+    PYTHON_BIN="$(resolve_first_executable "${PYTHON_BIN:-}" python3 python)" || die 'python not found for SGLang profile'
+
+    if wait_for_profile_ready "$HEALTHCHECK_MODE" "$HEALTHCHECK_URL" "${HEALTHCHECK_EXPECT_ID:-${SERVER_MODEL_ID:-}}" 1; then
+        log "SGLang already responding on $HEALTHCHECK_URL"
+    else
+        log "Starting SGLang profile $MODEL_PROFILE"
+        cmd=("$PYTHON_BIN" -m "${SGLANG_MODULE:-sglang.launch_server}" --model-path "$MODEL_SOURCE" --host "$HOST" --port "$PORT")
+        append_json_args "$SERVER_ARGS_JSON"
+        spawn_detached "$LOG_PATH" "$PID_PATH" "${cmd[@]}" >/dev/null
+        if ! wait_for_profile_ready "$HEALTHCHECK_MODE" "$HEALTHCHECK_URL" "${HEALTHCHECK_EXPECT_ID:-${SERVER_MODEL_ID:-}}" 240; then
+            tail -n 120 "$LOG_PATH" || true
+            die "SGLang failed to become ready for $MODEL_PROFILE"
+        fi
+    fi
+elif [ "$RUNTIME" = "tgi" ]; then
+    MODEL_SOURCE="$(model_source_for_adapter || true)"
+    [ -n "$MODEL_SOURCE" ] || die "MODEL_REPO, MODEL_ID, MODEL_DIR, MODEL_PATH, or MODEL_FILE is required for TGI profiles"
+    TGI_BIN="$(resolve_first_executable "${SERVER_BIN:-}" "${TGI_SERVER_BIN:-}" text-generation-launcher)" || die 'text-generation-launcher not found; set SERVER_BIN or add it to PATH'
+
+    if wait_for_profile_ready "$HEALTHCHECK_MODE" "$HEALTHCHECK_URL" "${HEALTHCHECK_EXPECT_ID:-${SERVER_MODEL_ID:-}}" 1; then
+        log "TGI already responding on $HEALTHCHECK_URL"
+    else
+        log "Starting TGI profile $MODEL_PROFILE"
+        cmd=("$TGI_BIN" --model-id "$MODEL_SOURCE" --hostname "$HOST" --port "$PORT")
+        append_json_args "$SERVER_ARGS_JSON"
+        spawn_detached "$LOG_PATH" "$PID_PATH" "${cmd[@]}" >/dev/null
+        if ! wait_for_profile_ready "$HEALTHCHECK_MODE" "$HEALTHCHECK_URL" "${HEALTHCHECK_EXPECT_ID:-${SERVER_MODEL_ID:-}}" 300; then
+            tail -n 120 "$LOG_PATH" || true
+            die "TGI failed to become ready for $MODEL_PROFILE"
+        fi
+    fi
+elif [ "$RUNTIME" = "llama-cpp-python" ]; then
+    MODEL_SOURCE="$(model_source_for_adapter || true)"
+    [ -n "$MODEL_SOURCE" ] || die "MODEL_PATH or MODEL_FILE is required for llama-cpp-python profiles"
+    [ -f "$MODEL_SOURCE" ] || die "Model file not found: $MODEL_SOURCE"
+    PYTHON_BIN="$(resolve_first_executable "${PYTHON_BIN:-}" python3 python)" || die 'python not found for llama-cpp-python profile'
+
+    if wait_for_profile_ready "$HEALTHCHECK_MODE" "$HEALTHCHECK_URL" "${HEALTHCHECK_EXPECT_ID:-${SERVER_MODEL_ID:-}}" 1; then
+        log "llama-cpp-python already responding on $HEALTHCHECK_URL"
+    else
+        log "Starting llama-cpp-python profile $MODEL_PROFILE"
+        cmd=("$PYTHON_BIN" -m "${LLAMA_CPP_PYTHON_MODULE:-llama_cpp.server}" --model "$MODEL_SOURCE" --host "$HOST" --port "$PORT" --model_alias "$MODEL_ALIAS")
+        append_json_args "$SERVER_ARGS_JSON"
+        spawn_detached "$LOG_PATH" "$PID_PATH" "${cmd[@]}" >/dev/null
+        if ! wait_for_profile_ready "$HEALTHCHECK_MODE" "$HEALTHCHECK_URL" "${HEALTHCHECK_EXPECT_ID:-${SERVER_MODEL_ID:-}}" 180; then
+            tail -n 120 "$LOG_PATH" || true
+            die "llama-cpp-python failed to become ready for $MODEL_PROFILE"
+        fi
+    fi
+elif [ "$RUNTIME" = "external" ] || [ "$RUNTIME" = "lm-studio" ] || [ "$RUNTIME" = "localai" ] || [ "$RUNTIME" = "jan" ]; then
+    if wait_for_profile_ready "$HEALTHCHECK_MODE" "$HEALTHCHECK_URL" "${HEALTHCHECK_EXPECT_ID:-${SERVER_MODEL_ID:-}}" 1; then
+        log "External profile responding on $HEALTHCHECK_URL"
+    elif [ "$HEALTHCHECK_MODE" = "disabled" ]; then
+        log "External profile has health checks disabled"
+    else
+        die "External runtime '$RUNTIME' is not ready at $HEALTHCHECK_URL; start it outside Model Switchboard or provide START_COMMAND"
+    fi
+elif [ "$RUNTIME" = "command" ] || [ -n "${START_COMMAND:-}" ]; then
     START_COMMAND="${START_COMMAND:-}"
     [ -n "$START_COMMAND" ] || die "START_COMMAND is required for custom runtime profiles"
 
@@ -439,14 +678,29 @@ elif [ "$RUNTIME" = "custom" ] || [ "$RUNTIME" = "command" ]; then
             die "Custom runtime failed to become ready for $MODEL_PROFILE"
         fi
     fi
+elif [ -n "${SERVER_BIN:-}" ]; then
+    [ -n "${SERVER_ARGS_JSON:-}" ] || die "SERVER_ARGS_JSON is required when SERVER_BIN is used for runtime '$RUNTIME' without a native adapter"
+
+    if wait_for_profile_ready "$HEALTHCHECK_MODE" "$HEALTHCHECK_URL" "${HEALTHCHECK_EXPECT_ID:-${SERVER_MODEL_ID:-}}" 1; then
+        log "$RUNTIME already responding on $HEALTHCHECK_URL"
+    else
+        log "Starting generic binary profile $MODEL_PROFILE with runtime $RUNTIME"
+        cmd=("$SERVER_BIN")
+        append_json_args "$SERVER_ARGS_JSON"
+        spawn_detached "$LOG_PATH" "$PID_PATH" "${cmd[@]}" >/dev/null
+        if ! wait_for_profile_ready "$HEALTHCHECK_MODE" "$HEALTHCHECK_URL" "${HEALTHCHECK_EXPECT_ID:-${SERVER_MODEL_ID:-}}" "${START_TIMEOUT_SECONDS:-180}"; then
+            tail -n 120 "$LOG_PATH" || true
+            die "Generic runtime '$RUNTIME' failed to become ready for $MODEL_PROFILE"
+        fi
+    fi
 else
     die "Unsupported runtime '$RUNTIME' in $PROFILE_PATH"
 fi
 
 install_agentlightning || true
 
-printf 'profile=%s\nruntime=%s\nbase_url=http://%s:%s/v1\nrequest_model=%s\nlog=%s\n' \
-    "$MODEL_PROFILE" "$RUNTIME" "$HOST" "$PORT" "$REQUEST_MODEL" "$LOG_PATH"
+printf 'profile=%s\nruntime=%s\nbase_url=%s\nrequest_model=%s\nlog=%s\n' \
+    "$MODEL_PROFILE" "$RUNTIME" "$BASE_URL" "$REQUEST_MODEL" "$LOG_PATH"
 if [ -f "$PID_PATH" ]; then
     printf 'pid=%s\n' "$(cat "$PID_PATH" 2>/dev/null || true)"
 fi

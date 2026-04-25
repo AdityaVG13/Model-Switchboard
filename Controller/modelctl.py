@@ -833,6 +833,8 @@ def load_json_profile(path: pathlib.Path) -> ProfileEnv:
             env[key] = ""
         elif isinstance(value, bool):
             env[key] = "1" if value else "0"
+        elif isinstance(value, (list, dict)):
+            env[key] = json.dumps(value)
         else:
             env[key] = str(value)
     env["PROFILE_NAME"] = path.stem
@@ -1473,6 +1475,19 @@ def model_path_for_profile(env: ProfileEnv, *, base: pathlib.Path = BASE) -> pat
     return None
 
 
+def adapter_model_source(env: ProfileEnv, *, base: pathlib.Path = BASE) -> str | None:
+    for key in ("MODEL_ID", "MODEL_REPO", "MODEL_DIR", "MODEL_PATH"):
+        value = env.get(key, "").strip()
+        if value:
+            return str(expand_profile_path(value)) if key in {"MODEL_DIR", "MODEL_PATH"} else value
+    model_path = model_path_for_profile(env, base=base)
+    return str(model_path) if model_path else None
+
+
+def executable_configured(env: ProfileEnv, *keys: str) -> bool:
+    return bool(resolve_executable(*(env.get(key) for key in keys)))
+
+
 def launch_agent_status() -> LaunchAgentStatusPayload:
     try:
         output = run(["launchctl", "list"], check=False).stdout
@@ -1555,13 +1570,42 @@ def diagnose_profile(
             errors.append("missing MODEL_DIR")
         elif not pathlib.Path(model_dir).exists():
             errors.append(f"MODEL_DIR not found: {model_dir}")
-    elif runtime in {"custom", "command"}:
+    elif runtime == "ollama":
+        if not executable_configured(env, "SERVER_BIN", "OLLAMA_BIN") and not shutil.which("ollama"):
+            errors.append("ollama not found")
+    elif runtime in {"vllm", "sglang", "tgi"}:
+        if not adapter_model_source(env):
+            errors.append(f"missing MODEL_REPO, MODEL_ID, MODEL_DIR, MODEL_PATH, or MODEL_FILE for {runtime}")
+        if runtime == "tgi":
+            if not executable_configured(env, "SERVER_BIN", "TGI_SERVER_BIN") and not shutil.which("text-generation-launcher"):
+                errors.append("text-generation-launcher not found")
+        elif not executable_configured(env, "PYTHON_BIN") and not shutil.which("python3") and not shutil.which("python"):
+            errors.append(f"python not found for {runtime}")
+    elif runtime == "llama-cpp-python":
+        model_source = adapter_model_source(env)
+        if not model_source:
+            errors.append("missing MODEL_PATH or MODEL_FILE for llama-cpp-python")
+        elif not pathlib.Path(model_source).exists():
+            errors.append(f"model file not found: {model_source}")
+        if not executable_configured(env, "PYTHON_BIN") and not shutil.which("python3") and not shutil.which("python"):
+            errors.append("python not found for llama-cpp-python")
+    elif runtime in {"external", "lm-studio", "localai", "jan"}:
+        if healthcheck_mode(env) != "disabled" and not healthcheck_url(env):
+            errors.append("missing BASE_URL or HEALTHCHECK_URL")
+    elif runtime == "command":
         if not env.get("START_COMMAND"):
             errors.append("missing START_COMMAND")
         if healthcheck_mode(env) != "disabled" and not healthcheck_url(env):
             errors.append("missing BASE_URL or HEALTHCHECK_URL")
+    elif env.get("SERVER_BIN"):
+        if not pathlib.Path(env["SERVER_BIN"]).exists():
+            errors.append(f"SERVER_BIN not found: {env['SERVER_BIN']}")
+        elif not os.access(env["SERVER_BIN"], os.X_OK):
+            errors.append(f"SERVER_BIN is not executable: {env['SERVER_BIN']}")
+        if not env.get("SERVER_ARGS_JSON"):
+            errors.append("missing SERVER_ARGS_JSON for generic SERVER_BIN runtime")
     else:
-        warnings.append(f"runtime '{runtime}' has no adapter-specific validation yet")
+        warnings.append(f"runtime '{runtime}' has no adapter-specific validation; use START_COMMAND or SERVER_BIN with SERVER_ARGS_JSON")
 
     if not base_url(env):
         warnings.append("base_url is empty; endpoint health checks may fail")
