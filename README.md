@@ -119,6 +119,37 @@ The installer places a fresh build under `~/Applications/`, registers it with La
 
 ---
 
+## Let your AI set it up
+
+If you already downloaded the app and just want the controller and profiles wired up, give your favorite AI this prompt:
+
+```text
+I already downloaded Model Switchboard on my Mac.
+
+Set up the reference controller for me, create working model profiles for the runtimes I actually have installed, and make the configuration portable instead of hardcoding your own assumptions.
+
+Rules:
+- This is macOS-only, and that is intentional.
+- Do not hardcode Homebrew paths, repo-local build paths, or personal directories unless you first verify they exist on this machine.
+- Prefer profile-driven config:
+  - `MODEL_PATH` or `MODEL_FILE` with `MODEL_ROOT` for llama.cpp
+  - `MODEL_DIR` or `MODEL_REPO` for MLX
+  - `SERVER_BIN` when a runtime binary is not already on PATH
+  - `START_COMMAND` only for truly custom launchers
+- Use the controller contract and profile format documented in this repo's `SETUP.md`.
+- Put profiles in the controller's `model-profiles` directory.
+- Verify that each profile can be started, health-checked, and stopped cleanly.
+- If something is missing, inspect the machine and ask me only the minimum necessary question.
+
+End state:
+- Model Switchboard opens with valid profiles visible
+- `Activate` works
+- health checks go green only when the endpoint is actually ready
+- nothing is tied to one specific Mac beyond what is truly installed here
+```
+
+---
+
 ## First run
 
 *Model Switchboard is the control surface. It does not run models itself.* You need a controller that knows how to launch and health-check models.
@@ -207,37 +238,6 @@ For maintainers, release prep is scriptable instead of hand-editing version file
 ```bash
 python3 Scripts/bump-version.py patch   # or minor / major / x.y.z
 ./Scripts/release-preflight.sh
-```
-
----
-
-## Let your AI set it up
-
-If you already downloaded the app and just want the controller and profiles wired up, give your favorite AI this prompt:
-
-```text
-I already downloaded Model Switchboard on my Mac.
-
-Set up the reference controller for me, create working model profiles for the runtimes I actually have installed, and make the configuration portable instead of hardcoding your own assumptions.
-
-Rules:
-- This is macOS-only, and that is intentional.
-- Do not hardcode Homebrew paths, repo-local build paths, or personal directories unless you first verify they exist on this machine.
-- Prefer profile-driven config:
-  - `MODEL_PATH` or `MODEL_FILE` with `MODEL_ROOT` for llama.cpp
-  - `MODEL_DIR` or `MODEL_REPO` for MLX
-  - `SERVER_BIN` when a runtime binary is not already on PATH
-  - `START_COMMAND` only for truly custom launchers
-- Use the controller contract and profile format documented in this repo's `SETUP.md`.
-- Put profiles in the controller's `model-profiles` directory.
-- Verify that each profile can be started, health-checked, and stopped cleanly.
-- If something is missing, inspect the machine and ask me only the minimum necessary question.
-
-End state:
-- Model Switchboard opens with valid profiles visible
-- `Activate` works
-- health checks go green only when the endpoint is actually ready
-- nothing is tied to one specific Mac beyond what is truly installed here
 ```
 
 ---
