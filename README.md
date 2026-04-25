@@ -41,7 +41,7 @@ Built with **SwiftUI** and `MenuBarExtra`. No Electron, no bundled inference eng
 
 ### Plus adds the numbers.
 
-**CPU and GPU utilization** live in the header, so you know what your machine is doing *without* dropping into Activity Monitor.
+**CPU, RAM, and GPU utilization** live in the header, so you know what your machine is doing *without* dropping into Activity Monitor.
 
 **`Benchmark All`** runs the fleet. **`Reopen Last`** jumps straight back to what you had up. **`Sync Droid`** pushes your managed profiles into Factory Droid's custom-model settings, so the model you just activated is the one Droid uses. It is the first of several planned sync adapters ([see contributing](#contributing)).
 
@@ -65,13 +65,15 @@ Tap **`Export CSV`** and you have a portable report. Every run lands as both JSO
 
 *Same codebase, two apps.* Pick at install time. They live side by side as **Model Switchboard.app** and **Model Switchboard Plus.app** under `~/Applications/`.
 
+The controller contract, profile discovery, runtime tags, and launcher support are shared by both editions. Plus adds the extra operator UI: live utilization badges, benchmarks, reopen-last, and integrations.
+
 | | Base | Plus |
 |---|:---:|:---:|
 | Profile list with live status | ✓ | ✓ |
 | `Activate` / `Start` / `Stop` / `Restart` | ✓ | ✓ |
 | `Refresh` / `Stop All` | ✓ | ✓ |
 | `Launch At Login` + attached Settings / Help | ✓ | ✓ |
-| CPU / GPU utilization badges | - | ✓ |
+| CPU / RAM / GPU utilization badges | - | ✓ |
 | `Benchmark All` + per-profile `Benchmark` | - | ✓ |
 | In-app Benchmarks panel + CSV export | - | ✓ |
 | `Reopen Last` | - | ✓ |
@@ -127,7 +129,7 @@ The installer places a fresh build under `~/Applications/`, registers it with La
 ./Controller/install-model-switchboard-controller.sh
 ```
 
-**2. Drop a profile manifest** into `~/.model-switchboard/model-profiles/` *(the exact path is shown in `Settings`).* A minimal `llama.cpp` example:
+**2. Drop a profile manifest** into the controller's `model-profiles/` folder *(the exact path is shown in `Settings`).* If you run the reference controller in this repo, that is `Controller/model-profiles/`; if you keep a dedicated controller root, it is `<controller-root>/model-profiles/`. A minimal `llama.cpp` example:
 
 ```env
 DISPLAY_NAME=Qwen 3.5 35B Local
