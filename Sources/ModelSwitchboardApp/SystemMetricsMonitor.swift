@@ -5,6 +5,7 @@ import Darwin
 @MainActor
 final class SystemMetricsMonitor: ObservableObject {
     @Published var cpuUsagePercent: Double?
+    @Published var memoryUsagePercent: Double?
     @Published var gpuUsagePercent: Double?
 
     private struct CPUSample {
@@ -38,6 +39,7 @@ final class SystemMetricsMonitor: ObservableObject {
 
     private func sample() {
         cpuUsagePercent = sampleCPUUsage()
+        memoryUsagePercent = sampleMemoryUsage()
         gpuUsagePercent = sampleGPUUsage()
     }
 
@@ -67,6 +69,31 @@ final class SystemMetricsMonitor: ObservableObject {
 
         let busyFraction = max(0, min(1, 1 - (Double(idleDelta) / Double(totalDelta))))
         return busyFraction * 100
+    }
+
+    private func sampleMemoryUsage() -> Double? {
+        var stats = vm_statistics64()
+        var count = mach_msg_type_number_t(MemoryLayout<vm_statistics64_data_t>.size / MemoryLayout<integer_t>.size)
+
+        let result = withUnsafeMutablePointer(to: &stats) { pointer in
+            pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { rebound in
+                host_statistics64(mach_host_self(), HOST_VM_INFO64, rebound, &count)
+            }
+        }
+        guard result == KERN_SUCCESS else { return nil }
+
+        let totalBytes = ProcessInfo.processInfo.physicalMemory
+        guard totalBytes > 0 else { return nil }
+
+        var pageSize: vm_size_t = 0
+        guard host_page_size(mach_host_self(), &pageSize) == KERN_SUCCESS, pageSize > 0 else {
+            return nil
+        }
+
+        let availablePages = UInt64(stats.free_count) + UInt64(stats.speculative_count)
+        let availableBytes = availablePages * UInt64(pageSize)
+        let usedBytes = totalBytes > availableBytes ? totalBytes - availableBytes : 0
+        return min(max((Double(usedBytes) / Double(totalBytes)) * 100, 0), 100)
     }
 
     private func sampleGPUUsage() -> Double? {

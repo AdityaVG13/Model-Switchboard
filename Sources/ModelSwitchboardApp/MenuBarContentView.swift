@@ -163,6 +163,7 @@ struct MenuBarContentView: View {
                 if features.supportsBenchmarks {
                     HStack(spacing: 6) {
                         utilizationBadge(label: "CPU", value: systemMetrics.cpuUsagePercent)
+                        utilizationBadge(label: "RAM", value: systemMetrics.memoryUsagePercent)
                         utilizationBadge(label: "GPU", value: systemMetrics.gpuUsagePercent)
                     }
                 }
