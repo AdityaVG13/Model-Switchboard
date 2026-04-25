@@ -89,15 +89,49 @@ func value<T>(_ element: AXUIElement, _ attr: String, as type: T.Type) -> T? {
     return ref as? T
 }
 
+func stringValue(_ element: AXUIElement, _ attr: String) -> String {
+    value(element, attr, as: String.self) ?? ""
+}
+
+func labels(for element: AXUIElement) -> [String] {
+    [
+        kAXDescriptionAttribute as String,
+        kAXTitleAttribute as String,
+        kAXValueAttribute as String,
+        kAXHelpAttribute as String,
+        kAXIdentifierAttribute as String,
+    ].map { stringValue(element, $0) }
+}
+
+func childElements(of element: AXUIElement) -> [AXUIElement] {
+    [
+        kAXChildrenAttribute as String,
+        kAXVisibleChildrenAttribute as String,
+        kAXContentsAttribute as String,
+    ].flatMap { value(element, $0, as: [AXUIElement].self) ?? [] }
+}
+
+func containsLabel(_ element: AXUIElement, _ target: String, depth: Int = 0) -> Bool {
+    if labels(for: element).contains(target) {
+        return true
+    }
+    if depth >= 8 {
+        return false
+    }
+    for child in childElements(of: element) {
+        if containsLabel(child, target, depth: depth + 1) {
+            return true
+        }
+    }
+    return false
+}
+
 func findButtons(in element: AXUIElement, matches: inout [AXUIElement]) {
     let role = value(element, kAXRoleAttribute, as: String.self) ?? ""
-    let desc = value(element, kAXDescriptionAttribute, as: String.self) ?? ""
-    let title = value(element, kAXTitleAttribute, as: String.self) ?? ""
-    if role == kAXButtonRole as String && (desc == targetDesc || title == targetDesc) {
+    if role == kAXButtonRole as String && containsLabel(element, targetDesc) {
         matches.append(element)
     }
-    let children = value(element, kAXChildrenAttribute, as: [AXUIElement].self) ?? []
-    for child in children {
+    for child in childElements(of: element) {
         findButtons(in: child, matches: &matches)
     }
 }
@@ -144,14 +178,58 @@ request.usesLanguageCorrection = false
 let handler = VNImageRequestHandler(cgImage: cg, options: [:])
 try handler.perform([request])
 
+struct TextBox {
+    let text: String
+    let centerX: Double
+    let centerY: Double
+    let minX: Double
+    let maxX: Double
+    let minY: Double
+    let maxY: Double
+}
+
+var boxes: [TextBox] = []
 for obs in request.results ?? [] {
     guard let candidate = obs.topCandidates(1).first else { continue }
     let text = candidate.string
+    let box = obs.boundingBox
+    let minX = box.origin.x * Double(rep.pixelsWide)
+    let maxX = (box.origin.x + box.size.width) * Double(rep.pixelsWide)
+    let minY = (1.0 - (box.origin.y + box.size.height)) * Double(rep.pixelsHigh)
+    let maxY = (1.0 - box.origin.y) * Double(rep.pixelsHigh)
+    let centerX = (minX + maxX) / 2.0
+    let centerY = (minY + maxY) / 2.0
+    boxes.append(TextBox(text: text, centerX: centerX, centerY: centerY, minX: minX, maxX: maxX, minY: minY, maxY: maxY))
     if text.lowercased().contains(query) {
-        let box = obs.boundingBox
-        let centerX = (box.origin.x + (box.size.width / 2.0)) * Double(rep.pixelsWide)
-        let centerY = (1.0 - (box.origin.y + (box.size.height / 2.0))) * Double(rep.pixelsHigh)
         print("\(centerX)|\(centerY)|\(text)")
+        exit(0)
+    }
+}
+
+let lineTolerance = max(12.0, Double(rep.pixelsHigh) * 0.006)
+let sortedBoxes = boxes.sorted {
+    if abs($0.centerY - $1.centerY) > lineTolerance {
+        return $0.centerY < $1.centerY
+    }
+    return $0.centerX < $1.centerX
+}
+var lines: [[TextBox]] = []
+for box in sortedBoxes {
+    if let last = lines.indices.last, let first = lines[last].first, abs(first.centerY - box.centerY) <= lineTolerance {
+        lines[last].append(box)
+    } else {
+        lines.append([box])
+    }
+}
+for line in lines {
+    let ordered = line.sorted { $0.centerX < $1.centerX }
+    let text = ordered.map(\.text).joined(separator: " ")
+    if text.lowercased().contains(query) {
+        let minX = ordered.map(\.minX).min() ?? 0
+        let maxX = ordered.map(\.maxX).max() ?? 0
+        let minY = ordered.map(\.minY).min() ?? 0
+        let maxY = ordered.map(\.maxY).max() ?? 0
+        print("\((minX + maxX) / 2.0)|\((minY + maxY) / 2.0)|\(text)")
         exit(0)
     }
 }
@@ -261,7 +339,27 @@ for _ in range(20):
         time.sleep(0.5)
 else:
     raise last
-rows = sorted(obj["statuses"], key=lambda row: row["display_name"].lower())
+def is_loopback(host):
+    return host in {"", "127.0.0.1", "::1", "localhost"}
+def port_rank(row):
+    try:
+        return int(row.get("port") or 0)
+    except (TypeError, ValueError):
+        return 0
+def display_key(row):
+    running_rank = 0 if row.get("running") else 1
+    ready_rank = 0 if row.get("ready") else 1
+    host = (row.get("host") or "").lower()
+    return (
+        running_rank,
+        ready_rank if row.get("running") else 0,
+        0 if is_loopback(host) else 1,
+        host,
+        port_rank(row),
+        (row.get("display_name") or "").lower(),
+        (row.get("profile") or "").lower(),
+    )
+rows = sorted(obj["statuses"], key=display_key)
 print(rows[0]["profile"])
 PY
 }
@@ -302,7 +400,7 @@ launch_app() {
   pkill -f "$APP_PATH/Contents/MacOS/$APP_BINARY_NAME" || true
   sleep 1
   for _ in {1..5}; do
-    if open -a "$APP_PATH" >/dev/null 2>&1; then
+    if open "$APP_PATH" >/dev/null 2>&1; then
       if app_pid >/dev/null 2>&1; then
         sleep 0.8
         return 0
@@ -703,6 +801,8 @@ press_button Settings
 wait_for_inspector_absent || fail "settings toggle close"
 pass "settings toggle close"
 
+launch_app
+open_menu
 press_button Help
 wait_for_inspector_present || fail "help sidebar missing"
 sleep 0.3
