@@ -1,7 +1,16 @@
 #!/usr/bin/env python3
 import json
 import pathlib
-from typing import NotRequired, TypedDict
+from typing import TypedDict
+
+try:
+    from typing import NotRequired
+except ImportError:
+    class _NotRequired:
+        def __getitem__(self, item):
+            return item
+
+    NotRequired = _NotRequired()
 
 from contracts import ProfileEnv
 from modelctl import load_env_profile
