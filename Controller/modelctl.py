@@ -1088,7 +1088,20 @@ def restart_profile(name: str) -> None:
 
 
 def stop_all() -> None:
+    benchmark_pid = read_pid("benchmark")
+    if benchmark_pid:
+        terminate_pid(benchmark_pid)
+        benchmark_pid_path().unlink(missing_ok=True)
+    profiles = load_profiles()
+    errors: list[str] = []
+    for name in sorted(profiles):
+        try:
+            stop_profile(name)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{name}: {exc}")
     run(["bash", str(STOP_ALL_SCRIPT)], capture=False)
+    if errors:
+        raise RuntimeError("Failed to stop profiles: " + "; ".join(errors))
 
 
 
