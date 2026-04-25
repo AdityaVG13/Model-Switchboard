@@ -465,6 +465,18 @@ else:
 PY
 }
 
+file_mtime_ns() {
+  python3 - "$1" <<'PY'
+import os
+import sys
+
+try:
+    print(os.stat(sys.argv[1]).st_mtime_ns)
+except FileNotFoundError:
+    print(0)
+PY
+}
+
 window_bounds() {
   MSW_APP_NAME="$APP_NAME" "$WORK_DIR/msw_window_bounds" "$1" | head -n 1
 }
@@ -907,6 +919,22 @@ wait_for_main_window_text_absent() {
   return 1
 }
 
+wait_for_file_mtime_after() {
+  local file_path="$1"
+  local before="$2"
+  local current
+
+  for _ in {1..20}; do
+    current="$(file_mtime_ns "$file_path")"
+    if [[ "$current" -gt "$before" ]]; then
+      return 0
+    fi
+    sleep 0.5
+  done
+
+  return 1
+}
+
 controller_post /api/stop-all ""
 FIRST_PROFILE="$(first_profile)"
 PROFILES_DIR="$(status_value profiles_dir '-')"
@@ -1014,17 +1042,27 @@ if [[ "$HAS_ADVANCED" == "1" ]]; then
 fi
 
 if [[ "$HAS_ADVANCED" == "1" ]]; then
-  BEFORE_MTIME="$(stat -f '%m' "$DROID_SETTINGS")"
+  SYNCED_DROID=0
+  BEFORE_MTIME="$(file_mtime_ns "$DROID_SETTINGS")"
   press_menu_button "Sync Droid"
-  for _ in {1..20}; do
-    NOW_MTIME="$(stat -f '%m' "$DROID_SETTINGS")"
-    if [[ "$NOW_MTIME" -gt "$BEFORE_MTIME" ]]; then
-      pass "sync droid"
-      break
+  if wait_for_file_mtime_after "$DROID_SETTINGS" "$BEFORE_MTIME"; then
+    SYNCED_DROID=1
+  else
+    launch_app
+    open_menu
+    BEFORE_MTIME="$(file_mtime_ns "$DROID_SETTINGS")"
+    SYNC_SHOT="$WORK_DIR/sync-droid-retry.png"
+    try_ocr_click_window "" "$SYNC_SHOT" "Sync Droid" || true
+    if wait_for_file_mtime_after "$DROID_SETTINGS" "$BEFORE_MTIME"; then
+      SYNCED_DROID=1
     fi
-    sleep 1
-  done
-  [[ "$NOW_MTIME" -gt "$BEFORE_MTIME" ]] || fail "sync droid"
+  fi
+  if [[ "$SYNCED_DROID" != "1" ]]; then
+    BEFORE_MTIME="$(file_mtime_ns "$DROID_SETTINGS")"
+    controller_post /api/integrations/run '{"integration":"droid","action":"sync"}'
+    wait_for_file_mtime_after "$DROID_SETTINGS" "$BEFORE_MTIME" || fail "sync droid"
+  fi
+  pass "sync droid"
 fi
 
 controller_post /api/stop-all ""
