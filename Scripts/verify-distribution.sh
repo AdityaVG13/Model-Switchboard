@@ -22,6 +22,7 @@ APP_PATH="${1:-$DEFAULT_APP_PATH}"
 DMG_PATH="${2:-$DEFAULT_DMG_PATH}"
 
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+"$ROOT_DIR/Scripts/verify-privacy.sh" "$APP_PATH"
 
 SIGNATURE_INFO="$(codesign -dv --verbose=4 "$APP_PATH" 2>&1 || true)"
 if grep -q "Authority=Developer ID Application" <<<"$SIGNATURE_INFO"; then

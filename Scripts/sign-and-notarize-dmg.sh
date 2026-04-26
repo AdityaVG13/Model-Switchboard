@@ -37,6 +37,7 @@ codesign \
   --timestamp \
   --sign "$IDENTITY" \
   "$APP_PATH"
+"$ROOT_DIR/Scripts/verify-privacy.sh" "$APP_PATH"
 
 APP_VARIANT="$APP_VARIANT" SKIP_BUILD=1 "$ROOT_DIR/Scripts/build-dmg.sh" >/dev/null
 

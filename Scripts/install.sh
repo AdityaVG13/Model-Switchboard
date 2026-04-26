@@ -23,7 +23,6 @@ INSTALL_DIR="${INSTALL_DIR:-$HOME/Applications}"
 SYSTEM_APPLICATIONS_DIR="/Applications"
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 CONFIGURATION="${CONFIGURATION:-Release}"
-DERIVED_APP="$ROOT_DIR/.xcodebuild/Build/Products/$CONFIGURATION/$PRODUCT_NAME"
 DIST_APP="$ROOT_DIR/dist/$APP_NAME"
 LEGACY_DIST_APP="${LEGACY_APP_NAME:+$ROOT_DIR/dist/$LEGACY_APP_NAME}"
 INSTALL_APP="$INSTALL_DIR/$APP_NAME"
@@ -38,14 +37,12 @@ mkdir -p "$INSTALL_DIR"
 pkill -f 'ModelSwitchboard(Plus)?(\.app/Contents/MacOS/ModelSwitchboard(Plus)?|App)' >/dev/null 2>&1 || true
 sleep 1
 
-APP_VARIANT="$APP_VARIANT" CONFIGURATION="$CONFIGURATION" "$ROOT_DIR/Scripts/build-xcode-app.sh" >/dev/null
-
-rm -rf "$DIST_APP" "$INSTALL_APP"
+rm -rf "$INSTALL_APP"
 if [ -n "$LEGACY_DIST_APP" ]; then
   rm -rf "$LEGACY_DIST_APP" "$LEGACY_INSTALL_APP"
 fi
-cp -R "$DERIVED_APP" "$DIST_APP"
-cp -R "$DERIVED_APP" "$INSTALL_APP"
+APP_VARIANT="$APP_VARIANT" CONFIGURATION="$CONFIGURATION" "$ROOT_DIR/Scripts/build-app.sh" >/dev/null
+cp -R "$DIST_APP" "$INSTALL_APP"
 
 if [ -w "$SYSTEM_APPLICATIONS_DIR" ]; then
   rm -rf "$SYSTEM_INSTALL_APP"
@@ -58,6 +55,7 @@ xattr -dr com.apple.quarantine "$DIST_APP" >/dev/null 2>&1 || true
 xattr -dr com.apple.quarantine "$INSTALL_APP" >/dev/null 2>&1 || true
 codesign --force --deep --sign - "$DIST_APP" >/dev/null 2>&1 || true
 codesign --force --deep --sign - "$INSTALL_APP" >/dev/null 2>&1 || true
+"$ROOT_DIR/Scripts/verify-privacy.sh" "$INSTALL_APP" >/dev/null
 if command -v SetFile >/dev/null 2>&1; then
   SetFile -a E "$DIST_APP" >/dev/null 2>&1 || true
   SetFile -a E "$INSTALL_APP" >/dev/null 2>&1 || true

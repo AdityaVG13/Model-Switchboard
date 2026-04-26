@@ -71,10 +71,10 @@ class ModelCtlTests(unittest.TestCase):
     def test_log_path_sanitizes_model_alias_paths(self) -> None:
         env = {
             "PROFILE_NAME": "supergemma31b-rvllm-mlx",
-            "MODEL_ALIAS": "/Users/aditya/AI/models/gemma",
+            "MODEL_ALIAS": "/opt/models/gemma",
         }
 
-        self.assertEqual(MODULE.log_path(env), "/tmp/_Users_aditya_AI_models_gemma.log")
+        self.assertEqual(MODULE.log_path(env), "/tmp/_opt_models_gemma.log")
 
     def test_diagnose_profile_reports_model_root_hint_fallbacks_when_model_path_is_missing(self) -> None:
         env = {

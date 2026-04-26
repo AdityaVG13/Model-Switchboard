@@ -25,6 +25,7 @@ pass "version format"
 require_file "Scripts/sign-and-notarize-dmg.sh"
 require_file "Scripts/verify-distribution.sh"
 require_file "Scripts/verify-installed-app.sh"
+require_file "Scripts/verify-privacy.sh"
 require_file "Scripts/bump-version.py"
 require_file ".github/workflows/release.yml"
 require_file "README.md"
@@ -39,6 +40,7 @@ require_executable "Scripts/check-cycles.py"
 require_executable "Scripts/sign-and-notarize-dmg.sh"
 require_executable "Scripts/verify-distribution.sh"
 require_executable "Scripts/verify-installed-app.sh"
+require_executable "Scripts/verify-privacy.sh"
 pass "release scripts executable"
 
 MARKETING_VERSION="$(awk '/MARKETING_VERSION:/ {print $2; exit}' project.yml)"
@@ -65,6 +67,9 @@ for secret in "${required_secrets[@]}"; do
   grep -Fq "secrets.$secret" .github/workflows/release.yml || fail "release workflow missing secret reference: $secret"
 done
 pass "release workflow secret wiring"
+
+"$ROOT_DIR/Scripts/verify-privacy.sh"
+pass "privacy audit"
 
 if [[ "${MSW_PREFLIGHT_SKIP_TESTS:-0}" != "1" ]]; then
   note "running swift test"
@@ -97,10 +102,12 @@ fi
 if [[ "${MSW_PREFLIGHT_SKIP_BUILDS:-0}" != "1" ]]; then
   note "building base app"
   ./Scripts/build-app.sh
+  ./Scripts/verify-distribution.sh
   pass "base app build"
 
   note "building plus app"
   APP_VARIANT=plus ./Scripts/build-app.sh
+  APP_VARIANT=plus ./Scripts/verify-distribution.sh
   pass "plus app build"
 else
   note "skipping app builds (MSW_PREFLIGHT_SKIP_BUILDS=1)"

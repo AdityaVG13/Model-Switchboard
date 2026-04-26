@@ -13,10 +13,14 @@ on:
       - "CHANGELOG.md"
       - "project.yml"
       - ".github/workflows/release.yml"
+      - "Scripts/build-app.sh"
+      - "Scripts/build-dmg.sh"
+      - "Scripts/build-xcode-app.sh"
       - "Scripts/release-preflight.sh"
       - "Scripts/sign-and-notarize-dmg.sh"
       - "Scripts/verify-distribution.sh"
       - "Scripts/verify-installed-app.sh"
+      - "Scripts/verify-privacy.sh"
       - "Scripts/bump-version.py"
 
 jobs:
