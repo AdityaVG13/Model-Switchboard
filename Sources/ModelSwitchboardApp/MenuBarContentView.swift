@@ -40,6 +40,7 @@ struct MenuBarContentView: View {
     @State private var hostWindow: NSWindow?
     @State private var inspectorController = InspectorPanelController()
     @StateObject private var systemMetrics = SystemMetricsMonitor()
+    @State private var activeResizeStartFrame: NSRect?
 
     private static let clockFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -115,6 +116,13 @@ struct MenuBarContentView: View {
             .frame(width: mainPanelWidth, height: panelHeight)
             .background(.thickMaterial)
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay {
+                HStack(spacing: 0) {
+                    resizeHandle(.leading)
+                    Spacer(minLength: 0)
+                    resizeHandle(.trailing)
+                }
+            }
     }
 
     private var mainPanel: some View {
@@ -349,6 +357,50 @@ struct MenuBarContentView: View {
             .accessibilityHidden(true)
     }
 
+    private func resizeHandle(_ edge: DashboardResizeEdge) -> some View {
+        Rectangle()
+            .fill(.clear)
+            .frame(width: DashboardResizeGeometry.edgeHitWidth)
+            .contentShape(Rectangle())
+            .gesture(resizeGesture(edge))
+            .help("Resize dashboard")
+            .onHover { isHovering in
+                if isHovering {
+                    NSCursor.resizeLeftRight.push()
+                } else {
+                    NSCursor.pop()
+                }
+            }
+    }
+
+    private func resizeGesture(_ edge: DashboardResizeEdge) -> some Gesture {
+        DragGesture(minimumDistance: 2, coordinateSpace: .global)
+            .onChanged { value in
+                guard let hostWindow else { return }
+                let startFrame = activeResizeStartFrame ?? hostWindow.frame
+                if activeResizeStartFrame == nil {
+                    activeResizeStartFrame = startFrame
+                }
+                let nextFrame = DashboardResizeGeometry.resizedFrame(
+                    from: startFrame,
+                    edge: edge,
+                    translationX: value.translation.width,
+                    minWidth: minMainPanelWidth,
+                    maxWidth: maxMainPanelWidth
+                )
+                hostWindow.setFrame(nextFrame, display: true)
+                let nextWidth = Double(nextFrame.width)
+                if abs(storedMainPanelWidth - nextWidth) > 0.5 {
+                    storedMainPanelWidth = nextWidth
+                }
+                synchronizeInspectorWindow()
+            }
+            .onEnded { _ in
+                activeResizeStartFrame = nil
+                synchronizeInspectorWindow()
+            }
+    }
+
     private func utilizationBadge(label: String, value: Double?) -> some View {
         let text: String
         if let value {
@@ -547,5 +599,36 @@ struct MenuBarContentView: View {
         window.minSize = NSSize(width: minMainPanelWidth, height: panelHeight)
         window.maxSize = NSSize(width: maxMainPanelWidth, height: panelHeight)
         window.resizeIncrements = NSSize(width: 1, height: 1)
+    }
+}
+
+enum DashboardResizeEdge {
+    case leading
+    case trailing
+}
+
+struct DashboardResizeGeometry {
+    static let edgeHitWidth: CGFloat = 10
+
+    static func resizedFrame(
+        from startFrame: NSRect,
+        edge: DashboardResizeEdge,
+        translationX: CGFloat,
+        minWidth: CGFloat,
+        maxWidth: CGFloat
+    ) -> NSRect {
+        let rawWidth = switch edge {
+        case .leading:
+            startFrame.width - translationX
+        case .trailing:
+            startFrame.width + translationX
+        }
+        let nextWidth = min(max(rawWidth, minWidth), maxWidth)
+        var frame = startFrame
+        frame.size.width = nextWidth
+        if edge == .leading {
+            frame.origin.x = startFrame.maxX - nextWidth
+        }
+        return frame
     }
 }

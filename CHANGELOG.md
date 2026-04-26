@@ -8,6 +8,7 @@ All notable changes to this project are documented in this file.
 - Added first-class runtime labels and tags for current OpenAI-compatible local launchers including Mistral.rs, MLC-LLM, LightLLM, FastChat, OpenLLM, Nexa, MLX Omni Server, MLX Serve, LiteLLM, TensorRT-LLM, and ONNX Runtime GenAI.
 
 ### Fixed
+- Added explicit dashboard edge resize handles so resizing works from the left side of the menu window as well as the right.
 - Preferred local model directories and files before remote model IDs when a profile provides both, avoiding accidental network fetches for adapter-based launchers.
 - Preserved runtime labels, tags, and launch mode through Swift status mutations so profile cards keep displaying the controller's real runtime metadata.
 
