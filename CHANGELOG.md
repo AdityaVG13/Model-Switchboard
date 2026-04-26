@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.1.2] - 2026-04-26
+
+### Added
+- Added a release privacy audit that scans tracked source and built app bundles for local user paths, private-key material, and common token-shaped secret values.
+- Added README coverage for supported runtimes, providers, external endpoints, and model-level runtime tags.
+
+### Changed
+- Release verification now runs the privacy audit against app bundles before publication, and the installer now installs from the same stripped build output used for distribution.
+
+### Fixed
+- Stripped Mach-O debug/source metadata before signing so public DMGs and locally installed apps do not retain local build paths.
+- Removed a personal path from a controller test fixture.
+
 ## [1.1.1] - 2026-04-26
 
 ### Added
