@@ -47,6 +47,27 @@ class ModelCtlTests(unittest.TestCase):
 
         self.assertEqual(MODULE.model_path_for_profile(env), Path("/direct/model.gguf"))
 
+    def test_adapter_model_source_prefers_local_sources_before_remote_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            model_dir = Path(tmpdir) / "mlx-model"
+            model_dir.mkdir()
+            env = {
+                "MODEL_DIR": str(model_dir),
+                "MODEL_FILE": "fallback.gguf",
+                "MODEL_ROOT": tmpdir,
+                "MODEL_ID": "remote/id",
+                "MODEL_REPO": "remote/repo",
+            }
+
+            self.assertEqual(MODULE.adapter_model_source(env), str(model_dir))
+
+            env.pop("MODEL_DIR")
+            env["MODEL_PATH"] = str(Path(tmpdir) / "direct.gguf")
+            self.assertEqual(MODULE.adapter_model_source(env), env["MODEL_PATH"])
+
+            env.pop("MODEL_PATH")
+            self.assertEqual(MODULE.adapter_model_source(env), str(Path(tmpdir) / "fallback.gguf"))
+
     def test_log_path_sanitizes_model_alias_paths(self) -> None:
         env = {
             "PROFILE_NAME": "supergemma31b-rvllm-mlx",
@@ -138,6 +159,33 @@ class ModelCtlTests(unittest.TestCase):
             ["vllm-mlx", "managed", "openai-compatible", "mlx", "server", "apple-silicon"],
         )
 
+    def test_runtime_metadata_keeps_named_command_runtime_label(self) -> None:
+        env = {
+            "RUNTIME": "ddtree_mlx",
+            "START_COMMAND": "/opt/ddtree/start",
+        }
+
+        self.assertEqual(MODULE.canonical_runtime(env["RUNTIME"]), "ddtree-mlx")
+        self.assertEqual(MODULE.runtime_spec(env)["label"], "DDTree MLX")
+        self.assertEqual(MODULE.runtime_spec(env)["launch_mode"], "command")
+        self.assertIn("speculative-decoding", MODULE.runtime_tags(env))
+
+    def test_runtime_metadata_covers_named_launcher_ecosystem(self) -> None:
+        cases = {
+            "mistral-rs": ("mistral.rs", "mistral.rs", "rust"),
+            "mlx-omni": ("mlx-omni-server", "MLX Omni Server", "anthropic-compatible"),
+            "mlc": ("mlc-llm", "MLC-LLM", "metal"),
+            "litellm-proxy": ("litellm", "LiteLLM", "proxy"),
+            "nexa-sdk": ("nexa", "Nexa SDK", "multimodal"),
+        }
+
+        for raw, (canonical, label, tag) in cases.items():
+            with self.subTest(runtime=raw):
+                env = {"RUNTIME": raw}
+                self.assertEqual(MODULE.canonical_runtime(raw), canonical)
+                self.assertEqual(MODULE.runtime_spec(env)["label"], label)
+                self.assertIn(tag, MODULE.runtime_tags(env))
+
     def test_runtime_spec_treats_start_command_as_command_launch_mode(self) -> None:
         env = {
             "RUNTIME": "lmstudio",
@@ -146,6 +194,32 @@ class ModelCtlTests(unittest.TestCase):
 
         self.assertEqual(MODULE.canonical_runtime(env["RUNTIME"]), "lm-studio")
         self.assertEqual(MODULE.runtime_spec(env)["launch_mode"], "command")
+
+    def test_diagnose_honors_external_launch_mode_for_native_runtime(self) -> None:
+        env = {
+            "PROFILE_NAME": "external-vllm",
+            "DISPLAY_NAME": "External vLLM",
+            "RUNTIME": "vllm",
+            "LAUNCH_MODE": "external",
+            "REQUEST_MODEL": "qwen",
+            "SERVER_MODEL_ID": "qwen",
+            "BASE_URL": "http://127.0.0.1:8000/v1",
+        }
+
+        with mock.patch.object(
+            MODULE,
+            "status_for_profile",
+            return_value={
+                "running": False,
+                "ready": False,
+                "pid": None,
+                "base_url": "http://127.0.0.1:8000/v1",
+            },
+        ):
+            report = MODULE.diagnose_profile("external-vllm", env)
+
+        self.assertNotIn("missing MODEL_REPO, MODEL_ID, MODEL_DIR, MODEL_PATH, or MODEL_FILE for vllm", report["errors"])
+        self.assertEqual(report["launch_mode"], "external")
 
     def test_terminate_pid_signals_process_group_before_process(self) -> None:
         with (
@@ -527,6 +601,7 @@ class ModelCtlTests(unittest.TestCase):
                     parser.add_argument("--model-dir")
                     parser.add_argument("--host", default="127.0.0.1")
                     parser.add_argument("--port", type=int, required=True)
+                    parser.add_argument("--ctx-len")
                     args = parser.parse_args()
 
                     class Handler(BaseHTTPRequestHandler):
@@ -575,7 +650,8 @@ class ModelCtlTests(unittest.TestCase):
                       "PORT": "{port}",
                       "REQUEST_MODEL": "supergemma-local",
                       "SERVER_MODEL_ID": "supergemma-local",
-                      "MODEL_ALIAS": "{log_alias}"
+                      "MODEL_ALIAS": "{log_alias}",
+                      "SERVER_ARGS_JSON": ["--ctx-len", "32768"]
                     }}
                     """
                 )

@@ -208,6 +208,30 @@ canonical_runtime() {
         vllm_mlx|vllm-mlx)
             printf '%s\n' "vllm-mlx"
             ;;
+        ddtree|ddtree_mlx|ddtree-mlx)
+            printf '%s\n' "ddtree-mlx"
+            ;;
+        mlx_vlm|mlx-vlm)
+            printf '%s\n' "mlx-vlm"
+            ;;
+        mlx-omni|mlx-omni-server)
+            printf '%s\n' "mlx-omni-server"
+            ;;
+        mlx-openai|mlx-openai-server)
+            printf '%s\n' "mlx-openai-server"
+            ;;
+        mlx-llm-server)
+            printf '%s\n' "mlx-llm-server"
+            ;;
+        mlx-serve)
+            printf '%s\n' "mlx-serve"
+            ;;
+        mlx-engine|mlxengine)
+            printf '%s\n' "mlxengine"
+            ;;
+        local-ai)
+            printf '%s\n' "localai"
+            ;;
         custom|command)
             printf '%s\n' "command"
             ;;
@@ -223,6 +247,45 @@ canonical_runtime() {
         oobabooga|text-generation-webui)
             printf '%s\n' "text-generation-webui"
             ;;
+        kobold-cpp)
+            printf '%s\n' "koboldcpp"
+            ;;
+        exllama|exllama-v2|exllamav2)
+            printf '%s\n' "exllamav2"
+            ;;
+        aphrodite-engine)
+            printf '%s\n' "aphrodite"
+            ;;
+        mistral-rs|mistralrs|mistral.rs)
+            printf '%s\n' "mistral.rs"
+            ;;
+        mlc|mlc-llm)
+            printf '%s\n' "mlc-llm"
+            ;;
+        fast-chat)
+            printf '%s\n' "fastchat"
+            ;;
+        bentoml-openllm)
+            printf '%s\n' "openllm"
+            ;;
+        nexa-sdk|nexaai)
+            printf '%s\n' "nexa"
+            ;;
+        litellm-proxy)
+            printf '%s\n' "litellm"
+            ;;
+        hf-transformers|huggingface-transformers)
+            printf '%s\n' "transformers"
+            ;;
+        nvidia-triton)
+            printf '%s\n' "triton"
+            ;;
+        tensorrtllm)
+            printf '%s\n' "tensorrt-llm"
+            ;;
+        ort-genai)
+            printf '%s\n' "onnxruntime-genai"
+            ;;
         *)
             printf '%s\n' "$normalized"
             ;;
@@ -231,11 +294,17 @@ canonical_runtime() {
 
 runtime_default_port() {
     case "$1" in
-        ollama)
+        ollama|ollmlx)
             printf '%s\n' "11434"
             ;;
-        lm-studio)
+        lm-studio|mistral.rs)
             printf '%s\n' "1234"
+            ;;
+        openllm)
+            printf '%s\n' "3000"
+            ;;
+        litellm)
+            printf '%s\n' "4000"
             ;;
         sglang)
             printf '%s\n' "30000"
@@ -292,7 +361,7 @@ PY
 
 model_source_for_adapter() {
     local source
-    for source in "${MODEL_ID:-}" "${MODEL_REPO:-}" "${MODEL_DIR:-}" "${MODEL_PATH:-}"; do
+    for source in "${MODEL_DIR:-}" "${MODEL_PATH:-}"; do
         if [ -n "$source" ]; then
             printf '%s\n' "$source"
             return 0
@@ -305,6 +374,12 @@ model_source_for_adapter() {
         printf '%s/%s\n' "$root" "$MODEL_FILE"
         return 0
     fi
+    for source in "${MODEL_ID:-}" "${MODEL_REPO:-}"; do
+        if [ -n "$source" ]; then
+            printf '%s\n' "$source"
+            return 0
+        fi
+    done
     return 1
 }
 
@@ -545,6 +620,7 @@ if [ "$RUNTIME" = "llama.cpp" ]; then
         if [ "${USE_MLOCK:-0}" = "1" ]; then
             cmd+=(--mlock)
         fi
+        append_json_args "$SERVER_ARGS_JSON"
         GGML_METAL_N_CB="${METAL_N_CB:-1}" spawn_detached "$LOG_PATH" "$PID_PATH" "${cmd[@]}" >/dev/null
         if ! wait_for_profile_ready "$HEALTHCHECK_MODE" "$HEALTHCHECK_URL" "$SERVER_MODEL_ID" 90; then
             tail -n 80 "$LOG_PATH" || true
@@ -578,6 +654,7 @@ elif [ "$RUNTIME" = "mlx" ]; then
             --prefill-step-size "$PREFILL_STEP_SIZE"
             --chat-template-args "$CHAT_TEMPLATE_ARGS"
         )
+        append_json_args "$SERVER_ARGS_JSON"
         spawn_detached "$LOG_PATH" "$PID_PATH" "${cmd[@]}" >/dev/null
         if ! wait_for_profile_ready "$HEALTHCHECK_MODE" "$HEALTHCHECK_URL" "$SERVER_MODEL_ID" 180; then
             tail -n 120 "$LOG_PATH" || true
@@ -600,6 +677,7 @@ elif [ "$RUNTIME" = "rvllm-mlx" ]; then
             --host "$HOST"
             --port "$PORT"
         )
+        append_json_args "$SERVER_ARGS_JSON"
         spawn_detached "$LOG_PATH" "$PID_PATH" "${cmd[@]}" >/dev/null
         if ! wait_for_profile_ready "$HEALTHCHECK_MODE" "$HEALTHCHECK_URL" "$SERVER_MODEL_ID" 180; then
             tail -n 120 "$LOG_PATH" || true
@@ -746,13 +824,13 @@ elif [ "$RUNTIME" = "command" ] || [ -n "${START_COMMAND:-}" ]; then
     [ -n "$START_COMMAND" ] || die "START_COMMAND is required for custom runtime profiles"
 
     if wait_for_profile_ready "$HEALTHCHECK_MODE" "$HEALTHCHECK_URL" "${HEALTHCHECK_EXPECT_ID:-${SERVER_MODEL_ID:-}}" 1; then
-        log "Custom profile already responding on $HEALTHCHECK_URL"
+        log "$RUNTIME profile already responding on $HEALTHCHECK_URL"
     else
-        log "Starting custom profile $MODEL_PROFILE"
+        log "Starting $RUNTIME profile $MODEL_PROFILE"
         spawn_detached "$LOG_PATH" "$PID_PATH" bash -lc "$START_COMMAND" >/dev/null
         if ! wait_for_profile_ready "$HEALTHCHECK_MODE" "$HEALTHCHECK_URL" "${HEALTHCHECK_EXPECT_ID:-${SERVER_MODEL_ID:-}}" 120; then
             tail -n 120 "$LOG_PATH" || true
-            die "Custom runtime failed to become ready for $MODEL_PROFILE"
+            die "$RUNTIME runtime failed to become ready for $MODEL_PROFILE"
         fi
     fi
 elif [ -n "${SERVER_BIN:-}" ]; then
@@ -771,7 +849,13 @@ elif [ -n "${SERVER_BIN:-}" ]; then
         fi
     fi
 else
-    die "Unsupported runtime '$RUNTIME' in $PROFILE_PATH"
+    if wait_for_profile_ready "$HEALTHCHECK_MODE" "$HEALTHCHECK_URL" "${HEALTHCHECK_EXPECT_ID:-${SERVER_MODEL_ID:-}}" 1; then
+        log "$RUNTIME external profile responding on $HEALTHCHECK_URL"
+    elif [ "$HEALTHCHECK_MODE" = "disabled" ]; then
+        log "$RUNTIME profile has health checks disabled"
+    else
+        die "Runtime '$RUNTIME' is not ready at $HEALTHCHECK_URL; provide START_COMMAND, SERVER_BIN with SERVER_ARGS_JSON, or start the endpoint externally"
+    fi
 fi
 
 install_agentlightning || true

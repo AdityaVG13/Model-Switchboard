@@ -127,7 +127,7 @@ Model Switchboard now uses three launch modes:
 - `command`: profile-owned `START_COMMAND`, optional `STOP_COMMAND`, and readiness.
 - `external`: an already-running OpenAI-compatible endpoint such as LM Studio, Jan, LocalAI, or a manually launched server.
 
-Every profile status includes `runtime_label`, `runtime_tags`, and `launch_mode`. Add custom tags with `RUNTIME_TAGS="coding q8 long-context"`.
+Named command and generic-binary profiles can still use runtime ids such as `ddtree-mlx`, `turboquant`, `mlx-vlm`, `mlx-omni-server`, `mistral.rs`, `mlc-llm`, `lightllm`, `fastchat`, `openllm`, `nexa`, `exllamav2`, `aphrodite`, and `lmdeploy`; they retain their real runtime label instead of displaying as custom. Use `LAUNCH_MODE=external` when a named runtime is already running outside Model Switchboard. Every profile status includes `runtime_label`, `runtime_tags`, and `launch_mode`. Add custom tags with `RUNTIME_TAGS="coding q8 long-context"`.
 
 Generic JSON example:
 

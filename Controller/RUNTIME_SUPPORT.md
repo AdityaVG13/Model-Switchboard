@@ -25,6 +25,15 @@ Known runtime ids and aliases:
 | `mlx` | `mlx-lm`, `mlx_lm` | adapter | `managed`, `openai-compatible`, `mlx`, `apple-silicon` |
 | `rvllm-mlx` | `rvllm`, `rvllm_mlx` | adapter | `managed`, `openai-compatible`, `mlx`, `continuous-batching`, `apple-silicon` |
 | `vllm-mlx` | `vllm_mlx` | adapter | `managed`, `openai-compatible`, `mlx`, `server`, `apple-silicon` |
+| `ddtree-mlx` | `ddtree`, `ddtree_mlx` | command or generic binary | `managed`, `openai-compatible`, `mlx`, `speculative-decoding`, `apple-silicon` |
+| `turboquant` | - | command or generic binary | `managed`, `openai-compatible`, `gguf`, `quantized` |
+| `mlx-vlm` | `mlx_vlm` | command or generic binary | `managed`, `openai-compatible`, `mlx`, `vision`, `apple-silicon` |
+| `mlx-omni-server` | `mlx-omni` | command, generic binary, or external | `managed`, `openai-compatible`, `anthropic-compatible`, `mlx`, `multimodal`, `apple-silicon` |
+| `mlx-openai-server` | `mlx-openai` | command, generic binary, or external | `managed`, `openai-compatible`, `mlx`, `apple-silicon` |
+| `mlx-llm-server` | - | command, generic binary, or external | `managed`, `openai-compatible`, `mlx`, `apple-silicon` |
+| `mlx-serve` | - | command, generic binary, or external | `managed`, `openai-compatible`, `mlx`, `multimodal`, `apple-silicon` |
+| `mlxengine` | `mlx-engine` | command, generic binary, or external | `managed`, `openai-compatible`, `mlx`, `multimodal`, `apple-silicon` |
+| `ollmlx` | - | external by default | `external`, `openai-compatible`, `ollama-compatible`, `mlx`, `apple-silicon` |
 | `omlx` | - | adapter or command | `managed`, `openai-compatible`, `mlx`, `agent-cache`, `apple-silicon` |
 | `ollama` | - | adapter | `daemon`, `openai-compatible`, `model-registry`, `local` |
 | `vllm` | - | adapter | `managed`, `openai-compatible`, `server`, `continuous-batching` |
@@ -32,14 +41,30 @@ Known runtime ids and aliases:
 | `tgi` | `text-generation-inference`, `huggingface-tgi` | adapter | `managed`, `openai-compatible`, `server`, `hugging-face` |
 | `llama-cpp-python` | - | adapter | `managed`, `openai-compatible`, `gguf`, `python` |
 | `llamafile` | - | generic binary | `managed`, `openai-compatible`, `gguf`, `single-binary` |
-| `koboldcpp` | - | generic binary | `managed`, `openai-compatible`, `gguf` |
+| `koboldcpp` | `kobold-cpp` | generic binary | `managed`, `openai-compatible`, `gguf` |
 | `tabbyapi` | - | generic binary | `managed`, `openai-compatible`, `exllamav2`, `gptq` |
+| `exllamav2` | `exllama`, `exllama-v2` | generic binary | `managed`, `openai-compatible`, `exllamav2`, `gptq`, `exl2` |
+| `aphrodite` | `aphrodite-engine` | generic binary | `managed`, `openai-compatible`, `server`, `vllm-family` |
+| `lmdeploy` | - | generic binary | `managed`, `openai-compatible`, `server`, `turbomind` |
+| `mistral.rs` | `mistral-rs`, `mistralrs` | command, generic binary, or external | `managed`, `openai-compatible`, `rust`, `gguf`, `multimodal`, `continuous-batching` |
+| `mlc-llm` | `mlc` | command, generic binary, or external | `managed`, `openai-compatible`, `mlc`, `metal`, `cross-platform` |
+| `lightllm` | - | command, generic binary, or external | `managed`, `openai-compatible`, `server`, `high-throughput` |
+| `fastchat` | `fast-chat` | command, generic binary, or external | `managed`, `openai-compatible`, `server`, `vicuna` |
+| `openllm` | `bentoml-openllm` | command, generic binary, or external | `managed`, `openai-compatible`, `server`, `bentoml` |
+| `nexa` | `nexa-sdk`, `nexaai` | command, generic binary, or external | `managed`, `openai-compatible`, `multimodal`, `cross-platform` |
+| `litellm` | `litellm-proxy` | external by default | `external`, `openai-compatible`, `proxy` |
+| `transformers` | `hf-transformers`, `huggingface-transformers` | command or generic binary | `managed`, `openai-compatible`, `python`, `hugging-face` |
+| `triton` | `nvidia-triton` | external by default | `external`, `openai-compatible`, `server`, `nvidia` |
+| `tensorrt-llm` | `tensorrtllm` | command, generic binary, or external | `managed`, `openai-compatible`, `server`, `nvidia` |
+| `onnxruntime-genai` | `ort-genai` | command, generic binary, or external | `managed`, `openai-compatible`, `onnx`, `cross-platform` |
 | `text-generation-webui` | `oobabooga` | generic binary | `managed`, `openai-compatible`, `launcher`, `extensions` |
 | `lm-studio` | `lmstudio` | external by default | `external`, `openai-compatible`, `desktop` |
 | `localai` | - | external by default | `external`, `openai-compatible`, `multi-backend` |
 | `jan` | - | external by default | `external`, `openai-compatible`, `desktop` |
 | `external` | `openai`, `openai-compatible`, `endpoint` | external | `external`, `openai-compatible` |
 | `command` | `custom` | command | `managed`, `custom`, `openai-compatible` |
+
+For any named runtime above, you can still set `LAUNCH_MODE=external` with a `BASE_URL` when the server is started outside Model Switchboard. Without `LAUNCH_MODE=external`, use `START_COMMAND` or `SERVER_BIN` plus `SERVER_ARGS_JSON` for runtimes that do not have a native command builder yet.
 
 Profiles can add their own tags:
 

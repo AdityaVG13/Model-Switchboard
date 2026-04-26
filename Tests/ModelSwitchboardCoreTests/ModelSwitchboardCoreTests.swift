@@ -275,7 +275,10 @@ import Testing
     let status = ModelProfileStatus(
         profile: "qwen",
         displayName: "Qwen",
-        runtime: "llama.cpp",
+        runtime: "vllm-mlx",
+        runtimeLabel: "vLLM-MLX",
+        runtimeTags: ["vllm-mlx", "mlx"],
+        launchMode: "adapter",
         host: "127.0.0.1",
         port: "8080",
         baseURL: "http://127.0.0.1:8080/v1",
@@ -298,6 +301,10 @@ import Testing
     #expect(updated.serverIDs == ["qwen"])
     #expect(updated.rssMB == 2048)
     #expect(updated.command == status.command)
+    #expect(updated.runtimeLabel == "vLLM-MLX")
+    #expect(updated.runtimeTags == ["vllm-mlx", "mlx"])
+    #expect(updated.launchMode == "adapter")
+    #expect(updated.stateDescription.hasPrefix("vLLM-MLX"))
 }
 
 @Test func autoRefreshPolicyUsesIdleCadenceWhenNothingIsLive() {

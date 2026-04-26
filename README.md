@@ -17,7 +17,7 @@
 
 ---
 
-Running local models on an Apple Silicon Mac usually means a sprawl of terminal windows, half-remembered launch scripts, and no clean way to see **what's actually running.** Model Switchboard puts `llama.cpp`, MLX, Ollama, vLLM, and custom launch scripts behind **one menu bar panel.** Click **Activate**, every other model stops, and the one you picked comes up at an OpenAI-compatible endpoint.
+Running local models on an Apple Silicon Mac usually means a sprawl of terminal windows, half-remembered launch scripts, and no clean way to see **what's actually running.** Model Switchboard puts `llama.cpp`, MLX, Ollama, vLLM, SGLang, TGI, MLC-LLM, Mistral.rs, oMLX, vLLM-MLX, rVLLM MLX, LM Studio, Jan, and named command launchers behind **one menu bar panel.** Click **Activate**, every other model stops, and the one you picked comes up at an OpenAI-compatible endpoint.
 
 *No terminals. No orphan processes. No "green dot" lies.*
 
@@ -135,7 +135,7 @@ Rules:
   - `MODEL_PATH` or `MODEL_FILE` with `MODEL_ROOT` for llama.cpp
   - `MODEL_DIR` or `MODEL_REPO` for MLX
   - `SERVER_BIN` when a runtime binary is not already on PATH
-  - `START_COMMAND` only for truly custom launchers
+  - A named `RUNTIME` plus `START_COMMAND` or `SERVER_BIN` for launchers without a native adapter yet
 - Use the controller contract and profile format documented in this repo's `SETUP.md`.
 - Put profiles in the controller's `model-profiles` directory.
 - Verify that each profile can be started, health-checked, and stopped cleanly.
@@ -175,7 +175,7 @@ SERVER_MODEL_ID=qwen35-local
 
 Every profile must resolve to a unique endpoint. Reusing the same `HOST:PORT` or `BASE_URL` across two profiles is a configuration error, and the controller doctor will flag it.
 
-> Using your own runtime or launcher? Any OpenAI-compatible endpoint works. The controller has adapters and tags for MLX, Ollama, vLLM, SGLang, TGI, llama-cpp-python, rVLLM MLX, external endpoints, and generic binaries. See [runtime support](Controller/RUNTIME_SUPPORT.md).
+> Using your own runtime or launcher? Any OpenAI-compatible endpoint works. The controller has adapters and tags for MLX, Ollama, vLLM, SGLang, TGI, llama-cpp-python, rVLLM MLX, vLLM-MLX, DDTree MLX, TurboQuant, Mistral.rs, MLC-LLM, LightLLM, FastChat, OpenLLM, Nexa, ExLlamaV2, Aphrodite, LMDeploy, LiteLLM, external endpoints, and generic binaries. See [runtime support](Controller/RUNTIME_SUPPORT.md).
 
 ## Status labels
 

@@ -532,6 +532,9 @@ public extension ModelProfileStatus {
             profile: profile,
             displayName: displayName,
             runtime: runtime,
+            runtimeLabel: runtimeLabel,
+            runtimeTags: runtimeTags,
+            launchMode: launchMode,
             host: host,
             port: port,
             baseURL: baseURL,
@@ -553,7 +556,7 @@ public extension ModelProfileStatus {
     }
 
     var stateDescription: String {
-        var parts: [String] = [runtime, stateLabel]
+        var parts: [String] = [runtimeLabel ?? runtime, stateLabel]
         if running && !ready {
             parts.append("endpoint pending")
         } else if ready {

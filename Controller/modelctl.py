@@ -83,6 +83,21 @@ RUNTIME_ALIASES = {
     "rvllm-mlx": "rvllm-mlx",
     "vllm_mlx": "vllm-mlx",
     "vllm-mlx": "vllm-mlx",
+    "ddtree": "ddtree-mlx",
+    "ddtree_mlx": "ddtree-mlx",
+    "ddtree-mlx": "ddtree-mlx",
+    "turboquant": "turboquant",
+    "mlx-vlm": "mlx-vlm",
+    "mlx_vlm": "mlx-vlm",
+    "mlx-omni": "mlx-omni-server",
+    "mlx-omni-server": "mlx-omni-server",
+    "mlx-openai": "mlx-openai-server",
+    "mlx-openai-server": "mlx-openai-server",
+    "mlx-llm-server": "mlx-llm-server",
+    "mlx-serve": "mlx-serve",
+    "mlx-engine": "mlxengine",
+    "mlxengine": "mlxengine",
+    "ollmlx": "ollmlx",
     "openai": "external",
     "openai-compatible": "external",
     "endpoint": "external",
@@ -91,11 +106,42 @@ RUNTIME_ALIASES = {
     "command": "command",
     "lmstudio": "lm-studio",
     "lm-studio": "lm-studio",
+    "local-ai": "localai",
     "text-generation-inference": "tgi",
     "huggingface-tgi": "tgi",
     "text-generation-webui": "text-generation-webui",
     "oobabooga": "text-generation-webui",
+    "kobold-cpp": "koboldcpp",
     "llama-cpp-python": "llama-cpp-python",
+    "exllama": "exllamav2",
+    "exllama-v2": "exllamav2",
+    "exllamav2": "exllamav2",
+    "aphrodite-engine": "aphrodite",
+    "lmdeploy": "lmdeploy",
+    "mistral-rs": "mistral.rs",
+    "mistralrs": "mistral.rs",
+    "mistral.rs": "mistral.rs",
+    "mlc": "mlc-llm",
+    "mlc-llm": "mlc-llm",
+    "lightllm": "lightllm",
+    "fast-chat": "fastchat",
+    "fastchat": "fastchat",
+    "openllm": "openllm",
+    "bentoml-openllm": "openllm",
+    "nexa": "nexa",
+    "nexa-sdk": "nexa",
+    "nexaai": "nexa",
+    "litellm": "litellm",
+    "litellm-proxy": "litellm",
+    "transformers": "transformers",
+    "hf-transformers": "transformers",
+    "huggingface-transformers": "transformers",
+    "triton": "triton",
+    "nvidia-triton": "triton",
+    "tensorrt-llm": "tensorrt-llm",
+    "tensorrtllm": "tensorrt-llm",
+    "onnxruntime-genai": "onnxruntime-genai",
+    "ort-genai": "onnxruntime-genai",
 }
 
 
@@ -119,6 +165,51 @@ RUNTIME_SPECS: dict[str, RuntimeSpec] = {
         "label": "vLLM-MLX",
         "tags": ["managed", "openai-compatible", "mlx", "server", "apple-silicon"],
         "launch_mode": "adapter",
+    },
+    "ddtree-mlx": {
+        "label": "DDTree MLX",
+        "tags": ["managed", "openai-compatible", "mlx", "speculative-decoding", "apple-silicon"],
+        "launch_mode": "adapter",
+    },
+    "turboquant": {
+        "label": "TurboQuant",
+        "tags": ["managed", "openai-compatible", "gguf", "quantized"],
+        "launch_mode": "adapter",
+    },
+    "mlx-vlm": {
+        "label": "MLX-VLM",
+        "tags": ["managed", "openai-compatible", "mlx", "vision", "apple-silicon"],
+        "launch_mode": "adapter",
+    },
+    "mlx-omni-server": {
+        "label": "MLX Omni Server",
+        "tags": ["managed", "openai-compatible", "anthropic-compatible", "mlx", "multimodal", "apple-silicon"],
+        "launch_mode": "adapter",
+    },
+    "mlx-openai-server": {
+        "label": "MLX OpenAI Server",
+        "tags": ["managed", "openai-compatible", "mlx", "apple-silicon"],
+        "launch_mode": "adapter",
+    },
+    "mlx-llm-server": {
+        "label": "MLX-LLM Server",
+        "tags": ["managed", "openai-compatible", "mlx", "apple-silicon"],
+        "launch_mode": "adapter",
+    },
+    "mlx-serve": {
+        "label": "MLX Serve",
+        "tags": ["managed", "openai-compatible", "mlx", "multimodal", "apple-silicon"],
+        "launch_mode": "adapter",
+    },
+    "mlxengine": {
+        "label": "MLX Engine",
+        "tags": ["managed", "openai-compatible", "mlx", "multimodal", "apple-silicon"],
+        "launch_mode": "adapter",
+    },
+    "ollmlx": {
+        "label": "ollmlx",
+        "tags": ["external", "openai-compatible", "ollama-compatible", "mlx", "apple-silicon"],
+        "launch_mode": "external",
     },
     "omlx": {
         "label": "oMLX",
@@ -163,6 +254,76 @@ RUNTIME_SPECS: dict[str, RuntimeSpec] = {
     "tabbyapi": {
         "label": "TabbyAPI",
         "tags": ["managed", "openai-compatible", "exllamav2", "gptq"],
+        "launch_mode": "adapter",
+    },
+    "exllamav2": {
+        "label": "ExLlamaV2",
+        "tags": ["managed", "openai-compatible", "exllamav2", "gptq", "exl2"],
+        "launch_mode": "adapter",
+    },
+    "aphrodite": {
+        "label": "Aphrodite Engine",
+        "tags": ["managed", "openai-compatible", "server", "vllm-family"],
+        "launch_mode": "adapter",
+    },
+    "lmdeploy": {
+        "label": "LMDeploy",
+        "tags": ["managed", "openai-compatible", "server", "turbomind"],
+        "launch_mode": "adapter",
+    },
+    "mistral.rs": {
+        "label": "mistral.rs",
+        "tags": ["managed", "openai-compatible", "rust", "gguf", "multimodal", "continuous-batching"],
+        "launch_mode": "adapter",
+    },
+    "mlc-llm": {
+        "label": "MLC-LLM",
+        "tags": ["managed", "openai-compatible", "mlc", "metal", "cross-platform"],
+        "launch_mode": "adapter",
+    },
+    "lightllm": {
+        "label": "LightLLM",
+        "tags": ["managed", "openai-compatible", "server", "high-throughput"],
+        "launch_mode": "adapter",
+    },
+    "fastchat": {
+        "label": "FastChat",
+        "tags": ["managed", "openai-compatible", "server", "vicuna"],
+        "launch_mode": "adapter",
+    },
+    "openllm": {
+        "label": "OpenLLM",
+        "tags": ["managed", "openai-compatible", "server", "bentoml"],
+        "launch_mode": "adapter",
+    },
+    "nexa": {
+        "label": "Nexa SDK",
+        "tags": ["managed", "openai-compatible", "multimodal", "cross-platform"],
+        "launch_mode": "adapter",
+    },
+    "litellm": {
+        "label": "LiteLLM",
+        "tags": ["external", "openai-compatible", "proxy"],
+        "launch_mode": "external",
+    },
+    "transformers": {
+        "label": "Transformers",
+        "tags": ["managed", "openai-compatible", "python", "hugging-face"],
+        "launch_mode": "adapter",
+    },
+    "triton": {
+        "label": "Triton Inference Server",
+        "tags": ["external", "openai-compatible", "server", "nvidia"],
+        "launch_mode": "external",
+    },
+    "tensorrt-llm": {
+        "label": "TensorRT-LLM",
+        "tags": ["managed", "openai-compatible", "server", "nvidia"],
+        "launch_mode": "adapter",
+    },
+    "onnxruntime-genai": {
+        "label": "ONNX Runtime GenAI",
+        "tags": ["managed", "openai-compatible", "onnx", "cross-platform"],
         "launch_mode": "adapter",
     },
     "text-generation-webui": {
@@ -1540,12 +1701,18 @@ def model_path_for_profile(env: ProfileEnv, *, base: pathlib.Path = BASE) -> pat
 
 
 def adapter_model_source(env: ProfileEnv, *, base: pathlib.Path = BASE) -> str | None:
-    for key in ("MODEL_ID", "MODEL_REPO", "MODEL_DIR", "MODEL_PATH"):
+    for key in ("MODEL_DIR", "MODEL_PATH"):
         value = env.get(key, "").strip()
         if value:
-            return str(expand_profile_path(value)) if key in {"MODEL_DIR", "MODEL_PATH"} else value
+            return str(expand_profile_path(value))
     model_path = model_path_for_profile(env, base=base)
-    return str(model_path) if model_path else None
+    if model_path:
+        return str(model_path)
+    for key in ("MODEL_ID", "MODEL_REPO"):
+        value = env.get(key, "").strip()
+        if value:
+            return value
+    return None
 
 
 def executable_configured(env: ProfileEnv, *keys: str) -> bool:
@@ -1592,6 +1759,7 @@ def diagnose_profile(
 ) -> ProfileDiagnosticPayload:
     runtime = canonical_runtime(env.get("RUNTIME"))
     spec = runtime_spec(env)
+    launch_mode = spec["launch_mode"]
     errors: list[str] = []
     warnings: list[str] = []
 
@@ -1600,7 +1768,10 @@ def diagnose_profile(
     if not env.get("REQUEST_MODEL"):
         errors.append("missing REQUEST_MODEL")
 
-    if runtime == "llama.cpp":
+    if launch_mode == "external":
+        if healthcheck_mode(env) != "disabled" and not healthcheck_url(env):
+            errors.append("missing BASE_URL or HEALTHCHECK_URL")
+    elif runtime == "llama.cpp":
         if not resolve_llama_server_bin(env):
             errors.append("llama-server not found")
         model_path = model_path_for_profile(env)
@@ -1661,12 +1832,12 @@ def diagnose_profile(
             errors.append(f"model file not found: {model_source}")
         if not executable_configured(env, "PYTHON_BIN") and not shutil.which("python3") and not shutil.which("python"):
             errors.append("python not found for llama-cpp-python")
-    elif runtime in {"external", "lm-studio", "localai", "jan"}:
-        if healthcheck_mode(env) != "disabled" and not healthcheck_url(env):
-            errors.append("missing BASE_URL or HEALTHCHECK_URL")
     elif runtime == "command":
         if not env.get("START_COMMAND"):
             errors.append("missing START_COMMAND")
+        if healthcheck_mode(env) != "disabled" and not healthcheck_url(env):
+            errors.append("missing BASE_URL or HEALTHCHECK_URL")
+    elif env.get("START_COMMAND"):
         if healthcheck_mode(env) != "disabled" and not healthcheck_url(env):
             errors.append("missing BASE_URL or HEALTHCHECK_URL")
     elif env.get("SERVER_BIN"):
