@@ -61,6 +61,20 @@ Tap **`Export CSV`** and you have a portable report. Every run lands as both JSO
 
 ---
 
+## Runtime and provider support
+
+Model Switchboard is runtime-oriented, not model-family-oriented: if your runtime can expose an OpenAI-compatible endpoint, the app can track it, health-check it, switch it, and tag it. That means Qwen, Gemma, Llama, Mistral, GLM, DeepSeek, and other local models are supported through whichever backend serves them.
+
+| Support level | Runtimes and providers |
+|---|---|
+| Native command adapters | `llama.cpp`, MLX / `mlx_lm.server`, `rVLLM MLX`, `vLLM-MLX`, `Ollama`, `vLLM`, `SGLang`, Hugging Face `TGI`, `llama-cpp-python` |
+| Named launcher profiles | `DDTree MLX`, `TurboQuant`, `oMLX`, `Mistral.rs`, `MLC-LLM`, `LightLLM`, `FastChat`, `OpenLLM`, `Nexa`, `ExLlamaV2`, `Aphrodite`, `LMDeploy`, `MLX Omni Server`, `MLX OpenAI Server`, `MLX Serve`, `text-generation-webui`, `KoboldCpp`, `TabbyAPI`, `llamafile` |
+| External endpoints | `LM Studio`, `Jan`, `LocalAI`, `LiteLLM`, `ollmlx`, Triton-backed OpenAI-compatible servers, or any local/custom OpenAI-compatible base URL |
+
+Use `RUNTIME_TAGS` for model-level traits such as `coding`, `q8`, `long-context`, `vision`, or `agentic`. The full canonical runtime table lives in [Controller/RUNTIME_SUPPORT.md](Controller/RUNTIME_SUPPORT.md).
+
+---
+
 ## Base vs Plus
 
 *Same codebase, two apps.* Pick at install time. They live side by side as **Model Switchboard.app** and **Model Switchboard Plus.app** under `~/Applications/`.
