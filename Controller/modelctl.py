@@ -81,6 +81,8 @@ RUNTIME_ALIASES = {
     "rvllm": "rvllm-mlx",
     "rvllm_mlx": "rvllm-mlx",
     "rvllm-mlx": "rvllm-mlx",
+    "vllm_mlx": "vllm-mlx",
+    "vllm-mlx": "vllm-mlx",
     "openai": "external",
     "openai-compatible": "external",
     "endpoint": "external",
@@ -111,6 +113,11 @@ RUNTIME_SPECS: dict[str, RuntimeSpec] = {
     "rvllm-mlx": {
         "label": "rVLLM MLX",
         "tags": ["managed", "openai-compatible", "mlx", "continuous-batching", "apple-silicon"],
+        "launch_mode": "adapter",
+    },
+    "vllm-mlx": {
+        "label": "vLLM-MLX",
+        "tags": ["managed", "openai-compatible", "mlx", "server", "apple-silicon"],
         "launch_mode": "adapter",
     },
     "omlx": {
@@ -1484,6 +1491,19 @@ def resolve_mlx_server_bin(env: ProfileEnv | None = None) -> str | None:
     )
 
 
+def resolve_vllm_mlx_server_bin(env: ProfileEnv | None = None) -> str | None:
+    env = env or {}
+    return (
+        resolve_executable(
+            env.get("SERVER_BIN"),
+            env.get("VLLM_MLX_BIN"),
+            os.environ.get("SERVER_BIN"),
+            os.environ.get("VLLM_MLX_BIN"),
+        )
+        or shutil.which("vllm-mlx")
+    )
+
+
 def expand_profile_path(value: str) -> pathlib.Path:
     return pathlib.Path(os.path.expanduser(value))
 
@@ -1614,6 +1634,14 @@ def diagnose_profile(
             errors.append("missing MODEL_DIR")
         elif not pathlib.Path(model_dir).exists():
             errors.append(f"MODEL_DIR not found: {model_dir}")
+    elif runtime == "vllm-mlx":
+        if not resolve_vllm_mlx_server_bin(env):
+            errors.append("vllm-mlx not found")
+        model_source = adapter_model_source(env)
+        if not model_source:
+            errors.append("missing MODEL_REPO, MODEL_ID, MODEL_DIR, MODEL_PATH, or MODEL_FILE for vllm-mlx")
+        elif env.get("MODEL_DIR") and not pathlib.Path(env["MODEL_DIR"]).exists():
+            errors.append(f"MODEL_DIR not found: {env['MODEL_DIR']}")
     elif runtime == "ollama":
         if not executable_configured(env, "SERVER_BIN", "OLLAMA_BIN") and not shutil.which("ollama"):
             errors.append("ollama not found")

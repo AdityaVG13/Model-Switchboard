@@ -24,6 +24,7 @@ Known runtime ids and aliases:
 | `llama.cpp` | `llamacpp`, `llama-cpp` | adapter | `managed`, `openai-compatible`, `gguf`, `metal`, `apple-silicon` |
 | `mlx` | `mlx-lm`, `mlx_lm` | adapter | `managed`, `openai-compatible`, `mlx`, `apple-silicon` |
 | `rvllm-mlx` | `rvllm`, `rvllm_mlx` | adapter | `managed`, `openai-compatible`, `mlx`, `continuous-batching`, `apple-silicon` |
+| `vllm-mlx` | `vllm_mlx` | adapter | `managed`, `openai-compatible`, `mlx`, `server`, `apple-silicon` |
 | `omlx` | - | adapter or command | `managed`, `openai-compatible`, `mlx`, `agent-cache`, `apple-silicon` |
 | `ollama` | - | adapter | `daemon`, `openai-compatible`, `model-registry`, `local` |
 | `vllm` | - | adapter | `managed`, `openai-compatible`, `server`, `continuous-batching` |

@@ -173,6 +173,24 @@ resolve_rvllm_mlx_server() {
     return 1
 }
 
+resolve_vllm_mlx_server() {
+    local candidate
+    for candidate in \
+        "${SERVER_BIN:-}" \
+        "${VLLM_MLX_BIN:-}"
+    do
+        if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    if command -v vllm-mlx >/dev/null 2>&1; then
+        command -v vllm-mlx
+        return 0
+    fi
+    return 1
+}
+
 canonical_runtime() {
     local raw normalized
     raw="${1:-llama.cpp}"
@@ -186,6 +204,9 @@ canonical_runtime() {
             ;;
         rvllm|rvllm-mlx)
             printf '%s\n' "rvllm-mlx"
+            ;;
+        vllm_mlx|vllm-mlx)
+            printf '%s\n' "vllm-mlx"
             ;;
         custom|command)
             printf '%s\n' "command"
@@ -428,6 +449,17 @@ DECODE_CONCURRENCY="${DECODE_CONCURRENCY:-1}"
 PREFILL_STEP_SIZE="${PREFILL_STEP_SIZE:-512}"
 CHAT_TEMPLATE_ARGS="${CHAT_TEMPLATE_ARGS:-{}}"
 SERVER_ARGS_JSON="${SERVER_ARGS_JSON:-}"
+MAX_REQUEST_TOKENS="${MAX_REQUEST_TOKENS:-$MAX_TOKENS}"
+GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.90}"
+CACHE_MEMORY_PERCENT="${CACHE_MEMORY_PERCENT:-}"
+CHAT_TEMPLATE_KWARGS="${CHAT_TEMPLATE_KWARGS:-}"
+ENABLE_TOOL_CALLS="${ENABLE_TOOL_CALLS:-${ENABLE_AUTO_TOOL_CHOICE:-0}}"
+TOOL_CALL_PARSER="${TOOL_CALL_PARSER:-qwen}"
+REASONING_PARSER="${REASONING_PARSER:-}"
+CONTINUOUS_BATCHING="${CONTINUOUS_BATCHING:-0}"
+MAX_NUM_SEQS="${MAX_NUM_SEQS:-4}"
+PREFILL_BATCH_SIZE="${PREFILL_BATCH_SIZE:-4}"
+COMPLETION_BATCH_SIZE="${COMPLETION_BATCH_SIZE:-8}"
 THREADS="${THREADS:-$(calc_threads)}"
 THREADS_BATCH="${THREADS_BATCH:-$THREADS}"
 HOST="${HOST:-127.0.0.1}"
@@ -572,6 +604,49 @@ elif [ "$RUNTIME" = "rvllm-mlx" ]; then
         if ! wait_for_profile_ready "$HEALTHCHECK_MODE" "$HEALTHCHECK_URL" "$SERVER_MODEL_ID" 180; then
             tail -n 120 "$LOG_PATH" || true
             die "rvllm-mlx server failed to become ready for $MODEL_PROFILE"
+        fi
+    fi
+elif [ "$RUNTIME" = "vllm-mlx" ]; then
+    MODEL_SOURCE="$(model_source_for_adapter || true)"
+    [ -n "$MODEL_SOURCE" ] || die "MODEL_REPO, MODEL_ID, MODEL_DIR, MODEL_PATH, or MODEL_FILE is required for vLLM-MLX profiles"
+    VLLM_MLX_SERVER="$(resolve_vllm_mlx_server)" || die 'vllm-mlx not found; set SERVER_BIN or VLLM_MLX_BIN in the profile, or add vllm-mlx to PATH'
+
+    if wait_for_profile_ready "$HEALTHCHECK_MODE" "$HEALTHCHECK_URL" "$SERVER_MODEL_ID" 1; then
+        log "vLLM-MLX already responding on $HEALTHCHECK_URL"
+    else
+        log "Starting vLLM-MLX profile $MODEL_PROFILE"
+        cmd=(
+            "$VLLM_MLX_SERVER"
+            serve "$MODEL_SOURCE"
+            --host "$HOST"
+            --port "$PORT"
+            --served-model-name "$SERVER_MODEL_ID"
+            --max-tokens "$MAX_TOKENS"
+            --max-request-tokens "$MAX_REQUEST_TOKENS"
+            --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION"
+            --prefill-step-size "$PREFILL_STEP_SIZE"
+        )
+        [ -z "$CACHE_MEMORY_PERCENT" ] || cmd+=(--cache-memory-percent "$CACHE_MEMORY_PERCENT")
+        [ -z "$CHAT_TEMPLATE_KWARGS" ] || cmd+=(--default-chat-template-kwargs "$CHAT_TEMPLATE_KWARGS")
+        [ -z "$REASONING_PARSER" ] || cmd+=(--reasoning-parser "$REASONING_PARSER")
+        if [ "$ENABLE_TOOL_CALLS" = "1" ]; then
+            cmd+=(--enable-auto-tool-choice --tool-call-parser "$TOOL_CALL_PARSER")
+        elif [ -n "$TOOL_CALL_PARSER" ] && [ "$TOOL_CALL_PARSER" != "qwen" ]; then
+            cmd+=(--tool-call-parser "$TOOL_CALL_PARSER")
+        fi
+        if [ "$CONTINUOUS_BATCHING" = "1" ]; then
+            cmd+=(
+                --continuous-batching
+                --max-num-seqs "$MAX_NUM_SEQS"
+                --prefill-batch-size "$PREFILL_BATCH_SIZE"
+                --completion-batch-size "$COMPLETION_BATCH_SIZE"
+            )
+        fi
+        append_json_args "$SERVER_ARGS_JSON"
+        spawn_detached "$LOG_PATH" "$PID_PATH" "${cmd[@]}" >/dev/null
+        if ! wait_for_profile_ready "$HEALTHCHECK_MODE" "$HEALTHCHECK_URL" "${HEALTHCHECK_EXPECT_ID:-${SERVER_MODEL_ID:-}}" 240; then
+            tail -n 120 "$LOG_PATH" || true
+            die "vLLM-MLX failed to become ready for $MODEL_PROFILE"
         fi
     fi
 elif [ "$RUNTIME" = "ollama" ]; then

@@ -105,6 +105,16 @@ class ModelCtlTests(unittest.TestCase):
 
             self.assertEqual(MODULE.resolve_mlx_server_bin(env), str(server_bin))
 
+    def test_resolve_vllm_mlx_server_bin_prefers_profile_config_before_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            server_bin = Path(tmpdir) / "vllm-mlx"
+            server_bin.write_text("#!/bin/sh\nexit 0\n")
+            server_bin.chmod(0o755)
+
+            env = {"SERVER_BIN": str(server_bin)}
+
+            self.assertEqual(MODULE.resolve_vllm_mlx_server_bin(env), str(server_bin))
+
     def test_runtime_metadata_canonicalizes_aliases_and_adds_profile_tags(self) -> None:
         env = {
             "RUNTIME": "mlx_lm",
@@ -116,6 +126,16 @@ class ModelCtlTests(unittest.TestCase):
         self.assertEqual(
             MODULE.runtime_tags(env),
             ["mlx", "managed", "openai-compatible", "apple-silicon", "fast", "coding", "agent"],
+        )
+
+    def test_runtime_metadata_canonicalizes_vllm_mlx(self) -> None:
+        env = {"RUNTIME": "vllm_mlx"}
+
+        self.assertEqual(MODULE.canonical_runtime(env["RUNTIME"]), "vllm-mlx")
+        self.assertEqual(MODULE.runtime_spec(env)["label"], "vLLM-MLX")
+        self.assertEqual(
+            MODULE.runtime_tags(env),
+            ["vllm-mlx", "managed", "openai-compatible", "mlx", "server", "apple-silicon"],
         )
 
     def test_runtime_spec_treats_start_command_as_command_launch_mode(self) -> None:
@@ -432,6 +452,41 @@ class ModelCtlTests(unittest.TestCase):
         self.assertEqual(report["errors"], [])
         self.assertEqual(report["warnings"], [])
 
+    def test_diagnose_profile_accepts_valid_vllm_mlx_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            server_bin = tmp_path / "vllm-mlx"
+            server_bin.write_text("#!/bin/sh\nexit 0\n")
+            server_bin.chmod(0o755)
+            model_dir = tmp_path / "model"
+            model_dir.mkdir()
+
+            env = {
+                "PROFILE_NAME": "qwen-vllm-mlx",
+                "DISPLAY_NAME": "Qwen vLLM-MLX",
+                "RUNTIME": "vllm-mlx",
+                "SERVER_BIN": str(server_bin),
+                "MODEL_DIR": str(model_dir),
+                "PORT": "8102",
+                "REQUEST_MODEL": "qwen-local",
+                "SERVER_MODEL_ID": "qwen-local",
+            }
+
+            with mock.patch.object(
+                MODULE,
+                "status_for_profile",
+                return_value={
+                    "running": False,
+                    "ready": False,
+                    "pid": None,
+                    "base_url": "http://127.0.0.1:8102/v1",
+                },
+            ):
+                report = MODULE.diagnose_profile("qwen-vllm-mlx", env)
+
+        self.assertEqual(report["errors"], [])
+        self.assertEqual(report["warnings"], [])
+
     def test_start_model_script_requires_profile_selection(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             script_path = Path(tmpdir) / "start-model-mac.sh"
@@ -541,6 +596,112 @@ class ModelCtlTests(unittest.TestCase):
 
             pid_path = tmp_path / "run" / "supergemma31b-rvllm-mlx.pid"
             self.assertIn("runtime=rvllm-mlx", result.stdout)
+            self.assertTrue(pid_path.exists())
+
+            pid = int(pid_path.read_text().strip())
+            os.kill(pid, signal.SIGTERM)
+
+    def test_start_model_script_supports_vllm_mlx_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            script_path = tmp_path / "start-model-mac.sh"
+            shutil.copy2(ROOT / "start-model-mac.sh", script_path)
+            port = reserve_local_port()
+
+            model_dir = tmp_path / "model"
+            model_dir.mkdir()
+            profile_path = tmp_path / "qwen-vllm-mlx.json"
+            log_alias = "qwen-vllm-mlx-test"
+
+            server_bin = tmp_path / "fake-vllm-mlx"
+            server_bin.write_text(
+                textwrap.dedent(
+                    """\
+                    #!/usr/bin/env python3
+                    import argparse
+                    import json
+                    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+                    parser = argparse.ArgumentParser()
+                    parser.add_argument("command")
+                    parser.add_argument("model")
+                    parser.add_argument("--host", default="127.0.0.1")
+                    parser.add_argument("--port", type=int, required=True)
+                    parser.add_argument("--served-model-name", required=True)
+                    parser.add_argument("--max-tokens")
+                    parser.add_argument("--max-request-tokens")
+                    parser.add_argument("--gpu-memory-utilization")
+                    parser.add_argument("--prefill-step-size")
+                    parser.add_argument("--cache-memory-percent")
+                    parser.add_argument("--default-chat-template-kwargs")
+                    parser.add_argument("--enable-auto-tool-choice", action="store_true")
+                    parser.add_argument("--tool-call-parser")
+                    args = parser.parse_args()
+
+                    class Handler(BaseHTTPRequestHandler):
+                        def do_GET(self):
+                            if self.path != "/v1/models":
+                                self.send_response(404)
+                                self.end_headers()
+                                return
+                            payload = json.dumps({"data": [{"id": args.served_model_name}]}).encode()
+                            self.send_response(200)
+                            self.send_header("Content-Type", "application/json")
+                            self.send_header("Content-Length", str(len(payload)))
+                            self.end_headers()
+                            self.wfile.write(payload)
+
+                        def log_message(self, format, *args):
+                            return
+
+                    ThreadingHTTPServer((args.host, args.port), Handler).serve_forever()
+                    """
+                )
+            )
+            server_bin.chmod(0o755)
+
+            agl_python = tmp_path / ".venv-agentlightning" / "bin" / "python"
+            agl_python.parent.mkdir(parents=True)
+            agl_python.write_text("#!/bin/sh\nexit 0\n")
+            agl_python.chmod(0o755)
+
+            profile_path.write_text(
+                json.dumps(
+                    {
+                        "DISPLAY_NAME": "Qwen vLLM-MLX",
+                        "RUNTIME": "vllm-mlx",
+                        "SERVER_BIN": str(server_bin),
+                        "MODEL_DIR": str(model_dir),
+                        "HOST": "127.0.0.1",
+                        "PORT": str(port),
+                        "REQUEST_MODEL": "qwen-local",
+                        "SERVER_MODEL_ID": "qwen-local",
+                        "MODEL_ALIAS": log_alias,
+                        "MAX_TOKENS": "32768",
+                        "MAX_REQUEST_TOKENS": "32768",
+                        "CACHE_MEMORY_PERCENT": "0.15",
+                        "CHAT_TEMPLATE_KWARGS": "{\"enable_thinking\":false}",
+                        "ENABLE_TOOL_CALLS": "1",
+                        "TOOL_CALL_PARSER": "qwen",
+                    }
+                )
+            )
+
+            env = os.environ.copy()
+            env["MODEL_PROFILE"] = "qwen-vllm-mlx"
+            env["MODEL_PROFILE_PATH"] = str(profile_path)
+
+            result = subprocess.run(
+                ["bash", str(script_path)],
+                cwd=tmp_path,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+
+            pid_path = tmp_path / "run" / "qwen-vllm-mlx.pid"
+            self.assertIn("runtime=vllm-mlx", result.stdout)
             self.assertTrue(pid_path.exists())
 
             pid = int(pid_path.read_text().strip())

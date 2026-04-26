@@ -105,12 +105,25 @@ Typical fields:
 - `REQUEST_MODEL`
 - `SERVER_MODEL_ID`
 
+### `vllm-mlx`
+Best current speed lane for MLX model directories on Apple Silicon.
+
+Typical fields:
+
+- `RUNTIME=vllm-mlx`
+- `SERVER_BIN` or `VLLM_MLX_BIN` if `vllm-mlx` is not already on `PATH`
+- `MODEL_DIR` or `MODEL_REPO`
+- `PORT`
+- `REQUEST_MODEL`
+- `SERVER_MODEL_ID`
+- optional tuning fields: `MAX_TOKENS`, `MAX_REQUEST_TOKENS`, `GPU_MEMORY_UTILIZATION`, `CACHE_MEMORY_PERCENT`, `PREFILL_STEP_SIZE`, `ENABLE_TOOL_CALLS`, `TOOL_CALL_PARSER`
+
 ### Universal launchers
 Best when the model is owned by another runtime, desktop app, daemon, or wrapper.
 
 Model Switchboard now uses three launch modes:
 
-- `adapter`: known runtimes where the controller builds the command (`llama.cpp`, `mlx`, `rvllm-mlx`, `ollama`, `vllm`, `sglang`, `tgi`, `llama-cpp-python`).
+- `adapter`: known runtimes where the controller builds the command (`llama.cpp`, `mlx`, `rvllm-mlx`, `vllm-mlx`, `ollama`, `vllm`, `sglang`, `tgi`, `llama-cpp-python`).
 - `command`: profile-owned `START_COMMAND`, optional `STOP_COMMAND`, and readiness.
 - `external`: an already-running OpenAI-compatible endpoint such as LM Studio, Jan, LocalAI, or a manually launched server.
 
