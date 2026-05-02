@@ -11,6 +11,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -39,6 +40,7 @@ from contracts import (
 BASE = pathlib.Path(__file__).resolve().parent
 PROFILE_DIR = BASE / "model-profiles"
 RUN_DIR = BASE / "run"
+ACTIVE_PROFILE_PATH = RUN_DIR / "active-profile"
 START_SCRIPT = BASE / "start-model-mac.sh"
 STOP_ALL_SCRIPT = BASE / "stop-all-models.sh"
 SYNC_SCRIPT = BASE / "sync-droid-local-models.py"
@@ -1042,6 +1044,23 @@ def pid_path(profile_name: str) -> pathlib.Path:
     return RUN_DIR / f"{profile_name}.pid"
 
 
+def read_active_profile() -> str | None:
+    if not ACTIVE_PROFILE_PATH.exists():
+        return None
+    name = ACTIVE_PROFILE_PATH.read_text().strip()
+    return name or None
+
+
+def write_active_profile(name: str) -> None:
+    RUN_DIR.mkdir(parents=True, exist_ok=True)
+    ACTIVE_PROFILE_PATH.write_text(f"{name}\n")
+
+
+def clear_active_profile(name: str | None = None) -> None:
+    if name is None or read_active_profile() == name:
+        ACTIVE_PROFILE_PATH.unlink(missing_ok=True)
+
+
 def log_path(env: ProfileEnv) -> str:
     raw_name = env.get("LOG_ALIAS") or env.get("MODEL_ALIAS") or env["PROFILE_NAME"]
     safe_name = "".join(char if char.isalnum() or char in {"_", ".", "-"} else "_" for char in raw_name)
@@ -1450,6 +1469,7 @@ def stop_profile(name: str) -> None:
             stop_error = exc
     if not pid:
         pid_path(name).unlink(missing_ok=True)
+        clear_active_profile(name)
         if stop_error:
             raise RuntimeError(f"STOP_COMMAND failed for {name}: {stop_error}") from stop_error
         print(f"[INFO] {name} already stopped")
@@ -1457,6 +1477,7 @@ def stop_profile(name: str) -> None:
     if env.get("STOP_COMMAND_ONLY", "0") != "1":
         terminate_pid(pid)
     pid_path(name).unlink(missing_ok=True)
+    clear_active_profile(name)
     if stop_error:
         raise RuntimeError(f"STOP_COMMAND failed for {name}: {stop_error}") from stop_error
     print(f"[INFO] stopped {name} (pid {pid})")
@@ -1528,6 +1549,31 @@ def switch_profile(name: str) -> None:
         if item["profile"] != name and item["running"]:
             stop_profile(item["profile"])
     start_profile(name)
+    write_active_profile(name)
+
+
+def active_profile_watchdog_once() -> None:
+    name = read_active_profile()
+    if not name:
+        return
+    profiles = load_profiles()
+    env = profiles.get(name)
+    if not env:
+        clear_active_profile(name)
+        return
+    status = status_for_profile(name, env)
+    if status["ready"] or status["running"]:
+        return
+    start_profile(name)
+
+
+def run_active_profile_watchdog(interval: float = 30.0) -> None:
+    while True:
+        try:
+            active_profile_watchdog_once()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[WARN] active profile watchdog failed: {exc}", file=sys.stderr)
+        time.sleep(interval)
 
 
 def latest_benchmark_report() -> BenchmarkLatestReportPayload | None:
@@ -2081,6 +2127,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
 
 def serve_web(host: str, port: int) -> None:
+    threading.Thread(target=run_active_profile_watchdog, daemon=True).start()
     server = ThreadingHTTPServer((host, port), DashboardHandler)
     print(f"dashboard=http://{host}:{port}")
     server.serve_forever()
