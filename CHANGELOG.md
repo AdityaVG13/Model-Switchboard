@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.1.3] - 2026-05-02
+
+### Added
+- Added active-profile recovery in the controller so an activated local model profile is restarted when its process and health check both disappear.
+
+### Fixed
+- Fixed overnight local-model runs silently staying down after an MLX or other managed runtime crash.
+
 ## [1.1.2] - 2026-04-26
 
 ### Added
