@@ -26,6 +26,8 @@ This directory contains the local control plane used by the app.
 
 The controller reads profiles from `model-profiles`. Each profile defines launch and endpoint settings. The app remains model-agnostic because it only calls the controller API.
 
+When a profile is activated through the switch action, the controller records it as the active profile in `run/active-profile`. The background service checks that active profile every 30 seconds and restarts it if both the process and health check are gone. This covers native runtime crashes without keeping a dead overnight job hidden behind a stale PID.
+
 For llama.cpp profiles, `MODEL_PATH` still wins when set. If you prefer `MODEL_FILE`, the controller now resolves model roots in this order: `MODEL_ROOT`, `MODEL_ROOT_HINT`, `~/AI/models`, then `../models` relative to `Controller/`.
 
 ## Benchmark harness
