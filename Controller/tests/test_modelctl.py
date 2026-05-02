@@ -491,6 +491,104 @@ class ModelCtlTests(unittest.TestCase):
         stop_profile.assert_not_called()
         start_profile.assert_not_called()
 
+    def test_switch_profile_marks_active_profile_after_start(self) -> None:
+        profiles = {
+            "qwen35-a3b": {
+                "PROFILE_NAME": "qwen35-a3b",
+                "DISPLAY_NAME": "Qwen 3.5 35B",
+                "REQUEST_MODEL": "qwen35-local",
+                "HOST": "127.0.0.1",
+                "PORT": "8080",
+            },
+        }
+
+        with (
+            mock.patch.object(MODULE, "load_profiles", return_value=profiles),
+            mock.patch.object(MODULE, "status_snapshot", return_value=[]),
+            mock.patch.object(MODULE, "start_profile") as start_profile,
+            mock.patch.object(MODULE, "write_active_profile") as write_active_profile,
+        ):
+            MODULE.switch_profile("qwen35-a3b")
+
+        start_profile.assert_called_once_with("qwen35-a3b")
+        write_active_profile.assert_called_once_with("qwen35-a3b")
+
+    def test_active_profile_watchdog_restarts_dead_active_profile(self) -> None:
+        profiles = {
+            "qwen35-a3b": {
+                "PROFILE_NAME": "qwen35-a3b",
+                "DISPLAY_NAME": "Qwen 3.5 35B",
+                "REQUEST_MODEL": "qwen35-local",
+                "HOST": "127.0.0.1",
+                "PORT": "8080",
+            },
+        }
+
+        with (
+            mock.patch.object(MODULE, "read_active_profile", return_value="qwen35-a3b"),
+            mock.patch.object(MODULE, "load_profiles", return_value=profiles),
+            mock.patch.object(
+                MODULE,
+                "status_for_profile",
+                return_value={
+                    "running": False,
+                    "ready": False,
+                    "pid": None,
+                },
+            ),
+            mock.patch.object(MODULE, "start_profile") as start_profile,
+        ):
+            MODULE.active_profile_watchdog_once()
+
+        start_profile.assert_called_once_with("qwen35-a3b")
+
+    def test_active_profile_watchdog_leaves_live_active_profile_alone(self) -> None:
+        profiles = {
+            "qwen35-a3b": {
+                "PROFILE_NAME": "qwen35-a3b",
+                "DISPLAY_NAME": "Qwen 3.5 35B",
+                "REQUEST_MODEL": "qwen35-local",
+                "HOST": "127.0.0.1",
+                "PORT": "8080",
+            },
+        }
+
+        with (
+            mock.patch.object(MODULE, "read_active_profile", return_value="qwen35-a3b"),
+            mock.patch.object(MODULE, "load_profiles", return_value=profiles),
+            mock.patch.object(
+                MODULE,
+                "status_for_profile",
+                return_value={
+                    "running": True,
+                    "ready": False,
+                    "pid": 123,
+                },
+            ),
+            mock.patch.object(MODULE, "start_profile") as start_profile,
+        ):
+            MODULE.active_profile_watchdog_once()
+
+        start_profile.assert_not_called()
+
+    def test_stop_profile_clears_active_profile_when_already_stopped(self) -> None:
+        env = {
+            "PROFILE_NAME": "qwen35-a3b",
+            "DISPLAY_NAME": "Qwen 3.5 35B",
+            "REQUEST_MODEL": "qwen35-local",
+            "HOST": "127.0.0.1",
+            "PORT": "8080",
+        }
+
+        with (
+            mock.patch.object(MODULE, "require_profile", return_value=env),
+            mock.patch.object(MODULE, "status_for_profile", return_value={"pid": None}),
+            mock.patch.object(MODULE, "clear_active_profile") as clear_active_profile,
+        ):
+            MODULE.stop_profile("qwen35-a3b")
+
+        clear_active_profile.assert_called_once_with("qwen35-a3b")
+
     def test_diagnose_profile_accepts_valid_rvllm_mlx_profile(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
