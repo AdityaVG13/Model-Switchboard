@@ -50,6 +50,10 @@ struct MenuBarContentView: View {
         return formatter
     }()
 
+    private static let appVersion: String = {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
+    }()
+
     private var mainPanelWidth: CGFloat {
         CGFloat(clampPanelWidth(storedMainPanelWidth))
     }
@@ -157,9 +161,20 @@ struct MenuBarContentView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(features.appDisplayName)
                     .font(.title2.bold())
-                HStack(spacing: 10) {
-                    Label("\(store.displayedReadyProfiles)/\(store.summary.totalProfiles) ready", systemImage: "bolt.fill")
-                    Label("local control", systemImage: "switch.2")
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+                HStack(spacing: 7) {
+                    headerMetaItem(
+                        icon: "bolt.fill",
+                        text: "\(store.displayedReadyProfiles)/\(store.summary.totalProfiles) ready"
+                    )
+                    footerSeparator()
+                    headerMetaItem(icon: "switch.2", text: "local control")
+                    footerSeparator()
+                    Text("v\(Self.appVersion)")
+                        .fontWeight(.semibold)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -355,6 +370,16 @@ struct MenuBarContentView: View {
             .font(.caption.bold())
             .foregroundStyle(.tertiary)
             .accessibilityHidden(true)
+    }
+
+    private func headerMetaItem(icon: String, text: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon)
+                .imageScale(.small)
+            Text(text)
+                .lineLimit(1)
+        }
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     private func resizeHandle(_ edge: DashboardResizeEdge) -> some View {
