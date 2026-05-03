@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.1.4] - 2026-05-02
+
+### Fixed
+- Kept the dashboard open after model action clicks so users can see profiles transition through starting, stopping, and running states.
+- Hardened controller shutdown so Stop and Stop All terminate child processes, process groups, and stale profile port listeners instead of leaving model-serving Python processes resident.
+
 ## [1.1.3] - 2026-05-02
 
 ### Added
