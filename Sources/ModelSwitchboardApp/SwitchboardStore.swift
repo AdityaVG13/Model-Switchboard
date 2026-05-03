@@ -18,6 +18,8 @@ final class SwitchboardStore {
         static let loopbackEndpointProbeSuppressionSeconds: TimeInterval = 4
         static let loopbackEndpointProbeFastWindowSeconds: TimeInterval = 30
         static let loopbackEndpointProbeTimeoutSeconds: TimeInterval = 1
+        static let stopVerificationTimeoutSeconds: TimeInterval = 10
+        static let stopVerificationPollSeconds: TimeInterval = 0.5
     }
 
     enum StatusFreshness: Equatable {
@@ -311,6 +313,8 @@ final class SwitchboardStore {
             markProfile(profile, running: false, ready: false)
         } action: {
             try await $0.stop(profile: profile)
+        } verify: {
+            try await self.verifyProfileStopped(profile, using: $0)
         }
     }
 
@@ -334,8 +338,12 @@ final class SwitchboardStore {
         defer { pendingGlobalActions.remove("stop-all") }
         noteManagedLoopbackTransition()
         rememberLastActiveProfiles(from: statuses)
+        let stoppingProfiles = Set(statuses.filter { $0.running || $0.ready }.map(\.profile))
         statuses = statuses.map { $0.updating(running: false, ready: false) }
-        await run { try await $0.stopAll() }
+        await run(
+            { try await $0.stopAll() },
+            verify: { try await self.verifyProfilesStopped(stoppingProfiles, using: $0) }
+        )
     }
 
     func quickBenchmark(_ profiles: [String]? = nil) async {
@@ -516,7 +524,10 @@ final class SwitchboardStore {
         }
     }
 
-    private func run(_ action: @escaping (ControllerClient) async throws -> ControllerActionResponse) async {
+    private func run(
+        _ action: @escaping (ControllerClient) async throws -> ControllerActionResponse,
+        verify: ((ControllerClient) async throws -> Void)? = nil
+    ) async {
         do {
             let client = try self.client
             let response = try await action(client)
@@ -529,6 +540,7 @@ final class SwitchboardStore {
             if let profilesDirectory = response.profilesDirectory { self.profilesDirectory = profilesDirectory }
             if let controllerRoot = response.controllerRoot { self.controllerRoot = controllerRoot }
             cacheCurrentState()
+            try await verify?(client)
             lastError = nil
             lastUpdated = Date()
             await refresh()
@@ -542,14 +554,44 @@ final class SwitchboardStore {
         _ profile: String,
         label: String,
         optimisticUpdate: () -> Void,
-        action: @escaping (ControllerClient) async throws -> ControllerActionResponse
+        action: @escaping (ControllerClient) async throws -> ControllerActionResponse,
+        verify: ((ControllerClient) async throws -> Void)? = nil
     ) async {
         guard pendingProfileActions[profile] == nil else { return }
         noteManagedLoopbackTransition()
         pendingProfileActions[profile] = label
         optimisticUpdate()
         defer { pendingProfileActions.removeValue(forKey: profile) }
-        await run(action)
+        await run(action, verify: verify)
+    }
+
+    private func verifyProfileStopped(_ profile: String, using client: ControllerClient) async throws {
+        try await verifyProfilesStopped([profile], using: client)
+    }
+
+    private func verifyProfilesStopped(_ profiles: Set<String>, using client: ControllerClient) async throws {
+        guard !profiles.isEmpty else { return }
+        let deadline = Date().addingTimeInterval(Constants.stopVerificationTimeoutSeconds)
+        var survivingProfiles: [String] = []
+
+        while true {
+            let payload = try await client.fetchStatus()
+            let surviving = payload.statuses.filter { profiles.contains($0.profile) && ($0.running || $0.ready) }
+            if surviving.isEmpty {
+                apply(payload: payload)
+                cachePayload(payload, context: "stop-verification")
+                return
+            }
+            survivingProfiles = surviving.map(\.displayName)
+            if Date() >= deadline {
+                break
+            }
+            try await Task.sleep(for: .seconds(Constants.stopVerificationPollSeconds))
+        }
+
+        throw ControllerClientError.serverError(
+            "Stop returned but model process is still running: \(survivingProfiles.joined(separator: ", "))"
+        )
     }
 
     private func markProfile(_ profile: String, running: Bool, ready: Bool) {
