@@ -1491,9 +1491,11 @@ def terminate_pid(pid: int, *, timeout: float = 12.0) -> None:
     signal_process_tree(pid, signal.SIGKILL)
 
 
-def terminate_profile_processes(name: str, env: ProfileEnv, pid: int | None) -> None:
+def terminate_profile_processes(name: str, env: ProfileEnv, pid: int | None) -> bool:
+    terminated = False
     if pid:
         terminate_pid(pid)
+        terminated = True
 
     # A stale PID file should not leave a model server behind. If the profile
     # endpoint is still answering, reclaim the listener too.
@@ -1502,6 +1504,8 @@ def terminate_profile_processes(name: str, env: ProfileEnv, pid: int | None) -> 
         ready, _ = probe_health(env)
         if ready or pid_matches_profile(listener_pid, name, env):
             terminate_pid(listener_pid)
+            terminated = True
+    return terminated
 
 
 def wait_for_profile_stopped(name: str, env: ProfileEnv, pid: int | None, *, timeout: float = 8.0) -> bool:
@@ -1538,11 +1542,19 @@ def stop_profile(name: str) -> None:
         except Exception as exc:  # noqa: BLE001
             stop_error = exc
     if not pid:
+        terminated = False
+        if env.get("STOP_COMMAND_ONLY", "0") != "1":
+            terminated = terminate_profile_processes(name, env, None)
+            if terminated and not wait_for_profile_stopped(name, env, None):
+                raise RuntimeError(f"failed to stop {name}: endpoint or process is still alive")
         pid_path(name).unlink(missing_ok=True)
         clear_active_profile(name)
         if stop_error:
             raise RuntimeError(f"STOP_COMMAND failed for {name}: {stop_error}") from stop_error
-        print(f"[INFO] {name} already stopped")
+        if terminated:
+            print(f"[INFO] stopped {name} (stale listener)")
+        else:
+            print(f"[INFO] {name} already stopped")
         return
     if env.get("STOP_COMMAND_ONLY", "0") != "1":
         terminate_profile_processes(name, env, pid)

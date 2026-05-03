@@ -265,12 +265,33 @@ class ModelCtlTests(unittest.TestCase):
             mock.patch.object(MODULE, "require_profile", return_value=env),
             mock.patch.object(MODULE, "status_for_profile", return_value={"pid": None}),
             mock.patch.object(MODULE, "run_profile_shell") as run_profile_shell,
+            mock.patch.object(MODULE, "terminate_profile_processes", return_value=False) as terminate_profile_processes,
             mock.patch.object(MODULE, "pid_path") as pid_path,
         ):
             pid_path.return_value.unlink.return_value = None
             MODULE.stop_profile("external")
 
         run_profile_shell.assert_called_once_with("echo stop", env)
+        terminate_profile_processes.assert_called_once_with("external", env, None)
+
+    def test_stop_profile_terminates_stale_listener_without_pid(self) -> None:
+        env = {
+            "PROFILE_NAME": "managed",
+            "DISPLAY_NAME": "Managed",
+            "REQUEST_MODEL": "managed",
+        }
+        with (
+            mock.patch.object(MODULE, "require_profile", return_value=env),
+            mock.patch.object(MODULE, "status_for_profile", return_value={"pid": None}),
+            mock.patch.object(MODULE, "terminate_profile_processes", return_value=True) as terminate_profile_processes,
+            mock.patch.object(MODULE, "wait_for_profile_stopped", return_value=True) as wait_for_profile_stopped,
+            mock.patch.object(MODULE, "pid_path") as pid_path,
+        ):
+            pid_path.return_value.unlink.return_value = None
+            MODULE.stop_profile("managed")
+
+        terminate_profile_processes.assert_called_once_with("managed", env, None)
+        wait_for_profile_stopped.assert_called_once_with("managed", env, None)
 
     def test_stop_profile_runs_stop_command_then_terminates_pid(self) -> None:
         env = {
@@ -829,7 +850,10 @@ class ModelCtlTests(unittest.TestCase):
                     parser.add_argument("--max-request-tokens")
                     parser.add_argument("--gpu-memory-utilization")
                     parser.add_argument("--prefill-step-size")
+                    parser.add_argument("--cache-memory-mb")
                     parser.add_argument("--cache-memory-percent")
+                    parser.add_argument("--use-paged-cache", action="store_true")
+                    parser.add_argument("--no-memory-aware-cache", action="store_true")
                     parser.add_argument("--default-chat-template-kwargs")
                     parser.add_argument("--enable-auto-tool-choice", action="store_true")
                     parser.add_argument("--tool-call-parser")
@@ -876,7 +900,9 @@ class ModelCtlTests(unittest.TestCase):
                         "MODEL_ALIAS": log_alias,
                         "MAX_TOKENS": "32768",
                         "MAX_REQUEST_TOKENS": "32768",
+                        "CACHE_MEMORY_MB": "4096",
                         "CACHE_MEMORY_PERCENT": "0.15",
+                        "USE_PAGED_CACHE": "1",
                         "CHAT_TEMPLATE_KWARGS": "{\"enable_thinking\":false}",
                         "ENABLE_TOOL_CALLS": "1",
                         "TOOL_CALL_PARSER": "qwen",
