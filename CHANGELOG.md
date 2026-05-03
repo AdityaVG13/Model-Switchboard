@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.1.5] - 2026-05-02
+
+### Fixed
+- Verified Stop and Stop All results from the app after controller responses so lingering model processes are surfaced as errors instead of being hidden by optimistic UI state.
+
 ## [1.1.4] - 2026-05-02
 
 ### Fixed
