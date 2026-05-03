@@ -1203,6 +1203,35 @@ def process_alive(pid: int | None) -> bool:
     return True
 
 
+def child_pids(pid: int) -> list[int]:
+    try:
+        output = run(["pgrep", "-P", str(pid)]).stdout.strip().splitlines()
+    except subprocess.CalledProcessError:
+        return []
+    children: list[int] = []
+    for item in output:
+        item = item.strip()
+        if item.isdigit():
+            children.append(int(item))
+    return children
+
+
+def process_tree_pids(pid: int) -> list[int]:
+    seen: set[int] = set()
+    ordered: list[int] = []
+
+    def visit(current: int) -> None:
+        if current in seen:
+            return
+        seen.add(current)
+        ordered.append(current)
+        for child in child_pids(current):
+            visit(child)
+
+    visit(pid)
+    return ordered
+
+
 def pid_command(pid: int | None) -> str | None:
     if not pid:
         return None
@@ -1423,20 +1452,33 @@ def start_profile(name: str) -> None:
 
 
 
-def signal_process_tree(pid: int, sig: int) -> None:
-    try:
-        os.killpg(pid, sig)
-        return
-    except ProcessLookupError:
-        return
-    except OSError:
-        pass
+def signal_pid(pid: int, sig: int) -> None:
     try:
         os.kill(pid, sig)
     except ProcessLookupError:
         return
     except OSError:
         return
+
+
+def signal_process_tree(pid: int, sig: int) -> None:
+    try:
+        pgid = os.getpgid(pid)
+    except ProcessLookupError:
+        return
+    except OSError:
+        pgid = None
+
+    if pgid and pgid != os.getpgrp():
+        try:
+            os.killpg(pgid, sig)
+        except ProcessLookupError:
+            return
+        except OSError:
+            pass
+
+    for item in reversed(process_tree_pids(pid)):
+        signal_pid(item, sig)
 
 
 def terminate_pid(pid: int, *, timeout: float = 12.0) -> None:
@@ -1447,6 +1489,34 @@ def terminate_pid(pid: int, *, timeout: float = 12.0) -> None:
             return
         time.sleep(0.5)
     signal_process_tree(pid, signal.SIGKILL)
+
+
+def terminate_profile_processes(name: str, env: ProfileEnv, pid: int | None) -> None:
+    if pid:
+        terminate_pid(pid)
+
+    # A stale PID file should not leave a model server behind. If the profile
+    # endpoint is still answering, reclaim the listener too.
+    listener_pid = port_listener_pid(endpoint_port(env))
+    if listener_pid and listener_pid != pid:
+        ready, _ = probe_health(env)
+        if ready or pid_matches_profile(listener_pid, name, env):
+            terminate_pid(listener_pid)
+
+
+def wait_for_profile_stopped(name: str, env: ProfileEnv, pid: int | None, *, timeout: float = 8.0) -> bool:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        listener_pid = port_listener_pid(endpoint_port(env))
+        ready, _ = probe_health(env, timeout=0.5)
+        primary_alive = process_alive(pid)
+        listener_alive = bool(
+            listener_pid and (listener_pid == pid or ready or pid_matches_profile(listener_pid, name, env))
+        )
+        if not primary_alive and not listener_alive and not ready:
+            return True
+        time.sleep(0.5)
+    return False
 
 
 def run_profile_shell(command: str, env: ProfileEnv) -> subprocess.CompletedProcess[str]:
@@ -1475,7 +1545,9 @@ def stop_profile(name: str) -> None:
         print(f"[INFO] {name} already stopped")
         return
     if env.get("STOP_COMMAND_ONLY", "0") != "1":
-        terminate_pid(pid)
+        terminate_profile_processes(name, env, pid)
+        if not wait_for_profile_stopped(name, env, pid):
+            raise RuntimeError(f"failed to stop {name}: endpoint or process is still alive")
     pid_path(name).unlink(missing_ok=True)
     clear_active_profile(name)
     if stop_error:

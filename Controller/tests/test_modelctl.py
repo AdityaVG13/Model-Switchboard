@@ -223,14 +223,36 @@ class ModelCtlTests(unittest.TestCase):
 
     def test_terminate_pid_signals_process_group_before_process(self) -> None:
         with (
+            mock.patch.object(MODULE.os, "getpgid", return_value=4242),
+            mock.patch.object(MODULE.os, "getpgrp", return_value=9999),
             mock.patch.object(MODULE.os, "killpg") as killpg,
             mock.patch.object(MODULE.os, "kill") as kill_pid,
             mock.patch.object(MODULE, "process_alive", return_value=False),
+            mock.patch.object(MODULE, "process_tree_pids", return_value=[]),
         ):
             MODULE.terminate_pid(4242)
 
         killpg.assert_called_once_with(4242, signal.SIGTERM)
         kill_pid.assert_not_called()
+
+    def test_signal_process_tree_signals_descendants_when_process_is_not_group_leader(self) -> None:
+        with (
+            mock.patch.object(MODULE.os, "getpgid", return_value=9000),
+            mock.patch.object(MODULE.os, "getpgrp", return_value=9999),
+            mock.patch.object(MODULE.os, "killpg", side_effect=OSError),
+            mock.patch.object(MODULE, "process_tree_pids", return_value=[4242, 5151, 6161]),
+            mock.patch.object(MODULE, "signal_pid") as signal_pid,
+        ):
+            MODULE.signal_process_tree(4242, signal.SIGTERM)
+
+        self.assertEqual(
+            signal_pid.mock_calls,
+            [
+                mock.call(6161, signal.SIGTERM),
+                mock.call(5151, signal.SIGTERM),
+                mock.call(4242, signal.SIGTERM),
+            ],
+        )
 
     def test_stop_profile_runs_stop_command_without_pid(self) -> None:
         env = {
@@ -261,14 +283,15 @@ class ModelCtlTests(unittest.TestCase):
             mock.patch.object(MODULE, "require_profile", return_value=env),
             mock.patch.object(MODULE, "status_for_profile", return_value={"pid": 5151}),
             mock.patch.object(MODULE, "run_profile_shell") as run_profile_shell,
-            mock.patch.object(MODULE, "terminate_pid") as terminate_pid,
+            mock.patch.object(MODULE, "terminate_profile_processes") as terminate_profile_processes,
+            mock.patch.object(MODULE, "wait_for_profile_stopped", return_value=True),
             mock.patch.object(MODULE, "pid_path") as pid_path,
         ):
             pid_path.return_value.unlink.return_value = None
             MODULE.stop_profile("managed")
 
         run_profile_shell.assert_called_once_with("echo stop", env)
-        terminate_pid.assert_called_once_with(5151)
+        terminate_profile_processes.assert_called_once_with("managed", env, 5151)
 
     def test_status_for_profile_ignores_unmatched_shared_port_listener(self) -> None:
         env = {
