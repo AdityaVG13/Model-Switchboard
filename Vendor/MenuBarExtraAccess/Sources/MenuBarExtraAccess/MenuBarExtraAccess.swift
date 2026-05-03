@@ -6,6 +6,7 @@
 
 #if os(macOS)
 
+import AppKit
 import SwiftUI
 import Combine
 
@@ -197,23 +198,50 @@ struct MenuBarExtraAccess<Content: Scene>: Scene {
                 #if MENUBAREXTRAACCESS_DEBUG_LOGGING
                 print("MenuBarExtra index \(index) drop-down window did resign as key.")
                 #endif
-                
-                // it's possible for a window to resign key without actually closing, so let's
-                // close it as a failsafe.
-                if window.isVisible {
+
+                // SwiftUI controls inside a window-based MenuBarExtra can briefly
+                // move key focus while handling a click. Closing immediately here
+                // makes action buttons dismiss the dashboard before their pending
+                // state can be seen, so wait one run-loop turn and verify focus
+                // really left the menu window family.
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(50))
+
+                    guard window.isVisible else {
+                        MenuBarExtraUtils.setKnownPresented(for: .index(index), state: false)
+                        isMenuPresented = false
+                        return
+                    }
+
+                    if window.isKeyWindow || windowContainsCurrentKeyWindow(window) || mouseIsInsideWindow(window) {
+                        MenuBarExtraUtils.setKnownPresented(for: .index(index), state: true)
+                        isMenuPresented = true
+                        return
+                    }
+
                     #if MENUBAREXTRAACCESS_DEBUG_LOGGING
                     print("Closing MenuBarExtra index \(index) drop-down window as a result of it resigning as key.")
                     #endif
-                    
+
                     window.close()
+                    MenuBarExtraUtils.setKnownPresented(for: .index(index), state: false)
+                    isMenuPresented = false
                 }
-                
-                MenuBarExtraUtils.setKnownPresented(for: .index(index), state: false)
-                isMenuPresented = false
             }
         )
         
         return 0
+    }
+
+    private func windowContainsCurrentKeyWindow(_ window: NSWindow) -> Bool {
+        guard let keyWindow = NSApp.keyWindow else { return false }
+        if keyWindow === window { return true }
+        if keyWindow.parent === window { return true }
+        return window.childWindows?.contains(where: { $0 === keyWindow }) == true
+    }
+
+    private func mouseIsInsideWindow(_ window: NSWindow) -> Bool {
+        window.frame.contains(NSEvent.mouseLocation)
     }
     
     // MARK: Observers
