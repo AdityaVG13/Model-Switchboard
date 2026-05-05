@@ -816,6 +816,73 @@ class ModelCtlTests(unittest.TestCase):
             pid = int((tmp_path / "run" / "qwen-mlx.pid").read_text().strip())
             os.kill(pid, signal.SIGTERM)
 
+    def test_start_model_script_honors_start_timeout_for_command_and_ollama_runtimes(self) -> None:
+        for runtime, profile_extra, expected_checks in [
+            ("command", "START_COMMAND=true\n", 4),
+            ("ollama", "", 3),
+        ]:
+            with self.subTest(runtime=runtime), tempfile.TemporaryDirectory() as tmpdir:
+                tmp_path = Path(tmpdir)
+                script_path = tmp_path / "start-model-mac.sh"
+                shutil.copy2(ROOT / "start-model-mac.sh", script_path)
+                port = reserve_local_port()
+
+                fake_bin = tmp_path / "bin"
+                fake_bin.mkdir()
+                curl_count_path = tmp_path / "curl-count"
+                curl_bin = fake_bin / "curl"
+                curl_bin.write_text(
+                    textwrap.dedent(
+                        """\
+                        #!/bin/sh
+                        printf '1\\n' >> "$CURL_COUNT_PATH"
+                        exit 22
+                        """
+                    )
+                )
+                curl_bin.chmod(0o755)
+                sleep_bin = fake_bin / "sleep"
+                sleep_bin.write_text("#!/bin/sh\nexit 0\n")
+                sleep_bin.chmod(0o755)
+                server_bin = fake_bin / "ollama"
+                server_bin.write_text("#!/bin/sh\nexit 0\n")
+                server_bin.chmod(0o755)
+
+                timeout_seconds = 3 if runtime == "command" else 2
+                profile_path = tmp_path / f"{runtime}-timeout.env"
+                profile_path.write_text(
+                    textwrap.dedent(
+                        f"""\
+                        DISPLAY_NAME='{runtime} timeout'
+                        RUNTIME={runtime}
+                        SERVER_BIN={server_bin}
+                        HOST=127.0.0.1
+                        PORT={port}
+                        REQUEST_MODEL={runtime}-timeout
+                        SERVER_MODEL_ID={runtime}-timeout
+                        START_TIMEOUT_SECONDS={timeout_seconds}
+                        {profile_extra}"""
+                    )
+                )
+
+                env = os.environ.copy()
+                env["MODEL_PROFILE"] = f"{runtime}-timeout"
+                env["MODEL_PROFILE_PATH"] = str(profile_path)
+                env["CURL_COUNT_PATH"] = str(curl_count_path)
+                env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
+
+                result = subprocess.run(
+                    ["bash", str(script_path)],
+                    cwd=tmp_path,
+                    env=env,
+                    text=True,
+                    capture_output=True,
+                    timeout=10,
+                )
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(len(curl_count_path.read_text().splitlines()), expected_checks)
+
     def test_start_model_script_supports_rvllm_mlx_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)

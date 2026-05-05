@@ -740,7 +740,7 @@ elif [ "$RUNTIME" = "ollama" ]; then
         cmd=("$OLLAMA_BIN" serve)
         append_json_args "$SERVER_ARGS_JSON"
         spawn_detached "$LOG_PATH" "$PID_PATH" "${cmd[@]}" >/dev/null
-        if ! wait_for_profile_ready "$HEALTHCHECK_MODE" "$HEALTHCHECK_URL" "${HEALTHCHECK_EXPECT_ID:-${SERVER_MODEL_ID:-}}" 120; then
+        if ! wait_for_profile_ready "$HEALTHCHECK_MODE" "$HEALTHCHECK_URL" "${HEALTHCHECK_EXPECT_ID:-${SERVER_MODEL_ID:-}}" "${START_TIMEOUT_SECONDS:-120}"; then
             tail -n 120 "$LOG_PATH" || true
             die "Ollama failed to become ready for $MODEL_PROFILE"
         fi
@@ -831,7 +831,7 @@ elif [ "$RUNTIME" = "command" ] || [ -n "${START_COMMAND:-}" ]; then
     else
         log "Starting $RUNTIME profile $MODEL_PROFILE"
         spawn_detached "$LOG_PATH" "$PID_PATH" bash -lc "$START_COMMAND" >/dev/null
-        if ! wait_for_profile_ready "$HEALTHCHECK_MODE" "$HEALTHCHECK_URL" "${HEALTHCHECK_EXPECT_ID:-${SERVER_MODEL_ID:-}}" 120; then
+        if ! wait_for_profile_ready "$HEALTHCHECK_MODE" "$HEALTHCHECK_URL" "${HEALTHCHECK_EXPECT_ID:-${SERVER_MODEL_ID:-}}" "${START_TIMEOUT_SECONDS:-120}"; then
             tail -n 120 "$LOG_PATH" || true
             die "$RUNTIME runtime failed to become ready for $MODEL_PROFILE"
         fi
