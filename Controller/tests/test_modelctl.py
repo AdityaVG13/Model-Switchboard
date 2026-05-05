@@ -718,6 +718,104 @@ class ModelCtlTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Set MODEL_PROFILE or MODEL_PROFILE_PATH", result.stderr or result.stdout)
 
+    def test_start_model_script_preserves_non_empty_chat_template_args(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            script_path = tmp_path / "start-model-mac.sh"
+            shutil.copy2(ROOT / "start-model-mac.sh", script_path)
+            port = reserve_local_port()
+
+            model_dir = tmp_path / "model"
+            model_dir.mkdir()
+            capture_path = tmp_path / "mlx-args.json"
+            server_bin = tmp_path / "fake-mlx-server"
+            server_bin.write_text(
+                textwrap.dedent(
+                    """\
+                    #!/usr/bin/env python3
+                    import argparse
+                    import json
+                    import os
+                    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+                    parser = argparse.ArgumentParser()
+                    parser.add_argument("--model", required=True)
+                    parser.add_argument("--host", default="127.0.0.1")
+                    parser.add_argument("--port", type=int, required=True)
+                    parser.add_argument("--temp")
+                    parser.add_argument("--top-p")
+                    parser.add_argument("--max-tokens")
+                    parser.add_argument("--prompt-cache-size")
+                    parser.add_argument("--prompt-cache-bytes")
+                    parser.add_argument("--prompt-concurrency")
+                    parser.add_argument("--decode-concurrency")
+                    parser.add_argument("--prefill-step-size")
+                    parser.add_argument("--chat-template-args")
+                    args = parser.parse_args()
+
+                    with open(os.environ["ARG_CAPTURE_PATH"], "w", encoding="utf-8") as fp:
+                        json.dump(vars(args), fp)
+
+                    class Handler(BaseHTTPRequestHandler):
+                        def do_GET(self):
+                            if self.path != "/v1/models":
+                                self.send_response(404)
+                                self.end_headers()
+                                return
+                            payload = json.dumps({"data": [{"id": "qwen-mlx"}]}).encode()
+                            self.send_response(200)
+                            self.send_header("Content-Type", "application/json")
+                            self.send_header("Content-Length", str(len(payload)))
+                            self.end_headers()
+                            self.wfile.write(payload)
+
+                        def log_message(self, format, *args):
+                            return
+
+                    ThreadingHTTPServer((args.host, args.port), Handler).serve_forever()
+                    """
+                )
+            )
+            server_bin.chmod(0o755)
+
+            profile_path = tmp_path / "qwen-mlx.json"
+            profile_path.write_text(
+                json.dumps(
+                    {
+                        "DISPLAY_NAME": "Qwen MLX",
+                        "RUNTIME": "mlx",
+                        "SERVER_BIN": str(server_bin),
+                        "MODEL_DIR": str(model_dir),
+                        "HOST": "127.0.0.1",
+                        "PORT": str(port),
+                        "REQUEST_MODEL": "qwen-mlx",
+                        "SERVER_MODEL_ID": "qwen-mlx",
+                        "CHAT_TEMPLATE_ARGS": '{"enable_thinking":false}',
+                    }
+                )
+            )
+
+            env = os.environ.copy()
+            env["MODEL_PROFILE"] = "qwen-mlx"
+            env["MODEL_PROFILE_PATH"] = str(profile_path)
+            env["ARG_CAPTURE_PATH"] = str(capture_path)
+
+            result = subprocess.run(
+                ["bash", str(script_path)],
+                cwd=tmp_path,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+
+            self.assertIn("runtime=mlx", result.stdout)
+            captured_args = json.loads(capture_path.read_text())
+            self.assertEqual(captured_args["chat_template_args"], '{"enable_thinking":false}')
+
+            pid = int((tmp_path / "run" / "qwen-mlx.pid").read_text().strip())
+            os.kill(pid, signal.SIGTERM)
+
     def test_start_model_script_supports_rvllm_mlx_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
