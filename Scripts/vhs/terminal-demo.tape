@@ -15,11 +15,11 @@ Set TypingSpeed 35ms
 Set PlaybackSpeed 1.0
 
 Hide
-Type "export PATH=/Users/aditya/Projects/ModelSwitchboard/Scripts:$PATH"
+Type "export PATH=\"$PWD/Scripts:$PATH\""
 Enter
 Type "alias msb=model-switchboardctl"
 Enter
-Type "alias inv=/Users/aditya/Projects/ModelSwitchboard/Scripts/vhs/inventory.sh"
+Type "alias inv=\"$PWD/Scripts/vhs/inventory.sh\""
 Enter
 Type "clear"
 Enter
