@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
+## Unreleased
+
+### Changed
+- Hardened controller profile parsing so `.env` profiles are treated as declarative key/value data instead of shell scripts, with explicit validation shared by the CLI and launcher.
+
 ## [1.1.5] - 2026-05-02
 
 ### Fixed

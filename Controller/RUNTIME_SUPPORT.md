@@ -8,6 +8,8 @@ Model Switchboard treats every local model server as one of three launch modes:
 
 This keeps the controller open-ended. If a runtime exposes an OpenAI-compatible endpoint, it can be represented without code changes. If a runtime has no native adapter yet, use `SERVER_BIN` plus `SERVER_ARGS_JSON`, or use `START_COMMAND`.
 
+Profile files may be JSON or declarative `.env` files. `.env` profiles support `KEY=value`, `export KEY=value`, quoted values, blank lines, and comments; they are not sourced as shell scripts. Shell snippets belong only inside explicit `START_COMMAND` and `STOP_COMMAND` values, and run only when those actions are invoked. Prefer JSON profiles for structured values such as `SERVER_ARGS_JSON`.
+
 ## Runtime Tags
 
 Every status payload includes:

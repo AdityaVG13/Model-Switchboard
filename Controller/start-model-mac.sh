@@ -73,39 +73,16 @@ if [ -z "$MODEL_PROFILE" ]; then
     MODEL_PROFILE="${MODEL_PROFILE%.*}"
 fi
 
-load_json_profile() {
+load_profile_exports() {
     local path="$1"
-    eval "$(
-        python3 - "$path" <<'PY'
-import json
-import pathlib
-import shlex
-import sys
-
-path = pathlib.Path(sys.argv[1])
-data = json.loads(path.read_text())
-if not isinstance(data, dict):
-    raise SystemExit(f"Profile JSON must be an object: {path}")
-for key, value in data.items():
-    if value is None:
-        rendered = ""
-    elif isinstance(value, bool):
-        rendered = "1" if value else "0"
-    elif isinstance(value, (list, dict)):
-        rendered = json.dumps(value)
-    else:
-        rendered = str(value)
-    print(f"export {key}={shlex.quote(rendered)}")
-PY
-    )"
+    local exports
+    if ! exports="$(python3 "$WORK_DIR/profile_env.py" "$path")"; then
+        die "Failed to load profile: $path"
+    fi
+    eval "$exports"
 }
 
-if [[ "$PROFILE_PATH" == *.json ]]; then
-    load_json_profile "$PROFILE_PATH"
-else
-    # shellcheck disable=SC1090
-    source "$PROFILE_PATH"
-fi
+load_profile_exports "$PROFILE_PATH"
 
 calc_threads() {
     local cpu_count

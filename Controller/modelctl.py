@@ -6,7 +6,6 @@ import datetime as dt
 import json
 import os
 import pathlib
-import shlex
 import shutil
 import signal
 import subprocess
@@ -36,6 +35,7 @@ from contracts import (
     make_cached_status_payload,
     make_controller_status_payload,
 )
+from profile_env import ProfileFormatError, load_env_profile, load_json_profile, load_profile
 
 BASE = pathlib.Path(__file__).resolve().parent
 PROFILE_DIR = BASE / "model-profiles"
@@ -986,51 +986,18 @@ def run(
     )
 
 
-def load_env_profile(path: pathlib.Path) -> ProfileEnv:
-    data = subprocess.check_output(
-        ["bash", "-lc", f"set -a; source {shlex.quote(str(path))}; env -0"],
-        text=False,
-    )
-    env: ProfileEnv = {}
-    for item in data.decode().split("\0"):
-        if not item or "=" not in item:
-            continue
-        key, value = item.split("=", 1)
-        env[key] = value
-    env["PROFILE_NAME"] = path.stem
-    return env
-
-
-def load_json_profile(path: pathlib.Path) -> ProfileEnv:
-    raw = json.loads(path.read_text())
-    if not isinstance(raw, dict):
-        raise SystemExit(f"Profile JSON must be an object: {path}")
-    env: ProfileEnv = {}
-    for key, value in raw.items():
-        if value is None:
-            env[key] = ""
-        elif isinstance(value, bool):
-            env[key] = "1" if value else "0"
-        elif isinstance(value, (list, dict)):
-            env[key] = json.dumps(value)
-        else:
-            env[key] = str(value)
-    env["PROFILE_NAME"] = path.stem
-    return env
-
-
-def load_profile(path: pathlib.Path) -> ProfileEnv:
-    if path.suffix == ".json":
-        return load_json_profile(path)
-    return load_env_profile(path)
-
-
 def profile_paths() -> list[pathlib.Path]:
     return sorted(list(PROFILE_DIR.glob("*.env")) + list(PROFILE_DIR.glob("*.json")))
 
 
 def load_profiles() -> dict[str, ProfileEnv]:
-    return {path.stem: load_profile(path) for path in profile_paths()}
+    profiles: dict[str, ProfileEnv] = {}
+    for path in profile_paths():
+        try:
+            profiles[path.stem] = load_profile(path)
+        except ProfileFormatError as exc:
+            raise SystemExit(str(exc)) from exc
+    return profiles
 
 
 def require_profile(name: str) -> ProfileEnv:

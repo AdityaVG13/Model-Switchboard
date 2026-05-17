@@ -205,6 +205,7 @@ Rules:
   - `MODEL_DIR` or `MODEL_REPO` for MLX
   - `SERVER_BIN` when a runtime binary is not already on PATH
   - A named `RUNTIME` plus `START_COMMAND` or `SERVER_BIN` for launchers without a native adapter yet
+  - JSON profiles for structured values; `.env` profiles are declarative key/value files, not shell scripts
 - Use the controller contract and profile format documented in this repo's `SETUP.md`.
 - Put profiles in the controller's `model-profiles` directory.
 - Verify that each profile can be started, health-checked, and stopped cleanly.

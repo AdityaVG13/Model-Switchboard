@@ -31,7 +31,58 @@ def reserve_local_port() -> int:
         return int(sock.getsockname()[1])
 
 
+def copy_start_model_launcher(target_dir: Path) -> Path:
+    script_path = target_dir / "start-model-mac.sh"
+    shutil.copy2(ROOT / "start-model-mac.sh", script_path)
+    shutil.copy2(ROOT / "profile_env.py", target_dir / "profile_env.py")
+    return script_path
+
+
 class ModelCtlTests(unittest.TestCase):
+    def test_load_env_profile_is_declarative_and_does_not_execute_shell(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            marker = Path(tmpdir) / "profile-loader-ran"
+            profile = Path(tmpdir) / "safe.env"
+            profile.write_text(
+                textwrap.dedent(
+                    f"""\
+                    DISPLAY_NAME=$(touch {marker})
+                    START_COMMAND='cd /tmp && ./serve --port 8123'
+                    STOP_COMMAND='curl -fsS http://127.0.0.1:8123/shutdown || true'
+                    SERVER_ARGS_JSON='["--n_ctx", "32768"]'
+                    export SYNC_TO_DROID=0
+                    INLINE_COMMENT=value # local note
+                    """
+                )
+            )
+
+            env = MODULE.load_env_profile(profile)
+
+            self.assertFalse(marker.exists())
+            self.assertEqual(env["DISPLAY_NAME"], f"$(touch {marker})")
+            self.assertEqual(env["START_COMMAND"], "cd /tmp && ./serve --port 8123")
+            self.assertEqual(env["STOP_COMMAND"], "curl -fsS http://127.0.0.1:8123/shutdown || true")
+            self.assertEqual(env["SERVER_ARGS_JSON"], '["--n_ctx", "32768"]')
+            self.assertEqual(env["SYNC_TO_DROID"], "0")
+            self.assertEqual(env["INLINE_COMMENT"], "value")
+            self.assertEqual(env["PROFILE_NAME"], "safe")
+
+    def test_load_env_profile_rejects_shell_statements(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            profile = Path(tmpdir) / "unsafe.env"
+            profile.write_text("source ~/.zshrc\n")
+
+            with self.assertRaisesRegex(MODULE.ProfileFormatError, "profile files are not shell scripts"):
+                MODULE.load_env_profile(profile)
+
+    def test_load_json_profile_rejects_invalid_export_keys(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            profile = Path(tmpdir) / "unsafe.json"
+            profile.write_text(json.dumps({"BAD-KEY": "value"}))
+
+            with self.assertRaisesRegex(MODULE.ProfileFormatError, "invalid profile key"):
+                MODULE.load_json_profile(profile)
+
     def test_model_path_for_profile_supports_model_root_hint(self) -> None:
         env = {"MODEL_FILE": "demo.gguf", "MODEL_ROOT_HINT": "/hinted-models"}
 
@@ -705,8 +756,7 @@ class ModelCtlTests(unittest.TestCase):
 
     def test_start_model_script_requires_profile_selection(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            script_path = Path(tmpdir) / "start-model-mac.sh"
-            shutil.copy2(ROOT / "start-model-mac.sh", script_path)
+            script_path = copy_start_model_launcher(Path(tmpdir))
 
             result = subprocess.run(
                 ["bash", str(script_path)],
@@ -721,8 +771,7 @@ class ModelCtlTests(unittest.TestCase):
     def test_start_model_script_preserves_non_empty_chat_template_args(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
-            script_path = tmp_path / "start-model-mac.sh"
-            shutil.copy2(ROOT / "start-model-mac.sh", script_path)
+            script_path = copy_start_model_launcher(tmp_path)
             port = reserve_local_port()
 
             model_dir = tmp_path / "model"
@@ -823,8 +872,7 @@ class ModelCtlTests(unittest.TestCase):
         ]:
             with self.subTest(runtime=runtime), tempfile.TemporaryDirectory() as tmpdir:
                 tmp_path = Path(tmpdir)
-                script_path = tmp_path / "start-model-mac.sh"
-                shutil.copy2(ROOT / "start-model-mac.sh", script_path)
+                script_path = copy_start_model_launcher(tmp_path)
                 port = reserve_local_port()
 
                 fake_bin = tmp_path / "bin"
@@ -886,8 +934,7 @@ class ModelCtlTests(unittest.TestCase):
     def test_start_model_script_supports_rvllm_mlx_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
-            script_path = tmp_path / "start-model-mac.sh"
-            shutil.copy2(ROOT / "start-model-mac.sh", script_path)
+            script_path = copy_start_model_launcher(tmp_path)
             port = reserve_local_port()
 
             model_dir = tmp_path / "model"
@@ -987,8 +1034,7 @@ class ModelCtlTests(unittest.TestCase):
     def test_start_model_script_supports_vllm_mlx_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
-            script_path = tmp_path / "start-model-mac.sh"
-            shutil.copy2(ROOT / "start-model-mac.sh", script_path)
+            script_path = copy_start_model_launcher(tmp_path)
             port = reserve_local_port()
 
             model_dir = tmp_path / "model"
@@ -1098,8 +1144,7 @@ class ModelCtlTests(unittest.TestCase):
     def test_start_model_script_supports_generic_server_bin_with_json_args(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
-            script_path = tmp_path / "start-model-mac.sh"
-            shutil.copy2(ROOT / "start-model-mac.sh", script_path)
+            script_path = copy_start_model_launcher(tmp_path)
             port = reserve_local_port()
             server_bin = tmp_path / "fake-tabbyapi-server"
             server_bin.write_text(
@@ -1177,8 +1222,7 @@ class ModelCtlTests(unittest.TestCase):
     def test_start_model_script_resolves_model_root_hint_and_passes_llama_args(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
-            script_path = tmp_path / "start-model-mac.sh"
-            shutil.copy2(ROOT / "start-model-mac.sh", script_path)
+            script_path = copy_start_model_launcher(tmp_path)
             port = reserve_local_port()
 
             model_root = tmp_path / "hinted-models"
@@ -1330,8 +1374,7 @@ class ModelCtlTests(unittest.TestCase):
             tmp_path = Path(tmpdir)
             controller_dir = tmp_path / "Controller"
             controller_dir.mkdir()
-            script_path = controller_dir / "start-model-mac.sh"
-            shutil.copy2(ROOT / "start-model-mac.sh", script_path)
+            script_path = copy_start_model_launcher(controller_dir)
 
             profile_path = controller_dir / "broken.env"
             profile_path.write_text(
