@@ -16,9 +16,9 @@ sleep 1
 
 for app_name in "${APP_NAMES[@]}"; do
   rm -rf "$ROOT_DIR/dist/$app_name"
-  rm -rf "$INSTALL_DIR/$app_name"
+  rm -rf "${INSTALL_DIR:?}/$app_name"
   if [ -w "$SYSTEM_APPLICATIONS_DIR" ]; then
-    rm -rf "$SYSTEM_APPLICATIONS_DIR/$app_name"
+    rm -rf "${SYSTEM_APPLICATIONS_DIR:?}/$app_name"
   fi
 done
 

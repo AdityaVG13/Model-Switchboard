@@ -1,4 +1,5 @@
 #!/usr/bin/env zsh
+# shellcheck shell=bash
 set -euo pipefail
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
@@ -493,17 +494,13 @@ frontmost_app() {
   run_osascript 'tell application "System Events" to get name of first process whose frontmost is true' 3 0.2
 }
 
-ANCHOR_APP_NAME=""
-
 activate_anchor_app() {
   local candidate
   for candidate in "${MSW_ANCHOR_APP:-ghostty}" ghostty Terminal iTerm2 Finder; do
     if run_osascript "tell application \"$candidate\" to activate" 2 0.2 >/dev/null; then
-      ANCHOR_APP_NAME="$candidate"
       return 0
     fi
   done
-  ANCHOR_APP_NAME="Finder"
 }
 
 frontmost_browser_url() {

@@ -21,7 +21,7 @@ expand_user_path() {
         "~")
             printf '%s\n' "$HOME"
             ;;
-        "~/"*)
+        ~/*)
             printf '%s/%s\n' "$HOME" "${path#~/}"
             ;;
         *)
@@ -396,7 +396,7 @@ wait_for_models_endpoint() {
     local expected_id="$2"
     local retries="${3:-60}"
     local response
-    for i in $(seq 1 "$retries"); do
+    while [ "$retries" -gt 0 ]; do
         if response="$(curl -fsS "$models_url" 2>/dev/null)"; then
             if [ -n "$expected_id" ] && ! RESPONSE_JSON="$response" python3 - "$expected_id" <<'PY'
 import json
@@ -416,11 +416,13 @@ raise SystemExit(0 if expected in ids else 1)
 PY
             then
                 sleep 2
+                retries=$((retries - 1))
                 continue
             fi
             return 0
         fi
         sleep 2
+        retries=$((retries - 1))
     done
     return 1
 }
@@ -428,11 +430,12 @@ PY
 wait_for_http_200() {
     local url="$1"
     local retries="${2:-60}"
-    for i in $(seq 1 "$retries"); do
+    while [ "$retries" -gt 0 ]; do
         if curl -fsS "$url" >/dev/null 2>&1; then
             return 0
         fi
         sleep 2
+        retries=$((retries - 1))
     done
     return 1
 }

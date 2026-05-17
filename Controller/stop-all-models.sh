@@ -32,6 +32,24 @@ list_model_pids() {
     pgrep -u "$(id -u)" -f '(^|/)(llama-server|llama\.cpp-server|mlx_lm\.server)( |$)' || true
 }
 
+pids_csv() {
+    printf '%s\n' "$1" | paste -sd, -
+}
+
+kill_pids() {
+    local signal_arg="$1"
+    local pids="$2"
+    local pid
+    while IFS= read -r pid; do
+        [ -n "$pid" ] || continue
+        if [ -n "$signal_arg" ]; then
+            kill "$signal_arg" "$pid" 2>/dev/null || true
+        else
+            kill "$pid" 2>/dev/null || true
+        fi
+    done <<< "$pids"
+}
+
 print_status() {
     section "Active model servers"
 
@@ -43,7 +61,7 @@ print_status() {
         return 0
     fi
 
-    ps -o pid=,etime=,rss=,command= -p $pids | while read -r pid etime rss command; do
+    ps -o pid=,etime=,rss=,command= -p "$(pids_csv "$pids")" | while read -r pid etime rss command; do
         printf 'pid=%s  etime=%s  rss_kb=%s  cmd=%s\n' "$pid" "$etime" "$rss" "$command"
     done
 
@@ -61,8 +79,8 @@ stop_models() {
     fi
 
     section "Stopping model servers"
-    ps -o pid=,command= -p $pids
-    kill $pids 2>/dev/null || true
+    ps -o pid=,command= -p "$(pids_csv "$pids")"
+    kill_pids "" "$pids"
 
     local deadline
     deadline=$((SECONDS + WAIT_SECONDS))
@@ -78,8 +96,8 @@ stop_models() {
     done
 
     warn "Some model servers did not exit after ${WAIT_SECONDS}s; forcing them down"
-    ps -o pid=,command= -p $pids
-    kill -9 $pids 2>/dev/null || true
+    ps -o pid=,command= -p "$(pids_csv "$pids")"
+    kill_pids "-9" "$pids"
     sleep 1
 
     pids="$(list_model_pids)"
@@ -90,7 +108,7 @@ stop_models() {
     fi
 
     err "Some managed local model processes are still running"
-    ps -o pid=,command= -p $pids
+    ps -o pid=,command= -p "$(pids_csv "$pids")"
     return 1
 }
 
