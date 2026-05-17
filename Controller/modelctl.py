@@ -1103,20 +1103,42 @@ def profile_working_directory(env: ProfileEnv) -> pathlib.Path | None:
     return expand_profile_path(raw) if raw else None
 
 
+def validate_http_url(url: str, *, field: str = "URL") -> str:
+    value = url.strip()
+    parsed = urllib.parse.urlparse(value)
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+        raise ValueError(f"{field} must use http or https")
+    return value.rstrip("/")
+
+
+def url_host_literal(host: str) -> str:
+    value = host.strip()
+    if ":" in value and not (value.startswith("[") and value.endswith("]")):
+        return f"[{value}]"
+    return value
+
+
+def default_client_host(env: ProfileEnv) -> str:
+    host = env.get("HOST", "127.0.0.1").strip() or "127.0.0.1"
+    if is_loopback_host(host):
+        return host
+    return "127.0.0.1"
+
+
 def base_url(env: ProfileEnv) -> str:
     configured = env.get("BASE_URL", "").strip()
     if configured:
-        return configured.rstrip("/")
+        return validate_http_url(configured, field="BASE_URL")
     port = env.get("PORT", "").strip()
     if not port:
         return ""
-    return f"http://{env.get('HOST', '127.0.0.1')}:{port}/v1"
+    return f"http://{url_host_literal(default_client_host(env))}:{port}/v1"
 
 
 def models_url(env: ProfileEnv) -> str:
     configured = env.get("MODEL_LIST_URL", "").strip()
     if configured:
-        return configured
+        return validate_http_url(configured, field="MODEL_LIST_URL")
     url = base_url(env)
     if not url:
         return ""
@@ -1130,7 +1152,7 @@ def healthcheck_mode(env: ProfileEnv) -> str:
 def healthcheck_url(env: ProfileEnv) -> str:
     configured = env.get("HEALTHCHECK_URL", "").strip()
     if configured:
-        return configured
+        return validate_http_url(configured, field="HEALTHCHECK_URL")
     if healthcheck_mode(env) == "openai-models":
         return models_url(env)
     return base_url(env)
@@ -1320,6 +1342,10 @@ def port_listener_pid(port: str) -> int | None:
 def fetch_openai_models(url: str, timeout: float = 1.5) -> list[str]:
     if not url:
         return []
+    try:
+        url = validate_http_url(url)
+    except ValueError:
+        return []
     request = urllib.request.Request(url, headers={"Accept": "application/json"})
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -1331,7 +1357,10 @@ def fetch_openai_models(url: str, timeout: float = 1.5) -> list[str]:
 
 def probe_health(env: ProfileEnv, timeout: float = 1.5) -> tuple[bool, list[str]]:
     mode = healthcheck_mode(env)
-    url = healthcheck_url(env)
+    try:
+        url = healthcheck_url(env)
+    except ValueError:
+        return False, []
     if mode == "disabled":
         return False, []
     if mode == "http-200":
@@ -1974,6 +2003,26 @@ def diagnose_profile(
     launch_mode = spec["launch_mode"]
     errors: list[str] = []
     warnings: list[str] = []
+    profile_base_url = ""
+    url_config_error = False
+
+    try:
+        profile_base_url = base_url(env)
+    except ValueError as exc:
+        errors.append(str(exc))
+        url_config_error = True
+
+    health_url = ""
+    health_url_error = False
+    if healthcheck_mode(env) != "disabled":
+        try:
+            health_url = healthcheck_url(env)
+        except ValueError as exc:
+            message = str(exc)
+            if message not in errors:
+                errors.append(message)
+            health_url_error = True
+            url_config_error = True
 
     if not env.get("DISPLAY_NAME"):
         errors.append("missing DISPLAY_NAME")
@@ -1981,7 +2030,7 @@ def diagnose_profile(
         errors.append("missing REQUEST_MODEL")
 
     if launch_mode == "external":
-        if healthcheck_mode(env) != "disabled" and not healthcheck_url(env):
+        if healthcheck_mode(env) != "disabled" and not health_url and not health_url_error:
             errors.append("missing BASE_URL or HEALTHCHECK_URL")
     elif runtime == "llama.cpp":
         if not resolve_llama_server_bin(env):
@@ -2047,10 +2096,10 @@ def diagnose_profile(
     elif runtime == "command":
         if not env.get("START_COMMAND"):
             errors.append("missing START_COMMAND")
-        if healthcheck_mode(env) != "disabled" and not healthcheck_url(env):
+        if healthcheck_mode(env) != "disabled" and not health_url and not health_url_error:
             errors.append("missing BASE_URL or HEALTHCHECK_URL")
     elif env.get("START_COMMAND"):
-        if healthcheck_mode(env) != "disabled" and not healthcheck_url(env):
+        if healthcheck_mode(env) != "disabled" and not health_url and not health_url_error:
             errors.append("missing BASE_URL or HEALTHCHECK_URL")
     elif env.get("SERVER_BIN"):
         if not pathlib.Path(env["SERVER_BIN"]).exists():
@@ -2062,7 +2111,7 @@ def diagnose_profile(
     else:
         warnings.append(f"runtime '{runtime}' has no adapter-specific validation; use START_COMMAND or SERVER_BIN with SERVER_ARGS_JSON")
 
-    if not base_url(env):
+    if not profile_base_url:
         warnings.append("base_url is empty; endpoint health checks may fail")
     if healthcheck_mode(env) == "disabled":
         warnings.append("healthcheck disabled; ready state cannot be verified")
@@ -2070,17 +2119,25 @@ def diagnose_profile(
         endpoint, other_profiles = endpoint_conflict
         errors.append(f"duplicate {format_endpoint_conflict(endpoint, other_profiles)}")
 
-    try:
-        live = status_for_profile(name, env, allow_port_fallback=endpoint_conflict is None)
-    except Exception as exc:  # noqa: BLE001
+    if url_config_error:
         live = {
             "running": False,
             "ready": False,
             "pid": None,
-            "base_url": base_url(env),
-            "error": str(exc),
+            "base_url": profile_base_url,
         }
-        errors.append(f"status probe failed: {exc}")
+    else:
+        try:
+            live = status_for_profile(name, env, allow_port_fallback=endpoint_conflict is None)
+        except Exception as exc:  # noqa: BLE001
+            live = {
+                "running": False,
+                "ready": False,
+                "pid": None,
+                "base_url": profile_base_url,
+                "error": str(exc),
+            }
+            errors.append(f"status probe failed: {exc}")
 
     return {
         "profile": name,
@@ -2094,7 +2151,7 @@ def diagnose_profile(
         "running": live.get("running", False),
         "ready": live.get("ready", False),
         "pid": live.get("pid"),
-        "base_url": live.get("base_url", base_url(env)),
+        "base_url": live.get("base_url", profile_base_url),
     }
 
 
