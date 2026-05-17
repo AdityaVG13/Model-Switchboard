@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import http.client
 import json
 import os
 import plistlib
@@ -502,6 +503,48 @@ class ModelCtlTests(unittest.TestCase):
             stop_all.assert_called_once_with()
             self.assertTrue(body["ok"])
         finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_dashboard_rejects_oversized_json_content_length(self) -> None:
+        server = MODULE.ThreadingHTTPServer(("127.0.0.1", 0), MODULE.DashboardHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=2)
+        try:
+            connection.putrequest("POST", "/api/stop-all")
+            connection.putheader("Content-Type", "application/json")
+            connection.putheader("Content-Length", str(MODULE.MAX_JSON_BODY_BYTES + 1))
+            connection.endheaders()
+            response = connection.getresponse()
+            body = json.loads(response.read().decode())
+
+            self.assertEqual(response.status, 413)
+            self.assertEqual(body["error"], "payload_too_large")
+        finally:
+            connection.close()
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_dashboard_rejects_invalid_content_length(self) -> None:
+        server = MODULE.ThreadingHTTPServer(("127.0.0.1", 0), MODULE.DashboardHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=2)
+        try:
+            connection.putrequest("POST", "/api/stop-all")
+            connection.putheader("Content-Type", "application/json")
+            connection.putheader("Content-Length", "not-a-number")
+            connection.endheaders()
+            response = connection.getresponse()
+            body = json.loads(response.read().decode())
+
+            self.assertEqual(response.status, 400)
+            self.assertEqual(body["error"], "invalid_content_length")
+        finally:
+            connection.close()
             server.shutdown()
             server.server_close()
             thread.join(timeout=2)

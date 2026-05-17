@@ -51,6 +51,7 @@ BENCH_RESULTS_DIR = BASE / "benchmark-results"
 DEFAULT_WEB_HOST = "127.0.0.1"
 DEFAULT_WEB_PORT = 8877
 MIN_AUTH_TOKEN_BYTES = 16
+MAX_JSON_BODY_BYTES = 64 * 1024
 FACTORY_SETTINGS_PATH = pathlib.Path.home() / ".factory" / "settings.json"
 LAUNCH_AGENT_LABEL = "io.modelswitchboard.controller"
 LAUNCH_AGENT_PLIST = pathlib.Path.home() / "Library/LaunchAgents" / f"{LAUNCH_AGENT_LABEL}.plist"
@@ -59,6 +60,14 @@ STATUS_CACHE_PATH = pathlib.Path.home() / "Library/Caches/io.modelswitchboard/co
 
 class ProfileConflictError(RuntimeError):
     """Raised when two or more profiles resolve to the same endpoint."""
+
+
+class ControllerAPIError(Exception):
+    def __init__(self, status: int, code: str, message: str) -> None:
+        super().__init__(message)
+        self.status = status
+        self.code = code
+        self.message = message
 
 
 def _host_for_ip_parse(host: str) -> str:
@@ -1717,7 +1726,7 @@ def benchmark_pid_path() -> pathlib.Path:
 
 
 def benchmark_log_path() -> pathlib.Path:
-    return pathlib.Path("/tmp/model-benchmark.log")
+    return RUN_DIR / "logs" / "benchmark.log"
 
 
 def benchmark_status() -> BenchmarkStatusPayload:
@@ -1751,7 +1760,10 @@ def start_benchmark(
     if keep_running:
         cmd.append("--keep-running")
     RUN_DIR.mkdir(parents=True, exist_ok=True)
-    with open(benchmark_log_path(), "ab", buffering=0) as log_fp, open(os.devnull, "rb") as stdin_fp:
+    log_path = benchmark_log_path()
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    with os.fdopen(log_fd, "ab", buffering=0) as log_fp, open(os.devnull, "rb") as stdin_fp:
         proc = subprocess.Popen(
             cmd,
             stdin=stdin_fp,
@@ -2105,11 +2117,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self._send_json({"ok": False, "error": "unauthorized", "message": "unauthorized"}, status=401)
         return False
 
+    def _send_api_error(self, exc: ControllerAPIError) -> None:
+        self._send_json({"ok": False, "error": exc.code, "message": exc.message}, status=exc.status)
+
     @staticmethod
     def _required_string(payload: ControllerRequest, key: str) -> str:
         value = payload.get(key)
         if not isinstance(value, str) or not value:
-            raise ValueError(f"missing required string field: {key}")
+            raise ControllerAPIError(400, "invalid_request", f"missing required string field: {key}")
         return value
 
     @staticmethod
@@ -2118,7 +2133,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if profiles is None:
             return None
         if not isinstance(profiles, list):
-            raise ValueError("profiles must be a list of strings")
+            raise ControllerAPIError(400, "invalid_request", "profiles must be a list of strings")
         return profiles
 
     def _send_json(self, payload: dict[str, object], status: int = 200) -> None:
@@ -2138,13 +2153,27 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.wfile.write(raw)
 
     def _read_json(self) -> ControllerRequest:
-        length = int(self.headers.get("Content-Length", "0") or 0)
+        raw_length = self.headers.get("Content-Length", "0") or "0"
+        try:
+            length = int(raw_length)
+        except ValueError as exc:
+            raise ControllerAPIError(400, "invalid_content_length", "invalid Content-Length") from exc
+        if length < 0:
+            raise ControllerAPIError(400, "invalid_content_length", "invalid Content-Length")
+        if length > MAX_JSON_BODY_BYTES:
+            raise ControllerAPIError(413, "payload_too_large", "JSON payload too large")
         if length <= 0:
             return {}
-        payload = self.rfile.read(length).decode()
-        raw_payload = json.loads(payload) if payload else {}
+        try:
+            payload = self.rfile.read(length).decode()
+        except UnicodeDecodeError as exc:
+            raise ControllerAPIError(400, "invalid_json", "request body must be UTF-8 JSON") from exc
+        try:
+            raw_payload = json.loads(payload) if payload else {}
+        except json.JSONDecodeError as exc:
+            raise ControllerAPIError(400, "invalid_json", "invalid JSON") from exc
         if not isinstance(raw_payload, dict):
-            raise ValueError("request body must be a JSON object")
+            raise ControllerAPIError(400, "invalid_json", "request body must be a JSON object")
         request: ControllerRequest = {}
         profile = raw_payload.get("profile")
         if isinstance(profile, str):
@@ -2235,8 +2264,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
             else:
                 self._send_json({"error": "not found"}, status=404)
                 return
+        except ControllerAPIError as exc:
+            self._send_api_error(exc)
+            return
         except Exception as exc:  # noqa: BLE001
-            self._send_json({"error": str(exc)}, status=500)
+            print(f"[WARN] dashboard request failed: {exc}", file=sys.stderr)
+            self._send_json({"ok": False, "error": "internal_error", "message": "internal server error"}, status=500)
             return
         controller_payload = status_payload()
         response_payload = action_response_from_status(controller_payload)
