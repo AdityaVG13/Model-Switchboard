@@ -37,7 +37,7 @@ from contracts import (
     make_cached_status_payload,
     make_controller_status_payload,
 )
-from profile_env import ProfileFormatError, load_env_profile, load_json_profile, load_profile
+from profile_env import ProfileFormatError, load_env_profile, load_json_profile, load_profile  # noqa: F401
 
 BASE = pathlib.Path(__file__).resolve().parent
 PROFILE_DIR = BASE / "model-profiles"
@@ -2120,6 +2120,17 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def _send_api_error(self, exc: ControllerAPIError) -> None:
         self._send_json({"ok": False, "error": exc.code, "message": exc.message}, status=exc.status)
 
+    def _send_internal_error(self, exc: BaseException) -> None:
+        print(f"[ERROR] controller request failed: {type(exc).__name__}", file=sys.stderr)
+        self._send_api_error(ControllerAPIError(500, "internal_error", "internal server error"))
+
+    @staticmethod
+    def _system_exit_error(exc: SystemExit) -> ControllerAPIError:
+        message = str(exc)
+        if message.startswith("Unknown profile:"):
+            return ControllerAPIError(404, "profile_not_found", "profile not found")
+        return ControllerAPIError(400, "request_failed", "request could not be completed")
+
     @staticmethod
     def _required_string(payload: ControllerRequest, key: str) -> str:
         value = payload.get(key)
@@ -2133,6 +2144,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if profiles is None:
             return None
         if not isinstance(profiles, list):
+            raise ControllerAPIError(400, "invalid_request", "profiles must be a list of strings")
+        if not all(isinstance(item, str) for item in profiles):
             raise ControllerAPIError(400, "invalid_request", "profiles must be a list of strings")
         return profiles
 
@@ -2179,10 +2192,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if isinstance(profile, str):
             request["profile"] = profile
         profiles = raw_payload.get("profiles")
-        if isinstance(profiles, list):
-            profile_names = [item for item in profiles if isinstance(item, str)]
-            if profile_names:
-                request["profiles"] = profile_names
+        if profiles is not None:
+            if not isinstance(profiles, list) or not all(isinstance(item, str) for item in profiles):
+                raise ControllerAPIError(400, "invalid_request", "profiles must be a list of strings")
+            if profiles:
+                request["profiles"] = profiles
         integration = raw_payload.get("integration")
         if isinstance(integration, str):
             request["integration"] = integration
@@ -2201,32 +2215,39 @@ class DashboardHandler(BaseHTTPRequestHandler):
         return request
 
     def do_GET(self) -> None:
-        if self.path.startswith("/api/") and not self._check_auth():
-            return
-        if self.path in {"/", "/index.html"}:
-            self._send_html(HTML_PAGE)
-            return
-        if self.path == "/api/status":
-            payload = status_payload()
-            write_status_cache(payload)
-            self._send_json(payload)
-            return
-        if self.path == "/api/doctor":
-            self._send_json(doctor_report())
-            return
-        if self.path == "/api/benchmark/status":
-            self._send_json(benchmark_status())
-            return
-        if self.path == "/api/integrations":
-            self._send_json(
-                {
-                    "integrations": integration_status(),
-                    "profiles_dir": str(PROFILE_DIR),
-                    "controller_root": str(BASE),
-                }
-            )
-            return
-        self._send_json({"error": "not found"}, status=404)
+        try:
+            if self.path.startswith("/api/") and not self._check_auth():
+                return
+            if self.path in {"/", "/index.html"}:
+                self._send_html(HTML_PAGE)
+                return
+            if self.path == "/api/status":
+                payload = status_payload()
+                write_status_cache(payload)
+                self._send_json(payload)
+                return
+            if self.path == "/api/doctor":
+                self._send_json(doctor_report())
+                return
+            if self.path == "/api/benchmark/status":
+                self._send_json(benchmark_status())
+                return
+            if self.path == "/api/integrations":
+                self._send_json(
+                    {
+                        "integrations": integration_status(),
+                        "profiles_dir": str(PROFILE_DIR),
+                        "controller_root": str(BASE),
+                    }
+                )
+                return
+            raise ControllerAPIError(404, "not_found", "not found")
+        except ControllerAPIError as exc:
+            self._send_api_error(exc)
+        except SystemExit as exc:
+            self._send_api_error(self._system_exit_error(exc))
+        except Exception as exc:  # noqa: BLE001
+            self._send_internal_error(exc)
 
     def do_POST(self) -> None:
         if not self._check_auth():
@@ -2262,14 +2283,22 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._send_json(response_payload)
                 return
             else:
-                self._send_json({"error": "not found"}, status=404)
+                self._send_api_error(ControllerAPIError(404, "not_found", "not found"))
                 return
         except ControllerAPIError as exc:
             self._send_api_error(exc)
             return
+        except ProfileConflictError:
+            self._send_api_error(ControllerAPIError(409, "profile_conflict", "profile endpoint conflict"))
+            return
+        except SystemExit as exc:
+            self._send_api_error(self._system_exit_error(exc))
+            return
+        except ValueError:
+            self._send_api_error(ControllerAPIError(400, "invalid_request", "invalid request"))
+            return
         except Exception as exc:  # noqa: BLE001
-            print(f"[WARN] dashboard request failed: {exc}", file=sys.stderr)
-            self._send_json({"ok": False, "error": "internal_error", "message": "internal server error"}, status=500)
+            self._send_internal_error(exc)
             return
         controller_payload = status_payload()
         response_payload = action_response_from_status(controller_payload)

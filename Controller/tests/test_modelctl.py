@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import http.client
+import io
 import json
 import os
 import plistlib
@@ -545,6 +546,96 @@ class ModelCtlTests(unittest.TestCase):
             self.assertEqual(body["error"], "invalid_content_length")
         finally:
             connection.close()
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_dashboard_rejects_missing_required_fields_as_bad_request(self) -> None:
+        server = MODULE.ThreadingHTTPServer(("127.0.0.1", 0), MODULE.DashboardHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        url = f"http://127.0.0.1:{server.server_port}/api/start"
+        try:
+            request = urllib.request.Request(url, data=b"{}", method="POST", headers={"Content-Type": "application/json"})
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(request)
+            body = json.loads(ctx.exception.read().decode())
+
+            self.assertEqual(ctx.exception.code, 400)
+            self.assertEqual(body["error"], "invalid_request")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_dashboard_maps_unknown_profiles_to_not_found(self) -> None:
+        server = MODULE.ThreadingHTTPServer(("127.0.0.1", 0), MODULE.DashboardHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        url = f"http://127.0.0.1:{server.server_port}/api/start"
+        try:
+            request = urllib.request.Request(
+                url,
+                data=json.dumps({"profile": "missing-profile"}).encode(),
+                method="POST",
+                headers={"Content-Type": "application/json"},
+            )
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(request)
+            body = json.loads(ctx.exception.read().decode())
+
+            self.assertEqual(ctx.exception.code, 404)
+            self.assertEqual(body["error"], "profile_not_found")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_dashboard_maps_profile_conflicts_to_conflict(self) -> None:
+        server = MODULE.ThreadingHTTPServer(("127.0.0.1", 0), MODULE.DashboardHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        url = f"http://127.0.0.1:{server.server_port}/api/switch"
+        try:
+            request = urllib.request.Request(
+                url,
+                data=json.dumps({"profile": "qwen"}).encode(),
+                method="POST",
+                headers={"Content-Type": "application/json"},
+            )
+            with (
+                mock.patch.object(MODULE, "switch_profile", side_effect=MODULE.ProfileConflictError("raw conflict detail")),
+                self.assertRaises(urllib.error.HTTPError) as ctx,
+            ):
+                urllib.request.urlopen(request)
+            body = json.loads(ctx.exception.read().decode())
+
+            self.assertEqual(ctx.exception.code, 409)
+            self.assertEqual(body["error"], "profile_conflict")
+            self.assertNotIn("raw conflict detail", json.dumps(body))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_dashboard_sanitizes_unexpected_action_errors(self) -> None:
+        server = MODULE.ThreadingHTTPServer(("127.0.0.1", 0), MODULE.DashboardHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        url = f"http://127.0.0.1:{server.server_port}/api/stop-all"
+        try:
+            request = urllib.request.Request(url, data=b"{}", method="POST", headers={"Content-Type": "application/json"})
+            with (
+                mock.patch.object(MODULE, "stop_all", side_effect=RuntimeError("secret path /tmp/private")),
+                mock.patch.object(MODULE.sys, "stderr", io.StringIO()),
+                self.assertRaises(urllib.error.HTTPError) as ctx,
+            ):
+                urllib.request.urlopen(request)
+            body = json.loads(ctx.exception.read().decode())
+
+            self.assertEqual(ctx.exception.code, 500)
+            self.assertEqual(body, {"ok": False, "error": "internal_error", "message": "internal server error"})
+        finally:
             server.shutdown()
             server.server_close()
             thread.join(timeout=2)
