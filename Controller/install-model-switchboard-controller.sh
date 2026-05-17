@@ -10,6 +10,8 @@ HOST="${HOST:-127.0.0.1}"
 PORT="${PORT:-8877}"
 LOG_DIR="${LOG_DIR:-$HOME/Library/Logs/ModelSwitchboard}"
 PLIST_DIR="${PLIST_DIR:-$HOME/Library/LaunchAgents}"
+UNSAFE_BIND=0
+AUTH_TOKEN_FILE="${AUTH_TOKEN_FILE:-}"
 QUIET=0
 NO_GUM=0
 FORCE_INSTALL=0
@@ -27,7 +29,11 @@ Install the reference Model Switchboard controller as a per-user launchd service
 
 Options:
   --root PATH       Controller checkout/root (default: this script directory)
-  --host HOST       Bind host for the controller (default: 127.0.0.1)
+  --host HOST       Loopback bind host for the controller (default: 127.0.0.1)
+  --unsafe-bind HOST
+                    Bind a non-loopback host; writes a bearer token file
+  --auth-token-file PATH
+                    Token file for --unsafe-bind (default: ROOT/run/controller-token)
   --port PORT       Bind port for the controller (default: 8877)
   --no-start        Write/update the LaunchAgent but do not start it
   --force           Rebuild launcher even if it is up to date
@@ -133,6 +139,17 @@ parse_args() {
         [ "$#" -gt 0 ] || die "--host requires a value"
         HOST="$1"
         ;;
+      --unsafe-bind)
+        shift
+        [ "$#" -gt 0 ] || die "--unsafe-bind requires a value"
+        HOST="$1"
+        UNSAFE_BIND=1
+        ;;
+      --auth-token-file)
+        shift
+        [ "$#" -gt 0 ] || die "--auth-token-file requires a path"
+        AUTH_TOKEN_FILE="$1"
+        ;;
       --port)
         shift
         [ "$#" -gt 0 ] || die "--port requires a value"
@@ -171,6 +188,7 @@ normalize_paths() {
   PLIST_DST="$PLIST_DIR/${LABEL}.plist"
   LAUNCHER_SRC="$ROOT_DIR/ModelSwitchboardController.swift"
   LAUNCHER_BIN="$ROOT_DIR/bin/ModelSwitchboardController"
+  TOKEN_PATH="${AUTH_TOKEN_FILE:-$ROOT_DIR/run/controller-token}"
   USER_UID="$(id -u)"
   DOMAIN="gui/${USER_UID}"
   LOG_PATH="$LOG_DIR/controller.log"
@@ -203,6 +221,39 @@ check_write_permissions() {
   rm -f "$probe"
 }
 
+is_loopback_host() {
+  local host
+  host="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  case "$host" in
+    localhost|127.*|::1|\[::1\]) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+validate_bind_security() {
+  if is_loopback_host "$HOST"; then
+    return 0
+  fi
+  [ "$UNSAFE_BIND" -eq 1 ] || die "non-loopback controller host requires --unsafe-bind: $HOST"
+}
+
+prepare_auth_token_file() {
+  if is_loopback_host "$HOST"; then
+    return 0
+  fi
+  local token token_length token_dir
+  token_dir="$(dirname "$TOKEN_PATH")"
+  mkdir -p "$token_dir"
+  chmod 700 "$token_dir"
+  if [ ! -s "$TOKEN_PATH" ]; then
+    token="$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')"
+    (umask 077 && printf '%s\n' "$token" > "$TOKEN_PATH")
+  fi
+  chmod 600 "$TOKEN_PATH"
+  token_length="$(tr -d '\r\n' < "$TOKEN_PATH" | wc -c | tr -d ' ')"
+  [ "${token_length:-0}" -ge 16 ] || die "auth token file must contain at least 16 bytes: $TOKEN_PATH"
+}
+
 acquire_lock() {
   if mkdir "$LOCK_DIR" 2>/dev/null; then
     printf '%s\n' "$$" > "$LOCK_DIR/pid"
@@ -231,9 +282,11 @@ preflight_checks() {
     ''|*[!0-9]*) die "--port must be numeric: $PORT" ;;
   esac
   [ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ] || die "--port out of range: $PORT"
+  validate_bind_security
   check_disk_space "$ROOT_DIR"
   check_write_permissions "$PLIST_DIR"
   check_write_permissions "$ROOT_DIR/bin"
+  prepare_auth_token_file
   mkdir -p "$LOG_DIR"
   check_write_permissions "$LOG_DIR"
   if [ -f "$PLIST_DST" ]; then
@@ -256,7 +309,12 @@ build_launcher() {
 }
 
 write_plist() {
-  local tmp_plist
+  local bind_flag tmp_plist
+  if [ "$UNSAFE_BIND" -eq 1 ]; then
+    bind_flag="--unsafe-bind"
+  else
+    bind_flag="--host"
+  fi
   tmp_plist="$(mktemp "${TMPDIR:-/tmp}/model-switchboard-controller.XXXXXX")"
   cat >"$tmp_plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -270,10 +328,11 @@ write_plist() {
     <string>${LAUNCHER_BIN}</string>
     <string>--root</string>
     <string>${ROOT_DIR}</string>
-    <string>--host</string>
+    <string>${bind_flag}</string>
     <string>${HOST}</string>
     <string>--port</string>
     <string>${PORT}</string>
+$(if ! is_loopback_host "$HOST"; then printf '    <string>--auth-token-file</string>\n    <string>%s</string>\n' "$TOKEN_PATH"; fi)
   </array>
   <key>WorkingDirectory</key>
   <string>${ROOT_DIR}</string>

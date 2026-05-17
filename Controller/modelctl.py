@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hmac
+import ipaddress
 import json
 import os
 import pathlib
@@ -48,6 +50,7 @@ BENCH_SCRIPT = BASE / "benchmark-local-models.py"
 BENCH_RESULTS_DIR = BASE / "benchmark-results"
 DEFAULT_WEB_HOST = "127.0.0.1"
 DEFAULT_WEB_PORT = 8877
+MIN_AUTH_TOKEN_BYTES = 16
 FACTORY_SETTINGS_PATH = pathlib.Path.home() / ".factory" / "settings.json"
 LAUNCH_AGENT_LABEL = "io.modelswitchboard.controller"
 LAUNCH_AGENT_PLIST = pathlib.Path.home() / "Library/LaunchAgents" / f"{LAUNCH_AGENT_LABEL}.plist"
@@ -56,6 +59,46 @@ STATUS_CACHE_PATH = pathlib.Path.home() / "Library/Caches/io.modelswitchboard/co
 
 class ProfileConflictError(RuntimeError):
     """Raised when two or more profiles resolve to the same endpoint."""
+
+
+def _host_for_ip_parse(host: str) -> str:
+    value = host.strip().lower()
+    if value.startswith("[") and value.endswith("]"):
+        return value[1:-1]
+    return value
+
+
+def is_loopback_host(host: str) -> bool:
+    value = _host_for_ip_parse(host)
+    if value == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(value).is_loopback
+    except ValueError:
+        return False
+
+
+def read_auth_token_file(path: str | None) -> str | None:
+    if not path:
+        return None
+    token = pathlib.Path(path).expanduser().read_text(encoding="utf-8").strip()
+    return token or None
+
+
+def resolve_auth_token(token: str | None = None, token_file: str | None = None) -> str | None:
+    resolved = token or read_auth_token_file(token_file)
+    if resolved and len(resolved.encode("utf-8")) < MIN_AUTH_TOKEN_BYTES:
+        raise ValueError(f"auth token must be at least {MIN_AUTH_TOKEN_BYTES} bytes")
+    return resolved
+
+
+def validate_controller_bind(host: str, *, unsafe_bind: bool = False, auth_token: str | None = None) -> None:
+    if is_loopback_host(host):
+        return
+    if not unsafe_bind:
+        raise ValueError(f"non-loopback controller bind requires --unsafe-bind: {host}")
+    if not auth_token:
+        raise ValueError("non-loopback controller bind requires a bearer auth token")
 
 
 class ControllerRequest(TypedDict, total=False):
@@ -801,10 +844,20 @@ HTML_PAGE = r"""<!doctype html>
         .replace(/\b\w/g, (char) => char.toUpperCase());
     }
 
+    const queryToken = new URLSearchParams(window.location.search).get('token');
+    if (queryToken) {
+      sessionStorage.setItem('controllerToken', queryToken);
+      history.replaceState(null, '', window.location.pathname);
+    }
+    const controllerToken = queryToken || sessionStorage.getItem('controllerToken') || '';
+
     async function api(path, options = {}) {
+      const { headers: optionHeaders = {}, ...fetchOptions } = options;
+      const headers = { 'Content-Type': 'application/json', ...optionHeaders };
+      if (controllerToken) headers.Authorization = `Bearer ${controllerToken}`;
       const response = await fetch(path, {
-        headers: { 'Content-Type': 'application/json' },
-        ...options,
+        ...fetchOptions,
+        headers,
       });
       if (!response.ok) {
         throw new Error((await response.text()) || `HTTP ${response.status}`);
@@ -2038,6 +2091,20 @@ def print_doctor(report: DoctorReportPayload) -> None:
 
 
 class DashboardHandler(BaseHTTPRequestHandler):
+    def _auth_token(self) -> str | None:
+        token = getattr(self.server, "auth_token", None)
+        return token if isinstance(token, str) and token else None
+
+    def _check_auth(self) -> bool:
+        token = self._auth_token()
+        if not token:
+            return True
+        expected = f"Bearer {token}"
+        if hmac.compare_digest(self.headers.get("Authorization", ""), expected):
+            return True
+        self._send_json({"ok": False, "error": "unauthorized", "message": "unauthorized"}, status=401)
+        return False
+
     @staticmethod
     def _required_string(payload: ControllerRequest, key: str) -> str:
         value = payload.get(key)
@@ -2105,6 +2172,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
         return request
 
     def do_GET(self) -> None:
+        if self.path.startswith("/api/") and not self._check_auth():
+            return
         if self.path in {"/", "/index.html"}:
             self._send_html(HTML_PAGE)
             return
@@ -2131,6 +2200,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self._send_json({"error": "not found"}, status=404)
 
     def do_POST(self) -> None:
+        if not self._check_auth():
+            return
         try:
             payload = self._read_json()
             if self.path == "/api/start":
@@ -2177,9 +2248,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
 
 
-def serve_web(host: str, port: int) -> None:
+def serve_web(host: str, port: int, *, unsafe_bind: bool = False, auth_token: str | None = None) -> None:
+    validate_controller_bind(host, unsafe_bind=unsafe_bind, auth_token=auth_token)
     threading.Thread(target=run_active_profile_watchdog, daemon=True).start()
     server = ThreadingHTTPServer((host, port), DashboardHandler)
+    server.auth_token = auth_token
     print(f"dashboard=http://{host}:{port}")
     server.serve_forever()
 
@@ -2235,8 +2308,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("stop-all", help="Stop every managed model process")
 
     web_cmd = sub.add_parser("serve-web", help="Serve the local model dashboard")
-    web_cmd.add_argument("--host", default=DEFAULT_WEB_HOST)
+    web_cmd.add_argument("--host", default=None)
+    web_cmd.add_argument("--unsafe-bind", metavar="HOST", help="Bind a non-loopback host; requires an auth token")
     web_cmd.add_argument("--port", type=int, default=DEFAULT_WEB_PORT)
+    web_cmd.add_argument("--auth-token")
+    web_cmd.add_argument("--auth-token-file")
 
     return parser
 
@@ -2294,7 +2370,9 @@ def main() -> None:
         return
 
     if args.command == "serve-web":
-        serve_web(args.host, args.port)
+        host = args.unsafe_bind or args.host or DEFAULT_WEB_HOST
+        auth_token = resolve_auth_token(args.auth_token, args.auth_token_file)
+        serve_web(host, args.port, unsafe_bind=bool(args.unsafe_bind), auth_token=auth_token)
         return
 
     if args.command == "doctor":

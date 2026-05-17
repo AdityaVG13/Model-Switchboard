@@ -10,7 +10,10 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import textwrap
+import urllib.error
+import urllib.request
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -451,6 +454,57 @@ class ModelCtlTests(unittest.TestCase):
             ("localhost:8080", ["qwen35-a3b"]),
         )
         self.assertNotIn("gemma3-mlx", conflicts)
+
+    def test_controller_bind_rejects_non_loopback_without_unsafe_bind(self) -> None:
+        with self.assertRaisesRegex(ValueError, "requires --unsafe-bind"):
+            MODULE.validate_controller_bind("0.0.0.0")
+
+    def test_controller_bind_rejects_unsafe_non_loopback_without_token(self) -> None:
+        with self.assertRaisesRegex(ValueError, "requires a bearer auth token"):
+            MODULE.validate_controller_bind("0.0.0.0", unsafe_bind=True)
+
+    def test_controller_bind_accepts_unsafe_non_loopback_with_token(self) -> None:
+        MODULE.validate_controller_bind("0.0.0.0", unsafe_bind=True, auth_token="x" * 32)
+
+    def test_dashboard_api_requires_bearer_token_when_configured(self) -> None:
+        token = "x" * 32
+        server = MODULE.ThreadingHTTPServer(("127.0.0.1", 0), MODULE.DashboardHandler)
+        server.auth_token = token
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        url = f"http://127.0.0.1:{server.server_port}/api/stop-all"
+        status_payload = {
+            "statuses": [],
+            "benchmark": {"running": False, "pid": None, "log_path": "", "latest": None},
+            "integrations": [],
+            "profiles_dir": str(ROOT / "model-profiles"),
+            "controller_root": str(ROOT),
+        }
+        try:
+            request = urllib.request.Request(url, data=b"{}", method="POST", headers={"Content-Type": "application/json"})
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(request)
+            self.assertEqual(ctx.exception.code, 401)
+
+            request = urllib.request.Request(
+                url,
+                data=b"{}",
+                method="POST",
+                headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
+            )
+            with (
+                mock.patch.object(MODULE, "stop_all") as stop_all,
+                mock.patch.object(MODULE, "status_payload", return_value=status_payload),
+                mock.patch.object(MODULE, "write_status_cache"),
+                urllib.request.urlopen(request) as response,
+            ):
+                body = json.loads(response.read().decode())
+            stop_all.assert_called_once_with()
+            self.assertTrue(body["ok"])
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
 
     def test_status_snapshot_disables_port_fallback_for_conflicted_profiles(self) -> None:
         profiles = {
@@ -1405,6 +1459,43 @@ class ModelCtlTests(unittest.TestCase):
                 "MODEL_FILE requires MODEL_ROOT, MODEL_ROOT_HINT, ~/AI/models, or ../models",
                 result.stderr or result.stdout,
             )
+
+    def test_install_controller_script_rejects_non_loopback_host_without_unsafe_bind(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            install_dir = tmp_path / "installer"
+            install_dir.mkdir()
+            script_path = install_dir / "install-model-switchboard-controller.sh"
+            shutil.copy2(ROOT / "install-model-switchboard-controller.sh", script_path)
+
+            selected_root = tmp_path / "selected-root"
+            selected_root.mkdir()
+            (selected_root / "ModelSwitchboardController.swift").write_text("print(\"ok\")\n")
+
+            fake_bin = tmp_path / "fake-bin"
+            fake_bin.mkdir()
+            for executable in ("swiftc", "launchctl"):
+                path = fake_bin / executable
+                path.write_text("#!/bin/sh\nexit 0\n")
+                path.chmod(0o755)
+
+            home_dir = tmp_path / "home"
+            home_dir.mkdir()
+
+            env = os.environ.copy()
+            env["HOME"] = str(home_dir)
+            env["PATH"] = f"{fake_bin}:{env['PATH']}"
+
+            result = subprocess.run(
+                ["bash", str(script_path), "--root", str(selected_root), "--host", "0.0.0.0", "--no-start"],
+                cwd=install_dir,
+                env=env,
+                text=True,
+                capture_output=True,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("non-loopback controller host requires --unsafe-bind", result.stderr)
 
     def test_install_controller_script_supports_root_override(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
