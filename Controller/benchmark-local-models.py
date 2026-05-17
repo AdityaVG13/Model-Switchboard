@@ -25,6 +25,7 @@ from modelctl import (
     status_for_profile,
     status_snapshot,
     stop_profile,
+    validate_http_url,
 )
 
 BASE = pathlib.Path(__file__).resolve().parent
@@ -192,6 +193,10 @@ PROMPT_SUITES: dict[str, list[PromptSpec]] = {
 }
 
 
+def chat_completions_url(base: str) -> str:
+    return validate_http_url(f"{base.rstrip('/')}/chat/completions", field="BENCHMARK_URL")
+
+
 def stream_chat(base: str, model: str, prompt: str, *, temperature: float, max_tokens: int, timeout: float) -> StreamResult:
     payload = chat_request_payload(
         model,
@@ -201,7 +206,7 @@ def stream_chat(base: str, model: str, prompt: str, *, temperature: float, max_t
         stream=True,
     )
     request = urllib.request.Request(
-        f"{base}/chat/completions",
+        chat_completions_url(base),
         data=json.dumps(payload).encode(),
         headers={"Content-Type": "application/json", "Accept": "text/event-stream"},
     )
@@ -212,7 +217,7 @@ def stream_chat(base: str, model: str, prompt: str, *, temperature: float, max_t
     started = time.perf_counter()
 
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with urllib.request.urlopen(request, timeout=timeout) as response:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected -- chat_completions_url validates http/https before the request is built.
             for raw_line in response:
                 line = raw_line.decode("utf-8", errors="ignore").strip()
                 if not line or not line.startswith("data:"):
@@ -336,12 +341,12 @@ def non_stream_chat_diagnostic(
         stream=False,
     )
     request = urllib.request.Request(
-        f"{base}/chat/completions",
+        chat_completions_url(base),
         data=json.dumps(payload).encode(),
         headers={"Content-Type": "application/json", "Accept": "application/json"},
     )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with urllib.request.urlopen(request, timeout=timeout) as response:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected -- chat_completions_url validates http/https before the request is built.
             body = response.read().decode("utf-8", errors="ignore").strip()
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="ignore").strip()

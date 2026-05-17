@@ -150,6 +150,19 @@ class BenchmarkLocalModelsTests(unittest.TestCase):
         self.assertIn("empty streamed response without token usage", result["error"])
         self.assertIn("rope_dynamic", result["error"])
 
+    def test_stream_chat_rejects_non_http_base_url_without_opening_it(self) -> None:
+        with mock.patch.object(MODULE.urllib.request, "urlopen") as urlopen:
+            with self.assertRaisesRegex(ValueError, "BENCHMARK_URL must use http or https"):
+                MODULE.stream_chat(
+                    "file:///tmp/model",
+                    "demo",
+                    "hello",
+                    temperature=0.0,
+                    max_tokens=1,
+                    timeout=1.0,
+                )
+        urlopen.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

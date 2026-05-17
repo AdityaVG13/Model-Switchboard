@@ -1348,7 +1348,7 @@ def fetch_openai_models(url: str, timeout: float = 1.5) -> list[str]:
         return []
     request = urllib.request.Request(url, headers={"Accept": "application/json"})
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with urllib.request.urlopen(request, timeout=timeout) as response:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected -- validate_http_url rejects non-http profile URLs before this request.
             payload = json.loads(response.read().decode())
         return [item.get("id", "") for item in payload.get("data", []) if item.get("id")]
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError):
@@ -1368,7 +1368,7 @@ def probe_health(env: ProfileEnv, timeout: float = 1.5) -> tuple[bool, list[str]
             return False, []
         request = urllib.request.Request(url, headers={"Accept": "application/json"})
         try:
-            with urllib.request.urlopen(request, timeout=timeout):
+            with urllib.request.urlopen(request, timeout=timeout):  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected -- healthcheck_url validates explicit profile URLs and generated URLs are loopback http.
                 return True, []
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError):
             return False, []
@@ -1974,7 +1974,7 @@ def controller_status() -> ControllerHeartbeatPayload:
     url = f"http://{DEFAULT_WEB_HOST}:{DEFAULT_WEB_PORT}/api/status"
     request = urllib.request.Request(url, headers={"Accept": "application/json"})
     try:
-        with urllib.request.urlopen(request, timeout=1.5) as response:
+        with urllib.request.urlopen(request, timeout=1.5) as response:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected -- controller_status probes the fixed loopback controller URL.
             payload = json.loads(response.read().decode())
         return {
             "url": url,
