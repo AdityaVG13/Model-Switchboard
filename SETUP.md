@@ -313,6 +313,24 @@ APP_VARIANT=plus ./Scripts/build-dmg.sh   # Plus DMG
 ./Scripts/verify-installed-app.sh
 ```
 
+Source installs use the workmanship-hardened installer:
+
+```bash
+./Scripts/install.sh --variant base
+./Scripts/install.sh --variant plus --skip-open
+./Scripts/install.sh --verify
+```
+
+Useful flags:
+
+| Flag | Use |
+|---|---|
+| `--install-dir PATH` | Install the app outside `~/Applications`. |
+| `--bin-dir PATH` | Install `model-switchboardctl` outside `~/.local/bin`. |
+| `--easy-mode` | Add the CLI bin directory to writable shell rc files. |
+| `--quiet` / `--no-gum` | Run in CI or plain ANSI mode. |
+| `--no-cli` / `--no-completions` | Skip CLI or shell completion installation. |
+
 Or via `make`:
 
 ```bash

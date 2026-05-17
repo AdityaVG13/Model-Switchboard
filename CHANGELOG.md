@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+### Added
+- Installed `model-switchboardctl` and bash/zsh/fish completions from the source installer.
+- Added installer regression coverage for quiet installs, verification, and completion generation.
+
+### Changed
+- Hardened the app and controller installers with help flags, quiet/no-gum modes, preflight checks, atomic locks, install verification, and final uninstall guidance.
+
 ## [1.1.6] - 2026-05-17
 
 ### Added

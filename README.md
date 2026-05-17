@@ -151,10 +151,10 @@ Open, drag to `Applications`, launch.
 git clone https://github.com/AdityaVG13/Model-Switchboard.git
 cd Model-Switchboard
 ./Scripts/install.sh                   # Base
-APP_VARIANT=plus ./Scripts/install.sh  # Plus
+./Scripts/install.sh --variant plus    # Plus
 ```
 
-The installer places a fresh build under `~/Applications/`, registers it with Launch Services, and forces a Spotlight import so Raycast and Alfred pick it up immediately.
+The installer places a fresh build under `~/Applications/`, installs `model-switchboardctl` to `~/.local/bin`, writes bash/zsh/fish completions, registers the app with Launch Services, and forces a Spotlight import so Raycast and Alfred pick it up immediately. Use `./Scripts/install.sh --help` for quiet mode, custom install paths, `--verify`, and `--skip-open`.
 
 ---
 
@@ -168,7 +168,7 @@ The installer places a fresh build under `~/Applications/`, registers it with La
 ./Controller/install-model-switchboard-controller.sh
 ```
 
-The controller exposes its API at `http://127.0.0.1:8877` under a per-user LaunchAgent.
+The controller exposes its API at `http://127.0.0.1:8877` under a per-user LaunchAgent. Use `--root`, `--host`, `--port`, `--no-start`, or `--verify` when installing a dedicated controller checkout.
 
 **2. Drop a profile manifest** into the controller's `model-profiles/` folder *(the exact path is shown in `Settings`).* If you run the reference controller in this repo, that is `Controller/model-profiles/`; if you keep a dedicated controller root, it is `<controller-root>/model-profiles/`. A minimal `llama.cpp` example:
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+shopt -s lastpipe 2>/dev/null || true
 
 CONTROLLER_URL="${MODEL_SWITCHBOARD_URL:-http://127.0.0.1:8877}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
@@ -41,7 +42,79 @@ Commands:
   bench-all             Start the quick benchmark suite across all profiles
   bench <profile>       Start the quick benchmark suite for one profile
   stop-all              Stop all running profiles
+  completions <shell>   Print shell completions for bash, zsh, or fish
 USAGE
+}
+
+print_completions() {
+  local shell="${1:-}"
+  case "$shell" in
+    bash)
+      cat <<'BASH'
+_model_switchboardctl_completion() {
+  local cur commands
+  COMPREPLY=()
+  cur="${COMP_WORDS[COMP_CWORD]}"
+  commands="status summary profiles-dir controller-root open-app open-dashboard open-profiles start stop restart activate bench-all bench stop-all completions help"
+  if [ "$COMP_CWORD" -eq 1 ]; then
+    COMPREPLY=( $(compgen -W "$commands" -- "$cur") )
+  fi
+}
+complete -F _model_switchboardctl_completion model-switchboardctl
+BASH
+      ;;
+    zsh)
+      cat <<'ZSH'
+#compdef model-switchboardctl
+_model_switchboardctl() {
+  local -a commands
+  commands=(
+    'status:Print raw controller status JSON'
+    'summary:Print one-line status summary'
+    'profiles-dir:Print the controller profile directory'
+    'controller-root:Print the controller root directory'
+    'open-app:Launch the menu bar app'
+    'open-dashboard:Open the local dashboard'
+    'open-profiles:Open the profiles directory'
+    'start:Start a profile'
+    'stop:Stop a profile'
+    'restart:Restart a profile'
+    'activate:Activate a profile'
+    'bench-all:Start benchmarks for all profiles'
+    'bench:Start benchmark for one profile'
+    'stop-all:Stop all profiles'
+    'completions:Print shell completions'
+  )
+  _describe 'command' commands
+}
+compdef _model_switchboardctl model-switchboardctl
+ZSH
+      ;;
+    fish)
+      cat <<'FISH'
+complete -c model-switchboardctl -f
+complete -c model-switchboardctl -n '__fish_use_subcommand' -a status -d 'Print raw controller status JSON'
+complete -c model-switchboardctl -n '__fish_use_subcommand' -a summary -d 'Print one-line status summary'
+complete -c model-switchboardctl -n '__fish_use_subcommand' -a profiles-dir -d 'Print the controller profile directory'
+complete -c model-switchboardctl -n '__fish_use_subcommand' -a controller-root -d 'Print the controller root directory'
+complete -c model-switchboardctl -n '__fish_use_subcommand' -a open-app -d 'Launch the menu bar app'
+complete -c model-switchboardctl -n '__fish_use_subcommand' -a open-dashboard -d 'Open the local dashboard'
+complete -c model-switchboardctl -n '__fish_use_subcommand' -a open-profiles -d 'Open the profiles directory'
+complete -c model-switchboardctl -n '__fish_use_subcommand' -a start -d 'Start a profile'
+complete -c model-switchboardctl -n '__fish_use_subcommand' -a stop -d 'Stop a profile'
+complete -c model-switchboardctl -n '__fish_use_subcommand' -a restart -d 'Restart a profile'
+complete -c model-switchboardctl -n '__fish_use_subcommand' -a activate -d 'Activate a profile'
+complete -c model-switchboardctl -n '__fish_use_subcommand' -a bench-all -d 'Start benchmarks for all profiles'
+complete -c model-switchboardctl -n '__fish_use_subcommand' -a bench -d 'Start benchmark for one profile'
+complete -c model-switchboardctl -n '__fish_use_subcommand' -a stop-all -d 'Stop all profiles'
+complete -c model-switchboardctl -n '__fish_use_subcommand' -a completions -d 'Print shell completions'
+FISH
+      ;;
+    *)
+      printf 'error: completions requires bash, zsh, or fish\n' >&2
+      exit 1
+      ;;
+  esac
 }
 
 api() {
@@ -158,6 +231,10 @@ PY
     ;;
   stop-all)
     post_json /api/stop-all '{}'
+    ;;
+  completions)
+    shift
+    print_completions "${1:-}"
     ;;
   ""|-h|--help|help)
     usage
