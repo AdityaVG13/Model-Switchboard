@@ -4,8 +4,18 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## [1.1.6] - 2026-05-17
+
+### Added
+- Added a terminal demo recording and refreshed screenshot assets for the README.
+
 ### Changed
+- Redesigned the README hero and gallery around the current Base, Plus, benchmark, and controller workflows.
 - Hardened controller profile parsing so `.env` profiles are treated as declarative key/value data instead of shell scripts, with explicit validation shared by the CLI and launcher.
+
+### Fixed
+- Preserved llama.cpp chat template arguments and launcher start timeouts when generating managed runtime commands.
+- Removed a local filesystem path from the terminal demo source.
 
 ## [1.1.5] - 2026-05-02
 
