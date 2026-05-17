@@ -278,6 +278,42 @@ class ModelCtlTests(unittest.TestCase):
         self.assertNotIn("missing MODEL_REPO, MODEL_ID, MODEL_DIR, MODEL_PATH, or MODEL_FILE for vllm", report["errors"])
         self.assertEqual(report["launch_mode"], "external")
 
+    def test_profile_urls_reject_non_http_schemes(self) -> None:
+        with self.assertRaisesRegex(ValueError, "BASE_URL must use http or https"):
+            MODULE.base_url({"BASE_URL": "file:///etc/passwd"})
+        with self.assertRaisesRegex(ValueError, "MODEL_LIST_URL must use http or https"):
+            MODULE.models_url({"MODEL_LIST_URL": "ftp://127.0.0.1/models"})
+        with self.assertRaisesRegex(ValueError, "HEALTHCHECK_URL must use http or https"):
+            MODULE.healthcheck_url({"HEALTHCHECK_URL": "file:///tmp/health"})
+
+    def test_fetch_openai_models_does_not_open_non_http_urls(self) -> None:
+        with mock.patch.object(MODULE.urllib.request, "urlopen") as urlopen:
+            self.assertEqual(MODULE.fetch_openai_models("file:///etc/passwd"), [])
+        urlopen.assert_not_called()
+
+    def test_default_healthcheck_urls_use_loopback_for_wildcard_binds(self) -> None:
+        env = {
+            "HOST": "0.0.0.0",
+            "PORT": "8080",
+        }
+
+        self.assertEqual(MODULE.base_url(env), "http://127.0.0.1:8080/v1")
+        self.assertEqual(MODULE.healthcheck_url(env), "http://127.0.0.1:8080/v1/models")
+
+    def test_diagnose_profile_reports_invalid_profile_urls(self) -> None:
+        env = {
+            "PROFILE_NAME": "external",
+            "DISPLAY_NAME": "External",
+            "RUNTIME": "external",
+            "REQUEST_MODEL": "external",
+            "BASE_URL": "file:///etc/passwd",
+        }
+
+        report = MODULE.diagnose_profile("external", env)
+
+        self.assertIn("BASE_URL must use http or https", report["errors"])
+        self.assertFalse(report["ready"])
+
     def test_terminate_pid_signals_process_group_before_process(self) -> None:
         with (
             mock.patch.object(MODULE.os, "getpgid", return_value=4242),
