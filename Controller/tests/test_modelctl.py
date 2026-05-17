@@ -9,6 +9,7 @@ import plistlib
 import shutil
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -639,6 +640,36 @@ class ModelCtlTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join(timeout=2)
+
+    def test_start_benchmark_creates_unique_private_run_log(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "run"
+            fake_proc = mock.Mock(pid=4242)
+            with (
+                mock.patch.object(MODULE, "RUN_DIR", run_dir),
+                mock.patch.object(MODULE.subprocess, "Popen", return_value=fake_proc),
+                mock.patch.object(MODULE, "process_alive", return_value=True),
+            ):
+                status = MODULE.start_benchmark(["qwen35-a3b"])
+
+            log_path = Path(status["log_path"])
+            self.assertEqual(log_path.parent, run_dir / "logs")
+            self.assertRegex(log_path.name, r"^benchmark-\d{8}T\d{6}Z-[0-9a-f]{16}\.log$")
+            self.assertTrue(log_path.exists())
+            self.assertEqual(stat.S_IMODE(log_path.stat().st_mode), 0o600)
+            self.assertEqual(stat.S_IMODE(log_path.parent.stat().st_mode), 0o700)
+            self.assertEqual((run_dir / "benchmark.log.path").read_text().strip(), str(log_path))
+
+    def test_benchmark_log_creation_does_not_follow_symlinks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "run"
+            with mock.patch.object(MODULE, "RUN_DIR", run_dir):
+                log_dir = MODULE.secure_benchmark_log_dir()
+                link_path = log_dir / "blocked.log"
+                link_path.symlink_to(Path(tmpdir) / "target.log")
+
+                with self.assertRaises(FileExistsError):
+                    MODULE.open_benchmark_log_file(link_path)
 
     def test_status_snapshot_disables_port_fallback_for_conflicted_profiles(self) -> None:
         profiles = {

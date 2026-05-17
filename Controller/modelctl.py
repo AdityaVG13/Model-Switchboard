@@ -8,6 +8,7 @@ import ipaddress
 import json
 import os
 import pathlib
+import secrets
 import shutil
 import signal
 import subprocess
@@ -18,7 +19,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import TypedDict
+from typing import BinaryIO, TypedDict
 
 from contracts import (
     BenchmarkLatestReportPayload,
@@ -1725,8 +1726,58 @@ def benchmark_pid_path() -> pathlib.Path:
     return RUN_DIR / "benchmark.pid"
 
 
+def benchmark_log_dir() -> pathlib.Path:
+    return RUN_DIR / "logs"
+
+
+def benchmark_log_pointer_path() -> pathlib.Path:
+    return RUN_DIR / "benchmark.log.path"
+
+
+def secure_benchmark_log_dir() -> pathlib.Path:
+    log_dir = benchmark_log_dir()
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_dir.chmod(0o700)
+    return log_dir
+
+
 def benchmark_log_path() -> pathlib.Path:
-    return RUN_DIR / "logs" / "benchmark.log"
+    pointer = benchmark_log_pointer_path()
+    if pointer.exists():
+        try:
+            path = pathlib.Path(pointer.read_text(encoding="utf-8").strip())
+        except OSError:
+            path = pathlib.Path()
+        if path.is_absolute() and path.parent == benchmark_log_dir():
+            return path
+    return benchmark_log_dir() / "benchmark.log"
+
+
+def open_benchmark_log_file(path: pathlib.Path) -> BinaryIO:
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags, 0o600)
+    return os.fdopen(fd, "ab", buffering=0)
+
+
+def create_benchmark_log_file() -> tuple[pathlib.Path, BinaryIO]:
+    log_dir = secure_benchmark_log_dir()
+    timestamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    for _ in range(32):
+        path = log_dir / f"benchmark-{timestamp}-{secrets.token_hex(8)}.log"
+        try:
+            return path, open_benchmark_log_file(path)
+        except FileExistsError:
+            continue
+    raise RuntimeError("could not create unique benchmark log")
+
+
+def write_benchmark_log_pointer(path: pathlib.Path) -> None:
+    pointer = benchmark_log_pointer_path()
+    pointer.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = pointer.with_suffix(".tmp")
+    temp_path.write_text(f"{path}\n", encoding="utf-8")
+    temp_path.chmod(0o600)
+    temp_path.replace(pointer)
 
 
 def benchmark_status() -> BenchmarkStatusPayload:
@@ -1760,10 +1811,8 @@ def start_benchmark(
     if keep_running:
         cmd.append("--keep-running")
     RUN_DIR.mkdir(parents=True, exist_ok=True)
-    log_path = benchmark_log_path()
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    log_fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-    with os.fdopen(log_fd, "ab", buffering=0) as log_fp, open(os.devnull, "rb") as stdin_fp:
+    log_path, log_fp = create_benchmark_log_file()
+    with log_fp, open(os.devnull, "rb") as stdin_fp:
         proc = subprocess.Popen(
             cmd,
             stdin=stdin_fp,
@@ -1772,6 +1821,7 @@ def start_benchmark(
             start_new_session=True,
             close_fds=True,
         )
+    write_benchmark_log_pointer(log_path)
     benchmark_pid_path().write_text(f"{proc.pid}\n")
     return benchmark_status()
 
