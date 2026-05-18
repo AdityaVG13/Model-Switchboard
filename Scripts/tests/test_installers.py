@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import subprocess
@@ -159,6 +160,64 @@ class InstallerScriptTests(unittest.TestCase):
             check=True,
         )
         self.assertIn("complete -F _model_switchboardctl_completion", result.stdout)
+        self.assertEqual(result.stderr, "")
+
+    def test_model_switchboardctl_exposes_agent_capabilities_without_controller(self) -> None:
+        ctl = ROOT / "Scripts" / "model-switchboardctl"
+        result = subprocess.run(
+            ["bash", str(ctl), "capabilities"],
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["tool"], "model-switchboardctl")
+        self.assertEqual(payload["default_probe"], "model-switchboardctl triage")
+        self.assertIn("commands", payload)
+        self.assertEqual(result.stderr, "")
+
+    def test_model_switchboardctl_unknown_command_teaches_correction(self) -> None:
+        ctl = ROOT / "Scripts" / "model-switchboardctl"
+        result = subprocess.run(
+            ["bash", str(ctl), "stats"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 64)
+        self.assertIn("did you mean: model-switchboardctl status", result.stderr)
+        self.assertIn("model-switchboardctl capabilities", result.stderr)
+
+    def test_model_switchboardctl_robot_docs_rejects_unknown_topic(self) -> None:
+        ctl = ROOT / "Scripts" / "model-switchboardctl"
+        result = subprocess.run(
+            ["bash", str(ctl), "robot-docs", "reference"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 64)
+        self.assertIn("did you mean: model-switchboardctl robot-docs guide", result.stderr)
+
+    def test_model_switchboardctl_dry_run_plan_does_not_require_controller(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ctl = Path(tmpdir) / "model-switchboardctl"
+            shutil.copy2(ROOT / "Scripts" / "model-switchboardctl", ctl)
+            result = subprocess.run(
+                ["bash", str(ctl), "start", "qwen35-a3b", "--dry-run", "--json"],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["tool"], "model-switchboardctl")
+        self.assertTrue(payload["dry_run"])
+        self.assertEqual(payload["plan"][0]["endpoint"], "/api/start")
+        self.assertEqual(payload["plan"][0]["payload"], {"profile": "qwen35-a3b"})
         self.assertEqual(result.stderr, "")
 
 

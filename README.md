@@ -156,6 +156,8 @@ cd Model-Switchboard
 
 The installer places a fresh build under `~/Applications/`, installs `model-switchboardctl` to `~/.local/bin`, writes bash/zsh/fish completions, registers the app with Launch Services, and forces a Spotlight import so Raycast and Alfred pick it up immediately. Use `./Scripts/install.sh --help` for quiet mode, custom install paths, `--verify`, and `--skip-open`.
 
+Agent-facing CLI entrypoints are built in: `model-switchboardctl capabilities`, `model-switchboardctl robot-docs guide`, `model-switchboardctl triage`, and `model-switchboardctl doctor --json` expose machine-readable contracts, paste-ready guidance, one-call health triage, and structured diagnostics. Mutating commands such as `start`, `stop`, `restart`, `switch`/`activate`, and `stop-all` accept `--dry-run`/`--plan`; add `--json` for a structured result envelope.
+
 ---
 
 ## Quickstart

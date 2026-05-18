@@ -406,7 +406,7 @@ Raycast users have two paths:
 This repo supports both:
 
 - `Scripts/install.sh` explicitly registers the app with Launch Services and forces a Spotlight import so Raycast can discover it faster.
-- `Scripts/model-switchboardctl` provides a tiny controller CLI, selectable per edition via `MODEL_SWITCHBOARD_VARIANT=base|plus`.
+- `Scripts/model-switchboardctl` provides a tiny controller CLI, selectable per edition via `MODEL_SWITCHBOARD_VARIANT=base|plus`. Agents can start with `model-switchboardctl capabilities`, `model-switchboardctl robot-docs guide`, `model-switchboardctl triage`, or `model-switchboardctl doctor --json`; mutating commands support `--dry-run`/`--plan` and structured `--json` envelopes.
 - `Integrations/Raycast/Script Commands/` contains Script Commands for status, opening the profiles folder, stopping all models, and running quick benchmarks.
 
 If Finder shows `.app` extensions, that is the macOS `AppleShowAllExtensions` Finder preference, not a bundle naming issue.

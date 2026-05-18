@@ -7,9 +7,11 @@ All notable changes to this project are documented in this file.
 ### Added
 - Installed `model-switchboardctl` and bash/zsh/fish completions from the source installer.
 - Added installer regression coverage for quiet installs, verification, and completion generation.
+- Added agent-facing controller and wrapper discovery surfaces for capabilities, triage, robot docs, doctor diagnostics, and mutating-command dry-run plans.
 
 ### Changed
 - Hardened the app and controller installers with help flags, quiet/no-gum modes, preflight checks, atomic locks, install verification, and final uninstall guidance.
+- `model-switchboardctl --json` output for mutating commands now uses structured result envelopes instead of passing through raw controller responses.
 
 ## [1.1.6] - 2026-05-17
 
