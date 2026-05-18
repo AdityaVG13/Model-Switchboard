@@ -807,6 +807,325 @@ class ModelCtlTests(unittest.TestCase):
             diagnostics["supergemma31b-rvllm-mlx"]["errors"],
         )
 
+    def test_doctor_capabilities_advertise_agent_contract(self) -> None:
+        capabilities = MODULE.doctor_capabilities()
+
+        self.assertEqual(capabilities["tool"], "modelctl.py")
+        self.assertIn("capabilities", capabilities["subcommands"])
+        self.assertIn("robot-docs", capabilities["subcommands"])
+        self.assertIn("0", capabilities["exit_codes"])
+        self.assertIn("1", capabilities["exit_codes"])
+        self.assertTrue(capabilities["offline_default"])
+        self.assertTrue(any(fixer["id"] == "create-profiles-dir" for fixer in capabilities["fixers"]))
+
+    def test_modelctl_capabilities_advertise_root_agent_contract(self) -> None:
+        capabilities = MODULE.modelctl_capabilities()
+
+        self.assertEqual(capabilities["tool"], "modelctl.py")
+        self.assertEqual(capabilities["default_probe"], "./Controller/modelctl.py triage --json")
+        commands = {command["name"]: command for command in capabilities["commands"]}
+        self.assertIn("triage", commands)
+        self.assertIn("robot-docs", commands)
+        self.assertIn("doctor", commands)
+        self.assertEqual(capabilities["aliases"]["--robot-triage"], ["triage", "--json"])
+        self.assertIn("64", capabilities["exit_codes"])
+
+    def test_modelctl_triage_payload_is_single_call_agent_summary(self) -> None:
+        with (
+            mock.patch.object(MODULE, "load_profiles", return_value={"qwen35-a3b": {}, "gemma3-mlx": {}}),
+            mock.patch.object(
+                MODULE,
+                "doctor_health_payload",
+                return_value={"healthy": True, "finding_count": 0, "auto_fixable_count": 0},
+            ),
+        ):
+            payload = MODULE.modelctl_triage_payload()
+
+        self.assertTrue(payload["health"]["healthy"])
+        self.assertEqual(payload["profiles"]["names"], ["gemma3-mlx", "qwen35-a3b"])
+        self.assertTrue(any(item["command"] == "./Controller/modelctl.py capabilities --json" for item in payload["recommendations"]))
+        self.assertIn("./Controller/modelctl.py doctor --json", payload["commands"])
+
+    def test_modelctl_accepts_agent_intent_aliases(self) -> None:
+        parser = MODULE.build_parser()
+
+        diagnose = parser.parse_args(MODULE.normalize_cli_argv(["diagnose", "--json"]))
+        health = parser.parse_args(MODULE.normalize_cli_argv(["health", "--json"]))
+        triage = parser.parse_args(MODULE.normalize_cli_argv(["--robot-triage"]))
+
+        self.assertEqual(diagnose.command, "doctor")
+        self.assertTrue(diagnose.json)
+        self.assertEqual(health.command, "doctor")
+        self.assertEqual(health.doctor_command, "health")
+        self.assertEqual(triage.command, "triage")
+        self.assertTrue(triage.json)
+
+    def test_modelctl_usage_error_suggests_correct_command_and_flag(self) -> None:
+        parser = MODULE.build_parser()
+        stderr = io.StringIO()
+        with mock.patch.object(MODULE.sys, "stderr", stderr):
+            with self.assertRaises(SystemExit) as command_error:
+                parser.parse_args(["stats"])
+        self.assertEqual(command_error.exception.code, 64)
+        self.assertIn("did you mean: `", stderr.getvalue())
+        self.assertIn("status", stderr.getvalue())
+
+        stderr = io.StringIO()
+        with mock.patch.object(MODULE.sys, "stderr", stderr):
+            with self.assertRaises(SystemExit) as flag_error:
+                parser.parse_args(["doctor", "--jsno"])
+        self.assertEqual(flag_error.exception.code, 64)
+        self.assertIn("did you mean:", stderr.getvalue())
+        self.assertIn("--json", stderr.getvalue())
+
+    def test_modelctl_robot_docs_are_available_in_tool(self) -> None:
+        docs = MODULE.modelctl_robot_docs()
+
+        self.assertIn("./Controller/modelctl.py triage --json", docs)
+        self.assertIn("./Controller/modelctl.py capabilities --json", docs)
+        self.assertIn("Usage errors and hints print to stderr and exit 64", docs)
+
+    def test_start_dry_run_json_plans_without_starting_profile(self) -> None:
+        parser = MODULE.build_parser()
+        args = parser.parse_args(["start", "qwen35-a3b", "--dry-run", "--json"])
+        profiles = {
+            "qwen35-a3b": {
+                "PROFILE_NAME": "qwen35-a3b",
+                "DISPLAY_NAME": "Qwen",
+                "REQUEST_MODEL": "qwen35-local",
+                "HOST": "127.0.0.1",
+                "PORT": "8080",
+            }
+        }
+        stdout = io.StringIO()
+
+        with (
+            mock.patch.object(MODULE, "load_profiles", return_value=profiles),
+            mock.patch.object(MODULE, "start_profile") as start_profile,
+            mock.patch.object(MODULE.sys, "stdout", stdout),
+        ):
+            code = MODULE.handle_mutating_command(args)
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(code, 0)
+        self.assertTrue(payload["dry_run"])
+        self.assertEqual(payload["status"], "planned")
+        self.assertEqual(payload["plan"][0]["action"], "start-profile")
+        self.assertEqual(payload["plan"][0]["profile"], "qwen35-a3b")
+        start_profile.assert_not_called()
+
+    def test_start_all_dry_run_json_allows_empty_profile_set(self) -> None:
+        parser = MODULE.build_parser()
+        args = parser.parse_args(["start", "all", "--dry-run", "--json"])
+        stdout = io.StringIO()
+
+        with (
+            mock.patch.object(MODULE, "load_profiles", return_value={}),
+            mock.patch.object(MODULE, "start_profile") as start_profile,
+            mock.patch.object(MODULE.sys, "stdout", stdout),
+        ):
+            code = MODULE.handle_mutating_command(args)
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(code, 0)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["status"], "planned")
+        self.assertEqual(payload["plan"][0]["action"], "start-all")
+        self.assertEqual(payload["plan"][0]["details"]["profiles"], [])
+        start_profile.assert_not_called()
+
+    def test_switch_dry_run_json_plans_exclusive_activation_without_mutating(self) -> None:
+        parser = MODULE.build_parser()
+        args = parser.parse_args(["switch", "qwen35-a3b", "--plan", "--json"])
+        profiles = {
+            "qwen35-a3b": {
+                "PROFILE_NAME": "qwen35-a3b",
+                "DISPLAY_NAME": "Qwen",
+                "REQUEST_MODEL": "qwen35-local",
+                "HOST": "127.0.0.1",
+                "PORT": "8080",
+            },
+            "gemma3-mlx": {
+                "PROFILE_NAME": "gemma3-mlx",
+                "DISPLAY_NAME": "Gemma",
+                "REQUEST_MODEL": "gemma-local",
+                "HOST": "127.0.0.1",
+                "PORT": "8081",
+            },
+        }
+        stdout = io.StringIO()
+
+        with (
+            mock.patch.object(MODULE, "load_profiles", return_value=profiles),
+            mock.patch.object(MODULE, "status_snapshot", return_value=[{"profile": "gemma3-mlx", "running": True}]),
+            mock.patch.object(MODULE, "start_profile") as start_profile,
+            mock.patch.object(MODULE, "stop_profile") as stop_profile,
+            mock.patch.object(MODULE, "write_active_profile") as write_active_profile,
+            mock.patch.object(MODULE.sys, "stdout", stdout),
+        ):
+            code = MODULE.handle_mutating_command(args)
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["plan"][0]["action"], "switch-profile")
+        self.assertEqual(payload["plan"][0]["details"]["stop_first"], ["gemma3-mlx"])
+        steps = payload["plan"][0]["details"]["steps"]
+        self.assertEqual([step["action"] for step in steps], ["stop-running-profile", "start-profile", "write-active-profile"])
+        start_profile.assert_not_called()
+        stop_profile.assert_not_called()
+        write_active_profile.assert_not_called()
+
+    def test_start_json_result_envelope_captures_stdout_and_status(self) -> None:
+        parser = MODULE.build_parser()
+        args = parser.parse_args(["start", "qwen35-a3b", "--json"])
+        profiles = {
+            "qwen35-a3b": {
+                "PROFILE_NAME": "qwen35-a3b",
+                "DISPLAY_NAME": "Qwen",
+                "REQUEST_MODEL": "qwen35-local",
+                "HOST": "127.0.0.1",
+                "PORT": "8080",
+            }
+        }
+        status_after = {
+            "statuses": [],
+            "benchmark": {"running": False, "log_path": "", "latest": None},
+            "integrations": [],
+            "profiles_dir": "/tmp/profiles",
+            "controller_root": "/tmp/controller",
+        }
+        stdout = io.StringIO()
+
+        with (
+            mock.patch.object(MODULE, "load_profiles", return_value=profiles),
+            mock.patch.object(MODULE, "start_profile", side_effect=lambda name: print(f"started {name}")) as start_profile,
+            mock.patch.object(MODULE, "status_payload", return_value=status_after),
+            mock.patch.object(MODULE.sys, "stdout", stdout),
+        ):
+            code = MODULE.handle_mutating_command(args)
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(code, 0)
+        self.assertFalse(payload["dry_run"])
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["results"][0]["stdout"], ["started qwen35-a3b"])
+        self.assertEqual(payload["status_after"], status_after)
+        start_profile.assert_called_once_with("qwen35-a3b")
+
+    def test_stop_all_dry_run_json_plans_benchmark_profiles_and_script(self) -> None:
+        parser = MODULE.build_parser()
+        args = parser.parse_args(["stop-all", "--dry-run", "--json"])
+        stdout = io.StringIO()
+
+        with (
+            mock.patch.object(MODULE, "load_profiles", return_value={"qwen35-a3b": {}, "gemma3-mlx": {}}),
+            mock.patch.object(MODULE, "read_pid", return_value=4242),
+            mock.patch.object(MODULE, "stop_all") as stop_all,
+            mock.patch.object(MODULE.sys, "stdout", stdout),
+        ):
+            code = MODULE.handle_mutating_command(args)
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(code, 0)
+        steps = payload["plan"][0]["details"]["steps"]
+        self.assertEqual(steps[0]["action"], "stop-benchmark")
+        self.assertEqual(steps[-1]["action"], "run-stop-all-script")
+        self.assertEqual(payload["plan"][0]["details"]["profiles"], ["gemma3-mlx", "qwen35-a3b"])
+        stop_all.assert_not_called()
+
+    def test_mutating_json_error_envelope_for_unknown_profile(self) -> None:
+        parser = MODULE.build_parser()
+        args = parser.parse_args(["start", "missing-profile", "--json"])
+        stdout = io.StringIO()
+
+        with (
+            mock.patch.object(MODULE, "load_profiles", return_value={}),
+            mock.patch.object(MODULE.sys, "stdout", stdout),
+        ):
+            code = MODULE.handle_mutating_command(args)
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(code, 1)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"]["code"], "user_input_error")
+        self.assertIn("Unknown profile: missing-profile", payload["error"]["message"])
+
+    def test_doctor_report_includes_structured_findings_and_next_steps(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_profile_dir = MODULE.PROFILE_DIR
+            MODULE.PROFILE_DIR = Path(tmpdir) / "missing-profiles"
+            try:
+                with (
+                    mock.patch.object(MODULE, "controller_status", return_value={"url": "http://127.0.0.1:8877/api/status", "reachable": True, "profiles": 0, "integrations": 0}),
+                    mock.patch.object(MODULE, "launch_agent_status", return_value={"plist_path": "/tmp/io.modelswitchboard.controller.plist", "installed": True, "running": True}),
+                    mock.patch.object(MODULE, "integration_status", return_value=[]),
+                ):
+                    report = MODULE.doctor_report()
+            finally:
+                MODULE.PROFILE_DIR = original_profile_dir
+
+        self.assertFalse(report["healthy"])
+        findings = {finding["id"]: finding for finding in report["findings"]}
+        self.assertTrue(findings["fm-profiles-dir-missing"]["auto_fixable"])
+        self.assertIn("./Controller/modelctl.py doctor --fix", findings["fm-profiles-dir-missing"]["remediation"])
+        self.assertTrue(report["next_steps"])
+
+    def test_doctor_fix_creates_missing_profiles_dir_and_undo_quarantines_it(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_profile_dir = MODULE.PROFILE_DIR
+            original_artifact_dir = MODULE.DOCTOR_ARTIFACT_DIR
+            original_runs_dir = MODULE.DOCTOR_RUNS_DIR
+            original_latest_path = MODULE.DOCTOR_LATEST_PATH
+            MODULE.PROFILE_DIR = Path(tmpdir) / "model-profiles"
+            MODULE.DOCTOR_ARTIFACT_DIR = Path(tmpdir) / ".doctor"
+            MODULE.DOCTOR_RUNS_DIR = MODULE.DOCTOR_ARTIFACT_DIR / "runs"
+            MODULE.DOCTOR_LATEST_PATH = MODULE.DOCTOR_ARTIFACT_DIR / "latest"
+            try:
+                patches = (
+                    mock.patch.object(MODULE, "controller_status", return_value={"url": "http://127.0.0.1:8877/api/status", "reachable": True, "profiles": 0, "integrations": 0}),
+                    mock.patch.object(MODULE, "launch_agent_status", return_value={"plist_path": "/tmp/io.modelswitchboard.controller.plist", "installed": True, "running": True}),
+                    mock.patch.object(MODULE, "integration_status", return_value=[]),
+                )
+                with patches[0], patches[1], patches[2]:
+                    dry_run, dry_code = MODULE.doctor_fix(dry_run=True, run_id="dry-run")
+                    applied, code = MODULE.doctor_fix(run_id="create-dir")
+                    second, second_code = MODULE.doctor_fix(run_id="idempotent")
+                    undo, undo_code = MODULE.doctor_undo("create-dir")
+            finally:
+                MODULE.PROFILE_DIR = original_profile_dir
+                MODULE.DOCTOR_ARTIFACT_DIR = original_artifact_dir
+                MODULE.DOCTOR_RUNS_DIR = original_runs_dir
+                MODULE.DOCTOR_LATEST_PATH = original_latest_path
+
+            self.assertEqual(dry_code, 1)
+            self.assertEqual(dry_run["actions"][0]["status"], "planned")
+            self.assertEqual(code, 0)
+            self.assertEqual(applied["actions_taken"], 1)
+            self.assertEqual(second_code, 0)
+            self.assertEqual(second["actions_taken"], 0)
+            self.assertEqual(undo_code, 0)
+            self.assertTrue(undo["ok"])
+            self.assertFalse((Path(tmpdir) / "model-profiles").exists())
+            self.assertTrue(any(item["status"] == "quarantined" for item in undo["undone"]))
+
+    def test_doctor_explain_returns_current_finding_details(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_profile_dir = MODULE.PROFILE_DIR
+            MODULE.PROFILE_DIR = Path(tmpdir) / "missing-profiles"
+            try:
+                with (
+                    mock.patch.object(MODULE, "controller_status", return_value={"url": "http://127.0.0.1:8877/api/status", "reachable": True, "profiles": 0, "integrations": 0}),
+                    mock.patch.object(MODULE, "launch_agent_status", return_value={"plist_path": "/tmp/io.modelswitchboard.controller.plist", "installed": True, "running": True}),
+                    mock.patch.object(MODULE, "integration_status", return_value=[]),
+                ):
+                    payload, code = MODULE.explain_doctor_finding("fm-profiles-dir-missing")
+            finally:
+                MODULE.PROFILE_DIR = original_profile_dir
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["finding"]["id"], "fm-profiles-dir-missing")
+        self.assertIn("next_steps", payload)
+
     def test_switch_profile_rejects_duplicate_endpoint_assignment(self) -> None:
         profiles = {
             "qwen35-a3b": {

@@ -28,6 +28,29 @@ The controller reads profiles from `model-profiles`. Each profile defines launch
 
 When a profile is activated through the switch action, the controller records it as the active profile in `run/active-profile`. The background service checks that active profile every 30 seconds and restarts it if both the process and health check are gone. This covers native runtime crashes without keeping a dead overnight job hidden behind a stale PID.
 
+The controller CLI has an agent-facing doctor and robot surface:
+
+```bash
+./modelctl.py triage --json
+./modelctl.py capabilities --json
+./modelctl.py robot-docs guide
+./modelctl.py start <profile> --dry-run --json
+./modelctl.py stop <profile> --json
+./modelctl.py restart <profile> --plan --json
+./modelctl.py switch <profile> --dry-run --json
+./modelctl.py stop-all --dry-run --json
+./modelctl.py doctor --json
+./modelctl.py doctor health --json
+./modelctl.py doctor capabilities --json
+./modelctl.py doctor robot-docs
+./modelctl.py doctor --dry-run --fix --json
+./modelctl.py doctor undo <run-id> --json
+```
+
+`triage --json` is the one-call entrypoint for agents: it returns health, profile names, recommended commands, and exit-code meanings. `capabilities --json` describes the command contract, mutating surfaces, aliases, JSON support, and stdout/stderr contract. Mutating profile commands (`start`, `stop`, `restart`, `switch`, and `stop-all`) support `--dry-run`/`--plan` and `--json`; JSON mode returns a stable envelope with the plan, execution status, captured command output, errors, and post-action status when applied. `robot-docs guide` prints paste-ready in-tool guidance. Intent aliases are accepted for common first tries: `diagnose --json` maps to `doctor --json`, `health --json` maps to `doctor health --json`, `--robot-triage` maps to `triage --json`, and `--capabilities` maps to `capabilities --json`.
+
+`doctor` diagnoses controller reachability, LaunchAgent state, profile directory state, duplicate endpoints, invalid profile URLs, missing model sources, missing runtimes, and disabled health checks. Detect mode writes only `.doctor/runs/<run-id>/` artifacts. The only auto-fixer currently creates a missing `model-profiles` directory, records an action in `actions.jsonl`, and can be undone with `doctor undo <run-id>`.
+
 For llama.cpp profiles, `MODEL_PATH` still wins when set. If you prefer `MODEL_FILE`, the controller now resolves model roots in this order: `MODEL_ROOT`, `MODEL_ROOT_HINT`, `~/AI/models`, then `../models` relative to `Controller/`.
 
 ## Benchmark harness

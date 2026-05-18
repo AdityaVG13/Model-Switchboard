@@ -2,8 +2,12 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime as dt
+import difflib
+import hashlib
 import hmac
+import io
 import ipaddress
 import json
 import os
@@ -41,6 +45,7 @@ from contracts import (
 from profile_env import ProfileFormatError, load_env_profile, load_json_profile, load_profile  # noqa: F401
 
 BASE = pathlib.Path(__file__).resolve().parent
+PROJECT_ROOT = BASE.parent
 PROFILE_DIR = BASE / "model-profiles"
 RUN_DIR = BASE / "run"
 ACTIVE_PROFILE_PATH = RUN_DIR / "active-profile"
@@ -57,6 +62,74 @@ FACTORY_SETTINGS_PATH = pathlib.Path.home() / ".factory" / "settings.json"
 LAUNCH_AGENT_LABEL = "io.modelswitchboard.controller"
 LAUNCH_AGENT_PLIST = pathlib.Path.home() / "Library/LaunchAgents" / f"{LAUNCH_AGENT_LABEL}.plist"
 STATUS_CACHE_PATH = pathlib.Path.home() / "Library/Caches/io.modelswitchboard/controller-status.json"
+CLI_CONTRACT_VERSION = "1.0"
+CLI_SCHEMA_VERSION = "1"
+DOCTOR_CONTRACT_VERSION = "1.0"
+DOCTOR_SCHEMA_VERSION = "1"
+DOCTOR_ARTIFACT_DIR = PROJECT_ROOT / ".doctor"
+DOCTOR_RUNS_DIR = DOCTOR_ARTIFACT_DIR / "runs"
+DOCTOR_LATEST_PATH = DOCTOR_ARTIFACT_DIR / "latest"
+CLI_EXIT_CODES = {
+    "0": "success",
+    "1": "operation failed or diagnostic findings are present",
+    "2": "safety block or partially applied repair",
+    "3": "tool environment error or rollback failure",
+    "4": "unsafe state refused",
+    "5": "conflict or concurrency loss",
+    "64": "usage error",
+}
+CLI_COMMAND_ALIASES = {
+    "activate": ["switch"],
+    "diagnose": ["doctor"],
+    "validate": ["doctor"],
+    "health": ["doctor", "health"],
+    "docs": ["robot-docs", "guide"],
+    "robot-help": ["robot-docs", "guide"],
+}
+CLI_GLOBAL_ALIASES = {
+    "--capabilities": ["capabilities", "--json"],
+    "--robot-docs": ["robot-docs", "guide"],
+    "--robot-help": ["robot-docs", "guide"],
+    "--robot-triage": ["triage", "--json"],
+}
+CLI_COMMAND_NAMES = [
+    "status",
+    "list",
+    "start",
+    "stop",
+    "restart",
+    "switch",
+    "activate",
+    "benchmark",
+    "doctor",
+    "diagnose",
+    "health",
+    "capabilities",
+    "robot-docs",
+    "triage",
+    "integrations",
+    "run-integration",
+    "stop-all",
+    "serve-web",
+]
+CLI_KNOWN_FLAGS = [
+    "--allow-concurrent",
+    "--auth-token",
+    "--auth-token-file",
+    "--background",
+    "--dry-run",
+    "--fix",
+    "--help",
+    "--host",
+    "--json",
+    "--keep-running",
+    "--no-strict",
+    "--plan",
+    "--port",
+    "--run-id",
+    "--suite",
+    "--unsafe-bind",
+]
 
 
 class ProfileConflictError(RuntimeError):
@@ -69,6 +142,44 @@ class ControllerAPIError(Exception):
         self.status = status
         self.code = code
         self.message = message
+
+
+def closest_cli_token(value: str, choices: list[str]) -> str | None:
+    matches = difflib.get_close_matches(value, choices, n=1, cutoff=0.58)
+    return matches[0] if matches else None
+
+
+def normalize_cli_argv(argv: list[str]) -> list[str]:
+    if not argv:
+        return argv
+    first = argv[0]
+    if first in CLI_GLOBAL_ALIASES:
+        return [*CLI_GLOBAL_ALIASES[first], *argv[1:]]
+    if first in CLI_COMMAND_ALIASES:
+        return [*CLI_COMMAND_ALIASES[first], *argv[1:]]
+    return argv
+
+
+def cli_usage_hint(prog: str, message: str) -> str:
+    hint_parts: list[str] = []
+    if "invalid choice:" in message:
+        attempted = message.split("invalid choice:", 1)[1].split("(", 1)[0].strip().strip("'\"")
+        suggestion = closest_cli_token(attempted, CLI_COMMAND_NAMES)
+        if suggestion:
+            hint_parts.append(f"did you mean: `{prog} {suggestion}`")
+    if "unrecognized arguments:" in message:
+        unknown = message.split("unrecognized arguments:", 1)[1].strip().split()[0]
+        suggestion = closest_cli_token(unknown, CLI_KNOWN_FLAGS)
+        if suggestion:
+            hint_parts.append(f"did you mean: `{prog} {suggestion}`")
+    hint_parts.append(f"inspect machine-readable commands with `{prog} capabilities --json`")
+    return "\n".join(f"hint: {hint}" for hint in hint_parts)
+
+
+class AgentArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        self.print_usage(sys.stderr)
+        self.exit(64, f"{self.prog}: usage error: {message}\n{cli_usage_hint(self.prog, message)}\n")
 
 
 def _host_for_ip_parse(host: str) -> str:
@@ -1496,6 +1607,300 @@ def print_status(selected: list[str] | None = None, *, as_json: bool = False) ->
         )
 
 
+def mutation_action(
+    action: str,
+    *,
+    profile: str | None = None,
+    mutates: bool = True,
+    command: list[str] | None = None,
+    details: dict[str, object] | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "action": action,
+        "mutates": mutates,
+    }
+    if profile:
+        payload["profile"] = profile
+    if command:
+        payload["command"] = command
+    if details:
+        payload["details"] = details
+    return payload
+
+
+def plan_start_profile(name: str, profiles: dict[str, ProfileEnv] | None = None) -> dict[str, object]:
+    profiles = profiles or load_profiles()
+    if name not in profiles:
+        raise SystemExit(f"Unknown profile: {name}")
+    ensure_unique_profile_endpoint(name, profiles, action="start")
+    env = profiles[name]
+    return mutation_action(
+        "start-profile",
+        profile=name,
+        command=["bash", str(START_SCRIPT)],
+        details={
+            "environment": {"MODEL_PROFILE": name},
+            "runtime": env.get("RUNTIME", "llama.cpp"),
+            "base_url": base_url(env),
+            "request_model": env.get("REQUEST_MODEL"),
+        },
+    )
+
+
+def plan_stop_profile(name: str) -> dict[str, object]:
+    env = require_profile(name)
+    status = status_for_profile(name, env)
+    stop_command = env.get("STOP_COMMAND", "").strip()
+    return mutation_action(
+        "stop-profile",
+        profile=name,
+        details={
+            "pid": status.get("pid"),
+            "running": bool(status.get("running")),
+            "ready": bool(status.get("ready")),
+            "stop_command": stop_command or None,
+            "stop_command_only": env.get("STOP_COMMAND_ONLY", "0") == "1",
+            "will_clear_active_profile": True,
+        },
+    )
+
+
+def plan_restart_profile(name: str, profiles: dict[str, ProfileEnv] | None = None) -> dict[str, object]:
+    profiles = profiles or load_profiles()
+    if name not in profiles:
+        raise SystemExit(f"Unknown profile: {name}")
+    ensure_unique_profile_endpoint(name, profiles, action="restart")
+    return mutation_action(
+        "restart-profile",
+        profile=name,
+        details={
+            "steps": [
+                plan_stop_profile(name),
+                plan_start_profile(name, profiles),
+            ]
+        },
+    )
+
+
+def plan_switch_profile(name: str) -> dict[str, object]:
+    profiles = load_profiles()
+    if name not in profiles:
+        raise SystemExit(f"Unknown profile: {name}")
+    ensure_unique_profile_endpoint(name, profiles, action="activate")
+    running_others = sorted(
+        item["profile"] for item in status_snapshot() if item["profile"] != name and item["running"]
+    )
+    steps = [
+        *[
+            mutation_action(
+                "stop-running-profile",
+                profile=profile,
+                details={"reason": f"switch activates {name} exclusively"},
+            )
+            for profile in running_others
+        ],
+        plan_start_profile(name, profiles),
+        mutation_action("write-active-profile", profile=name, details={"path": str(ACTIVE_PROFILE_PATH)}),
+    ]
+    return mutation_action(
+        "switch-profile",
+        profile=name,
+        details={
+            "stop_first": running_others,
+            "steps": steps,
+        },
+    )
+
+
+def plan_stop_all() -> dict[str, object]:
+    profiles = load_profiles()
+    benchmark_pid = read_pid("benchmark")
+    steps = []
+    if benchmark_pid:
+        steps.append(mutation_action("stop-benchmark", details={"pid": benchmark_pid}))
+    steps.extend(mutation_action("stop-profile", profile=name) for name in sorted(profiles))
+    steps.append(mutation_action("run-stop-all-script", command=["bash", str(STOP_ALL_SCRIPT)]))
+    return mutation_action(
+        "stop-all",
+        details={
+            "benchmark_pid": benchmark_pid,
+            "profiles": sorted(profiles),
+            "steps": steps,
+        },
+    )
+
+
+def mutating_plan_for_args(args: argparse.Namespace) -> list[dict[str, object]]:
+    if args.command == "switch":
+        return [plan_switch_profile(args.profile)]
+    if args.command == "stop-all":
+        return [plan_stop_all()]
+    selected = resolve_selected(args)
+    if not selected:
+        if getattr(args, "dry_run", False) and getattr(args, "profiles", None) == ["all"]:
+            return [mutation_action(f"{args.command}-all", details={"profiles": [], "steps": []})]
+        raise SystemExit("No profiles selected")
+    if args.command == "start":
+        profiles = load_profiles()
+        return [plan_start_profile(name, profiles) for name in selected]
+    if args.command == "stop":
+        return [plan_stop_profile(name) for name in selected]
+    if args.command == "restart":
+        profiles = load_profiles()
+        return [plan_restart_profile(name, profiles) for name in selected]
+    raise SystemExit(f"Unsupported mutating command: {args.command}")
+
+
+def mutation_envelope(
+    args: argparse.Namespace,
+    *,
+    dry_run: bool,
+    plan: list[dict[str, object]],
+    ok: bool = True,
+    results: list[dict[str, object]] | None = None,
+    error: dict[str, object] | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "schema_version": CLI_SCHEMA_VERSION,
+        "tool": "modelctl.py",
+        "tool_version": tool_version(),
+        "command": args.command,
+        "dry_run": dry_run,
+        "status": "planned" if dry_run else ("applied" if ok else "failed"),
+        "ok": ok,
+        "generated_at": utc_now().isoformat().replace("+00:00", "Z"),
+        "plan": plan,
+        "results": results or [],
+    }
+    if error:
+        payload["error"] = error
+    if not dry_run and ok:
+        payload["status_after"] = status_payload()
+    return payload
+
+
+def print_mutation_plan(envelope: dict[str, object]) -> None:
+    print(f"plan {envelope['command']} dry_run={str(envelope['dry_run']).lower()}")
+    for item in envelope["plan"]:
+        profile = f" {item['profile']}" if item.get("profile") else ""
+        print(f"- {item['action']}{profile}")
+        details = item.get("details")
+        if isinstance(details, dict):
+            steps = details.get("steps")
+            if isinstance(steps, list):
+                for step in steps:
+                    step_profile = f" {step['profile']}" if step.get("profile") else ""
+                    print(f"  - {step['action']}{step_profile}")
+
+
+def mutation_exit_code(exc: BaseException) -> int:
+    if isinstance(exc, ProfileConflictError):
+        return 5
+    if isinstance(exc, SystemExit) and isinstance(exc.code, int):
+        return exc.code
+    return 1
+
+
+def mutation_error_payload(exc: BaseException) -> dict[str, object]:
+    if isinstance(exc, ProfileConflictError):
+        code = "profile_conflict"
+    elif isinstance(exc, SystemExit):
+        code = "usage_error" if isinstance(exc.code, int) and exc.code == 64 else "user_input_error"
+    else:
+        code = "operation_failed"
+    return {
+        "code": code,
+        "message": str(exc),
+    }
+
+
+def execute_mutating_args(args: argparse.Namespace) -> None:
+    if args.command == "switch":
+        switch_profile(args.profile)
+        return
+    if args.command == "stop-all":
+        stop_all(capture_script=True)
+        return
+    selected = resolve_selected(args)
+    if not selected:
+        raise SystemExit("No profiles selected")
+    for name in selected:
+        if args.command == "start":
+            start_profile(name)
+        elif args.command == "stop":
+            stop_profile(name)
+        elif args.command == "restart":
+            restart_profile(name)
+        else:
+            raise SystemExit(f"Unsupported mutating command: {args.command}")
+
+
+def capture_mutating_execution(args: argparse.Namespace) -> tuple[list[dict[str, object]], BaseException | None]:
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            execute_mutating_args(args)
+    except (Exception, SystemExit) as exc:  # noqa: BLE001
+        return [
+            {
+                "ok": False,
+                "stdout": stdout.getvalue().splitlines(),
+                "stderr": stderr.getvalue().splitlines(),
+            }
+        ], exc
+    return [
+        {
+            "ok": True,
+            "stdout": stdout.getvalue().splitlines(),
+            "stderr": stderr.getvalue().splitlines(),
+        }
+    ], None
+
+
+def handle_mutating_command(args: argparse.Namespace) -> int:
+    as_json = bool(getattr(args, "json", False))
+    dry_run = bool(getattr(args, "dry_run", False))
+    try:
+        plan = mutating_plan_for_args(args)
+    except (Exception, SystemExit) as exc:  # noqa: BLE001
+        if not as_json:
+            raise
+        payload = mutation_envelope(
+            args,
+            dry_run=dry_run,
+            plan=[],
+            ok=False,
+            error=mutation_error_payload(exc),
+        )
+        print(json.dumps(payload, indent=2))
+        return mutation_exit_code(exc)
+
+    if dry_run:
+        payload = mutation_envelope(args, dry_run=True, plan=plan)
+        if as_json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print_mutation_plan(payload)
+        return 0
+
+    if as_json:
+        results, error = capture_mutating_execution(args)
+        payload = mutation_envelope(
+            args,
+            dry_run=False,
+            plan=plan,
+            ok=error is None,
+            results=results,
+            error=mutation_error_payload(error) if error else None,
+        )
+        print(json.dumps(payload, indent=2))
+        return 0 if error is None else mutation_exit_code(error)
+
+    execute_mutating_args(args)
+    return 0
+
+
 
 def start_profile(name: str) -> None:
     profiles = load_profiles()
@@ -1637,7 +2042,7 @@ def restart_profile(name: str) -> None:
 
 
 
-def stop_all() -> None:
+def stop_all(*, capture_script: bool = False) -> None:
     benchmark_pid = read_pid("benchmark")
     if benchmark_pid:
         terminate_pid(benchmark_pid)
@@ -1649,7 +2054,11 @@ def stop_all() -> None:
             stop_profile(name)
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{name}: {exc}")
-    run(["bash", str(STOP_ALL_SCRIPT)], capture=False)
+    result = run(["bash", str(STOP_ALL_SCRIPT)], capture=capture_script)
+    if capture_script:
+        sys.stdout.write(result.stdout)
+        if result.stderr:
+            sys.stderr.write(result.stderr)
     if errors:
         raise RuntimeError("Failed to stop profiles: " + "; ".join(errors))
 
@@ -1992,6 +2401,701 @@ def controller_status() -> ControllerHeartbeatPayload:
         return {"url": url, "reachable": False, "profiles": 0, "integrations": 0}
 
 
+def utc_now() -> dt.datetime:
+    return dt.datetime.now(dt.timezone.utc)
+
+
+def utc_stamp() -> str:
+    return utc_now().strftime("%Y%m%dT%H%M%SZ")
+
+
+def tool_version() -> str:
+    version_path = PROJECT_ROOT / "VERSION"
+    try:
+        return version_path.read_text(encoding="utf-8").strip() or "unknown"
+    except OSError:
+        return "unknown"
+
+
+def sha256_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def sha256_path(path: pathlib.Path) -> str | None:
+    if not path.exists() or path.is_dir():
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def doctor_run_id(label: str = "doctor") -> str:
+    stamp = utc_stamp()
+    seed = f"{PROJECT_ROOT}:{stamp}:{label}:{os.getpid()}"
+    return f"{stamp}__{hashlib.sha256(seed.encode('utf-8')).hexdigest()[:8]}"
+
+
+def doctor_run_dir(run_id: str) -> pathlib.Path:
+    return DOCTOR_RUNS_DIR / run_id
+
+
+def write_json_atomic(path: pathlib.Path, payload: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    temp_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    temp_path.replace(path)
+
+
+def append_jsonl(path: pathlib.Path, payload: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, sort_keys=True) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def update_doctor_latest(run_dir: pathlib.Path) -> None:
+    DOCTOR_ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = DOCTOR_ARTIFACT_DIR / f".latest.{os.getpid()}.tmp"
+    tmp.unlink(missing_ok=True)
+    os.symlink(f"runs/{run_dir.name}", tmp)
+    tmp.replace(DOCTOR_LATEST_PATH)
+
+
+def doctor_finding(
+    *,
+    finding_id: str,
+    severity: str,
+    subsystem: str,
+    message: str,
+    evidence: str,
+    remediation: str,
+    auto_fixable: bool = False,
+    fixer: str | None = None,
+) -> dict[str, object]:
+    return {
+        "id": finding_id,
+        "severity": severity,
+        "subsystem": subsystem,
+        "message": message,
+        "evidence": evidence,
+        "remediation": remediation,
+        "auto_fixable": auto_fixable,
+        "fixer": fixer,
+        "online_required": False,
+    }
+
+
+def profile_finding_id(profile: str, kind: str, message: str) -> str:
+    slug = "".join(char.lower() if char.isalnum() else "-" for char in profile).strip("-") or "profile"
+    digest = sha256_text(f"{profile}:{kind}:{message}")[:8]
+    return f"fm-profile-{slug}-{kind}-{digest}"
+
+
+def doctor_findings(report: DoctorReportPayload) -> list[dict[str, object]]:
+    findings: list[dict[str, object]] = []
+    profiles_dir = pathlib.Path(report["profiles_dir"])
+    if not profiles_dir.exists():
+        findings.append(
+            doctor_finding(
+                finding_id="fm-profiles-dir-missing",
+                severity="P1",
+                subsystem="profiles",
+                message="profiles directory is missing",
+                evidence=str(profiles_dir),
+                remediation="./Controller/modelctl.py doctor --fix",
+                auto_fixable=True,
+                fixer="create-profiles-dir",
+            )
+        )
+    elif not profiles_dir.is_dir():
+        findings.append(
+            doctor_finding(
+                finding_id="fm-profiles-dir-not-directory",
+                severity="P0",
+                subsystem="profiles",
+                message="profiles path exists but is not a directory",
+                evidence=str(profiles_dir),
+                remediation="Move the file aside, then run ./Controller/modelctl.py doctor --fix",
+            )
+        )
+    controller = report["controller"]
+    if not controller["reachable"]:
+        findings.append(
+            doctor_finding(
+                finding_id="fm-controller-unreachable",
+                severity="P2",
+                subsystem="controller",
+                message="controller API is not reachable",
+                evidence=controller["url"],
+                remediation="./Controller/modelctl.py serve-web",
+            )
+        )
+    launch_agent = report["launch_agent"]
+    if not launch_agent["installed"]:
+        findings.append(
+            doctor_finding(
+                finding_id="fm-launch-agent-not-installed",
+                severity="P2",
+                subsystem="launch-agent",
+                message="controller LaunchAgent is not installed",
+                evidence=launch_agent["plist_path"],
+                remediation="./Controller/install-model-switchboard-controller.sh",
+            )
+        )
+    elif not launch_agent["running"]:
+        findings.append(
+            doctor_finding(
+                finding_id="fm-launch-agent-not-running",
+                severity="P2",
+                subsystem="launch-agent",
+                message="controller LaunchAgent is installed but not running",
+                evidence=launch_agent["plist_path"],
+                remediation="launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.modelswitchboard.controller.plist",
+            )
+        )
+    for profile in report["profiles"]:
+        for message in profile["errors"]:
+            findings.append(
+                doctor_finding(
+                    finding_id=profile_finding_id(profile["profile"], "error", message),
+                    severity="P1",
+                    subsystem="profile",
+                    message=message,
+                    evidence=f"profile={profile['profile']} base_url={profile['base_url'] or 'n/a'}",
+                    remediation=f"Edit {PROFILE_DIR / (profile['profile'] + '.env')} or run ./Controller/modelctl.py doctor explain {profile_finding_id(profile['profile'], 'error', message)}",
+                )
+            )
+        for message in profile["warnings"]:
+            findings.append(
+                doctor_finding(
+                    finding_id=profile_finding_id(profile["profile"], "warning", message),
+                    severity="P3",
+                    subsystem="profile",
+                    message=message,
+                    evidence=f"profile={profile['profile']} base_url={profile['base_url'] or 'n/a'}",
+                    remediation=f"Review {PROFILE_DIR / (profile['profile'] + '.env')}",
+                )
+            )
+    return findings
+
+
+def doctor_next_steps(findings: list[dict[str, object]]) -> list[str]:
+    if not findings:
+        return ["No findings. Re-run with --json for machine-readable status."]
+    steps = ["Run ./Controller/modelctl.py doctor --json for structured findings."]
+    if any(finding.get("auto_fixable") for finding in findings):
+        steps.append("Preview safe repairs with ./Controller/modelctl.py doctor --dry-run --fix --json.")
+        steps.append("Apply safe repairs with ./Controller/modelctl.py doctor --fix --json.")
+    steps.append("Use ./Controller/modelctl.py doctor explain <finding-id> for evidence and remediation.")
+    return steps
+
+
+def write_doctor_run_artifact(payload: object, *, run_id: str, command: str) -> pathlib.Path:
+    run_dir = doctor_run_dir(run_id)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    write_json_atomic(
+        run_dir / "report.json",
+        {
+            "command": command,
+            "generated_at": utc_now().isoformat().replace("+00:00", "Z"),
+            "payload": payload,
+        },
+    )
+    update_doctor_latest(run_dir)
+    return run_dir
+
+
+def doctor_capabilities() -> dict[str, object]:
+    return {
+        "schema_version": DOCTOR_SCHEMA_VERSION,
+        "tool": "modelctl.py",
+        "tool_version": tool_version(),
+        "doctor_contract_version": DOCTOR_CONTRACT_VERSION,
+        "default_command": "diagnose",
+        "offline_default": True,
+        "subcommands": ["diagnose", "health", "capabilities", "robot-docs", "explain", "undo"],
+        "detectors": [
+            {"id": "profiles-dir", "subsystem": "profiles", "online_required": False},
+            {"id": "controller-api", "subsystem": "controller", "online_required": False},
+            {"id": "launch-agent", "subsystem": "launch-agent", "online_required": False},
+            {"id": "profile-config", "subsystem": "profile", "online_required": False},
+        ],
+        "fixers": [
+            {
+                "id": "create-profiles-dir",
+                "description": "Create the controller model-profiles directory when it is absent.",
+                "writes_to": [str(PROFILE_DIR)],
+                "undo": True,
+            }
+        ],
+        "write_scopes": [str(PROFILE_DIR), str(DOCTOR_ARTIFACT_DIR)],
+        "artifacts": {
+            "runs_dir": str(DOCTOR_RUNS_DIR),
+            "latest": str(DOCTOR_LATEST_PATH),
+            "actions_jsonl": "actions.jsonl",
+            "backups_dir": "backups/",
+        },
+        "exit_codes": {
+            "0": "healthy, fix complete, or undo complete",
+            "1": "findings present in diagnose mode",
+            "2": "fix partially applied",
+            "3": "fix failed and rolled back",
+            "4": "refused unsafe state",
+            "5": "concurrency lost",
+            "64": "usage error",
+        },
+        "env_vars": ["MODEL_SWITCHBOARD_URL", "MODEL_SWITCHBOARD_APP_PATH", "MODEL_SWITCHBOARD_VARIANT"],
+    }
+
+
+def doctor_health_payload() -> dict[str, object]:
+    report = doctor_report()
+    findings = report["findings"]
+    return {
+        "schema_version": DOCTOR_SCHEMA_VERSION,
+        "healthy": not findings,
+        "finding_count": len(findings),
+        "auto_fixable_count": sum(1 for finding in findings if finding.get("auto_fixable")),
+        "controller_reachable": report["controller"]["reachable"],
+        "launch_agent_installed": report["launch_agent"]["installed"],
+        "launch_agent_running": report["launch_agent"]["running"],
+    }
+
+
+def doctor_robot_docs() -> str:
+    capabilities = doctor_capabilities()
+    exit_codes = capabilities["exit_codes"]
+    return "\n".join(
+        [
+            "Model Switchboard doctor robot docs",
+            "",
+            "Safe defaults:",
+            "- `doctor` and `doctor diagnose` do not modify profile/controller state.",
+            "- `doctor --fix` only applies fixers declared by `doctor capabilities --json`.",
+            "- `doctor --dry-run --fix --json` prints the planned actions first.",
+            "- `doctor undo <run-id>` reverses recorded fix actions from `.doctor/runs/<run-id>/actions.jsonl`.",
+            "- Network probes are not used by this doctor.",
+            "",
+            "Primary commands:",
+            "- `./Controller/modelctl.py doctor --json`",
+            "- `./Controller/modelctl.py doctor health --json`",
+            "- `./Controller/modelctl.py doctor capabilities --json`",
+            "- `./Controller/modelctl.py doctor --dry-run --fix --json`",
+            "- `./Controller/modelctl.py doctor explain <finding-id> --json`",
+            "- `./Controller/modelctl.py doctor undo <run-id> --json`",
+            "",
+            "Exit codes:",
+            *[f"- {code}: {meaning}" for code, meaning in exit_codes.items()],
+        ]
+    )
+
+
+def modelctl_command_contracts() -> list[dict[str, object]]:
+    return [
+        {
+            "name": "capabilities",
+            "aliases": ["--capabilities"],
+            "mutates": False,
+            "json": True,
+            "purpose": "Return the machine-readable CLI contract.",
+            "examples": ["./Controller/modelctl.py capabilities --json"],
+        },
+        {
+            "name": "robot-docs",
+            "aliases": ["docs", "--robot-docs", "--robot-help"],
+            "mutates": False,
+            "json": False,
+            "purpose": "Print paste-ready agent guidance.",
+            "examples": ["./Controller/modelctl.py robot-docs guide"],
+        },
+        {
+            "name": "triage",
+            "aliases": ["--robot-triage"],
+            "mutates": False,
+            "json": True,
+            "purpose": "Return health, recommended commands, and next actions in one call.",
+            "examples": ["./Controller/modelctl.py triage --json", "./Controller/modelctl.py --robot-triage"],
+        },
+        {
+            "name": "doctor",
+            "aliases": ["diagnose", "validate"],
+            "mutates": "only with --fix",
+            "json": True,
+            "purpose": "Diagnose profiles, controller reachability, LaunchAgent state, and safe repairs.",
+            "examples": [
+                "./Controller/modelctl.py doctor --json",
+                "./Controller/modelctl.py diagnose --json",
+                "./Controller/modelctl.py doctor --dry-run --fix --json",
+            ],
+        },
+        {
+            "name": "health",
+            "aliases": [],
+            "mutates": False,
+            "json": True,
+            "purpose": "Alias for doctor health.",
+            "examples": ["./Controller/modelctl.py health --json"],
+        },
+        {
+            "name": "status",
+            "aliases": [],
+            "mutates": False,
+            "json": True,
+            "purpose": "Show profile runtime status.",
+            "examples": ["./Controller/modelctl.py status --json"],
+        },
+        {
+            "name": "list",
+            "aliases": [],
+            "mutates": False,
+            "json": True,
+            "purpose": "List configured profiles.",
+            "examples": ["./Controller/modelctl.py list --json"],
+        },
+        {
+            "name": "integrations",
+            "aliases": [],
+            "mutates": False,
+            "json": True,
+            "purpose": "List optional backend integrations.",
+            "examples": ["./Controller/modelctl.py integrations"],
+        },
+        {
+            "name": "start",
+            "aliases": [],
+            "mutates": True,
+            "json": True,
+            "dry_run": True,
+            "purpose": "Start one or more profiles.",
+            "examples": [
+                "./Controller/modelctl.py start qwen35-a3b --dry-run --json",
+                "./Controller/modelctl.py start qwen35-a3b --json",
+            ],
+            "safe_alternative": "./Controller/modelctl.py doctor --json",
+        },
+        {
+            "name": "stop",
+            "aliases": [],
+            "mutates": True,
+            "json": True,
+            "dry_run": True,
+            "purpose": "Stop one or more profiles.",
+            "examples": [
+                "./Controller/modelctl.py stop qwen35-a3b --dry-run --json",
+                "./Controller/modelctl.py stop qwen35-a3b --json",
+            ],
+            "safe_alternative": "./Controller/modelctl.py status --json",
+        },
+        {
+            "name": "restart",
+            "aliases": [],
+            "mutates": True,
+            "json": True,
+            "dry_run": True,
+            "purpose": "Restart one or more profiles.",
+            "examples": [
+                "./Controller/modelctl.py restart qwen35-a3b --dry-run --json",
+                "./Controller/modelctl.py restart qwen35-a3b --json",
+            ],
+            "safe_alternative": "./Controller/modelctl.py status --json",
+        },
+        {
+            "name": "switch",
+            "aliases": ["activate"],
+            "mutates": True,
+            "json": True,
+            "dry_run": True,
+            "purpose": "Stop other running profiles and start the selected profile.",
+            "examples": [
+                "./Controller/modelctl.py switch qwen35-a3b --dry-run --json",
+                "./Controller/modelctl.py switch qwen35-a3b --json",
+            ],
+            "safe_alternative": "./Controller/modelctl.py status --json",
+        },
+        {
+            "name": "benchmark",
+            "aliases": [],
+            "mutates": "starts benchmark workers unless --background is omitted and the harness exits inline",
+            "json": "with --background",
+            "purpose": "Run the benchmark harness.",
+            "safe_alternative": "./Controller/modelctl.py triage --json",
+        },
+        {
+            "name": "stop-all",
+            "aliases": [],
+            "mutates": True,
+            "json": True,
+            "dry_run": True,
+            "purpose": "Stop every managed model process.",
+            "examples": [
+                "./Controller/modelctl.py stop-all --dry-run --json",
+                "./Controller/modelctl.py stop-all --json",
+            ],
+            "safe_alternative": "./Controller/modelctl.py status --json",
+        },
+        {
+            "name": "serve-web",
+            "aliases": [],
+            "mutates": "starts a local HTTP server",
+            "json": False,
+            "purpose": "Serve the local model dashboard.",
+            "safe_alternative": "./Controller/modelctl.py doctor --json",
+        },
+    ]
+
+
+def modelctl_capabilities() -> dict[str, object]:
+    return {
+        "schema_version": CLI_SCHEMA_VERSION,
+        "tool": "modelctl.py",
+        "tool_version": tool_version(),
+        "contract_version": CLI_CONTRACT_VERSION,
+        "default_probe": "./Controller/modelctl.py triage --json",
+        "offline_first": True,
+        "commands": modelctl_command_contracts(),
+        "aliases": {**CLI_COMMAND_ALIASES, **CLI_GLOBAL_ALIASES},
+        "exit_codes": CLI_EXIT_CODES,
+        "env_vars": [
+            "MODEL_SWITCHBOARD_URL",
+            "MODEL_SWITCHBOARD_APP_PATH",
+            "MODEL_SWITCHBOARD_VARIANT",
+            "SOURCE_DATE_EPOCH",
+            "NO_COLOR",
+            "CI",
+            "TERM",
+        ],
+        "stdout_stderr_contract": {
+            "stdout": "requested human or JSON data only",
+            "stderr": "usage errors, diagnostics, and actionable hints",
+        },
+        "doctor": doctor_capabilities(),
+    }
+
+
+def modelctl_triage_payload() -> dict[str, object]:
+    profiles = load_profiles()
+    health = doctor_health_payload()
+    recommendations = [
+        {
+            "id": "inspect-contract",
+            "command": "./Controller/modelctl.py capabilities --json",
+            "reason": "Discover commands, aliases, mutability, JSON support, and exit codes.",
+        },
+        {
+            "id": "read-agent-guide",
+            "command": "./Controller/modelctl.py robot-docs guide",
+            "reason": "Get paste-ready usage guidance without opening external docs.",
+        },
+    ]
+    if not health["healthy"]:
+        recommendations.insert(
+            0,
+            {
+                "id": "diagnose-findings",
+                "command": "./Controller/modelctl.py doctor --json",
+                "reason": "Structured findings are present; inspect exact evidence and remediation.",
+            },
+        )
+    if health["auto_fixable_count"]:
+        recommendations.insert(
+            1,
+            {
+                "id": "preview-safe-fix",
+                "command": "./Controller/modelctl.py doctor --dry-run --fix --json",
+                "reason": "Preview reversible fixes before changing local state.",
+            },
+        )
+    return {
+        "schema_version": CLI_SCHEMA_VERSION,
+        "tool": "modelctl.py",
+        "tool_version": tool_version(),
+        "health": health,
+        "profiles": {
+            "count": len(profiles),
+            "names": sorted(profiles),
+        },
+        "commands": [
+            "./Controller/modelctl.py status --json",
+            "./Controller/modelctl.py list --json",
+            "./Controller/modelctl.py doctor --json",
+            "./Controller/modelctl.py capabilities --json",
+            "./Controller/modelctl.py robot-docs guide",
+        ],
+        "recommendations": recommendations,
+        "exit_codes": CLI_EXIT_CODES,
+    }
+
+
+def print_modelctl_triage(payload: dict[str, object]) -> None:
+    health = payload["health"]
+    profiles = payload["profiles"]
+    print(f"healthy={str(health['healthy']).lower()} findings={health['finding_count']}")
+    print(f"profiles={profiles['count']}")
+    for recommendation in payload["recommendations"]:
+        print(f"next | {recommendation['id']} | {recommendation['command']}")
+
+
+def modelctl_robot_docs(topic: str = "guide") -> str:
+    if topic != "guide":
+        raise ValueError(f"unknown robot-docs topic {topic!r}; use `./Controller/modelctl.py robot-docs guide`")
+    return "\n".join(
+        [
+            "Model Switchboard modelctl robot docs",
+            "",
+            "First commands to try:",
+            "- `./Controller/modelctl.py triage --json` returns health, profile names, recommended commands, and exit codes.",
+            "- `./Controller/modelctl.py capabilities --json` returns the machine-readable CLI contract.",
+            "- `./Controller/modelctl.py doctor --json` returns structured findings with evidence and remediation.",
+            "- `./Controller/modelctl.py status --json` returns live profile status.",
+            "- `./Controller/modelctl.py list --json` returns configured profiles.",
+            "",
+            "Intent aliases:",
+            "- `./Controller/modelctl.py diagnose --json` is accepted as `doctor --json`.",
+            "- `./Controller/modelctl.py health --json` is accepted as `doctor health --json`.",
+            "- `./Controller/modelctl.py --robot-triage` is accepted as `triage --json`.",
+            "- `./Controller/modelctl.py --capabilities` is accepted as `capabilities --json`.",
+            "",
+            "Mutation safety:",
+            "- `start`, `stop`, `restart`, `switch`, `benchmark --background`, `stop-all`, and `serve-web` mutate local runtime state.",
+            "- Use `status --json`, `doctor --json`, or `triage --json` before mutating when you need a safe probe.",
+            "- Use `start|stop|restart|switch <profile> --dry-run --json` or `stop-all --dry-run --json` to preview profile mutations.",
+            "- Use `--json` on applied profile mutations to receive a stable envelope with plan, captured output, errors, and post-action status.",
+            "- Use `doctor --dry-run --fix --json` before `doctor --fix --json`.",
+            "",
+            "Output contract:",
+            "- JSON commands print data to stdout.",
+            "- Usage errors and hints print to stderr and exit 64.",
+            "- Diagnostic findings exit non-zero so agents can branch deterministically.",
+        ]
+    )
+
+
+def doctor_mutate_create_directory(path: pathlib.Path, *, run_dir: pathlib.Path, dry_run: bool = False) -> dict[str, object]:
+    before_exists = path.exists()
+    before_hash = sha256_path(path)
+    action = {
+        "action": "create_directory",
+        "path": str(path),
+        "before_exists": before_exists,
+        "before_hash": before_hash,
+        "after_exists": before_exists,
+        "after_hash": before_hash,
+        "dry_run": dry_run,
+    }
+    if before_exists:
+        action["status"] = "skipped_already_exists"
+        return action
+    if dry_run:
+        action["status"] = "planned"
+        return action
+    path.mkdir(parents=True, exist_ok=True)
+    action["after_exists"] = path.exists()
+    action["after_hash"] = sha256_path(path)
+    action["status"] = "applied"
+    append_jsonl(run_dir / "actions.jsonl", action)
+    return action
+
+
+def doctor_fix(*, dry_run: bool = False, run_id: str | None = None) -> tuple[dict[str, object], int]:
+    before = doctor_report()
+    run_id = run_id or doctor_run_id("fix")
+    run_dir = doctor_run_dir(run_id)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    actions: list[dict[str, object]] = []
+    for finding in before["findings"]:
+        if finding.get("fixer") == "create-profiles-dir":
+            actions.append(doctor_mutate_create_directory(PROFILE_DIR, run_dir=run_dir, dry_run=dry_run))
+    after = before if dry_run else doctor_report()
+    payload = {
+        "schema_version": DOCTOR_SCHEMA_VERSION,
+        "run_id": run_id,
+        "dry_run": dry_run,
+        "actions_taken": sum(1 for action in actions if action.get("status") == "applied"),
+        "actions": actions,
+        "healthy": after["healthy"],
+        "findings": after["findings"],
+        "next_steps": doctor_next_steps(after["findings"]),
+    }
+    write_doctor_run_artifact(payload, run_id=run_id, command="fix")
+    if dry_run:
+        return payload, 0 if not actions else 1
+    if payload["actions_taken"] == 0 and before["findings"]:
+        return payload, 1
+    return payload, 0 if after["healthy"] else 2
+
+
+def doctor_undo(run_id: str, *, strict: bool = True) -> tuple[dict[str, object], int]:
+    run_dir = doctor_run_dir(run_id)
+    actions_path = run_dir / "actions.jsonl"
+    if not actions_path.exists():
+        return {
+            "schema_version": DOCTOR_SCHEMA_VERSION,
+            "run_id": run_id,
+            "ok": False,
+            "error": "actions.jsonl not found",
+            "strict": strict,
+        }, 4
+    actions = [json.loads(line) for line in actions_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    undone: list[dict[str, object]] = []
+    quarantine = run_dir / "quarantine"
+    for action in reversed(actions):
+        if action.get("action") != "create_directory" or action.get("before_exists"):
+            continue
+        path = pathlib.Path(str(action["path"]))
+        item: dict[str, object] = {"action": "undo_create_directory", "path": str(path)}
+        if not path.exists():
+            item["status"] = "skipped_missing"
+            undone.append(item)
+            continue
+        if any(path.iterdir()):
+            item["status"] = "refused_non_empty_directory"
+            undone.append(item)
+            if strict:
+                return {
+                    "schema_version": DOCTOR_SCHEMA_VERSION,
+                    "run_id": run_id,
+                    "ok": False,
+                    "strict": strict,
+                    "undone": undone,
+                    "error": "refused to undo non-empty created directory",
+                }, 4
+            continue
+        quarantine.mkdir(parents=True, exist_ok=True)
+        target = quarantine / f"{path.name}.{sha256_text(str(path))[:8]}"
+        path.replace(target)
+        item["status"] = "quarantined"
+        item["quarantine_path"] = str(target)
+        undone.append(item)
+    payload = {"schema_version": DOCTOR_SCHEMA_VERSION, "run_id": run_id, "ok": True, "strict": strict, "undone": undone}
+    write_doctor_run_artifact(payload, run_id=doctor_run_id("undo"), command=f"undo {run_id}")
+    return payload, 0
+
+
+def explain_doctor_finding(finding_id: str) -> tuple[dict[str, object], int]:
+    report = doctor_report()
+    for finding in report["findings"]:
+        if finding["id"] == finding_id:
+            return {
+                "schema_version": DOCTOR_SCHEMA_VERSION,
+                "finding": finding,
+                "capabilities": {
+                    "fixer": finding.get("fixer"),
+                    "auto_fixable": finding.get("auto_fixable"),
+                    "online_required": finding.get("online_required"),
+                },
+                "next_steps": doctor_next_steps([finding]),
+            }, 0
+    return {
+        "schema_version": DOCTOR_SCHEMA_VERSION,
+        "error": "finding not present in current doctor report",
+        "finding_id": finding_id,
+        "known_findings": [finding["id"] for finding in report["findings"]],
+    }, 1
+
+
 def diagnose_profile(
     name: str,
     env: ProfileEnv,
@@ -2162,7 +3266,11 @@ def doctor_report() -> DoctorReportPayload:
         diagnose_profile(name, env, endpoint_conflict=conflicts.get(name))
         for name, env in sorted(profiles.items())
     ]
-    return {
+    report = {
+        "schema_version": DOCTOR_SCHEMA_VERSION,
+        "doctor_contract_version": DOCTOR_CONTRACT_VERSION,
+        "tool_version": tool_version(),
+        "generated_at": utc_now().isoformat().replace("+00:00", "Z"),
         "controller": controller_status(),
         "launch_agent": launch_agent_status(),
         "integrations": integration_status(),
@@ -2170,6 +3278,11 @@ def doctor_report() -> DoctorReportPayload:
         "controller_root": str(BASE),
         "profiles": diagnostics,
     }
+    findings = doctor_findings(report)
+    report["healthy"] = not findings
+    report["findings"] = findings
+    report["next_steps"] = doctor_next_steps(findings)
+    return report
 
 
 def print_doctor(report: DoctorReportPayload) -> None:
@@ -2207,6 +3320,26 @@ def print_doctor(report: DoctorReportPayload) -> None:
         if item["warnings"]:
             details.append("warnings=" + "; ".join(item["warnings"]))
         print(f"profile:{item['profile']} | {state} | {' • '.join(details)}")
+    findings = report.get("findings", [])
+    print(f"doctor | {'ok' if not findings else 'warn'} | findings={len(findings)} contract={DOCTOR_CONTRACT_VERSION}")
+    for step in report.get("next_steps", []):
+        print(f"next | info | {step}")
+
+
+def print_doctor_health(payload: dict[str, object]) -> None:
+    print("component | status | details")
+    print("--- | --- | ---")
+    print(
+        "doctor | "
+        f"{'ok' if payload['healthy'] else 'warn'} | "
+        f"findings={payload['finding_count']} auto_fixable={payload['auto_fixable_count']}"
+    )
+    print(f"controller | {'ok' if payload['controller_reachable'] else 'warn'} | reachable={payload['controller_reachable']}")
+    print(
+        "launch-agent | "
+        f"{'ok' if payload['launch_agent_installed'] and payload['launch_agent_running'] else 'warn'} | "
+        f"installed={payload['launch_agent_installed']} running={payload['launch_agent_running']}"
+    )
 
 
 class DashboardHandler(BaseHTTPRequestHandler):
@@ -2427,8 +3560,8 @@ def resolve_selected(args: argparse.Namespace) -> list[str] | None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Control local llama.cpp and MLX profiles")
-    sub = parser.add_subparsers(dest="command", required=True)
+    parser = AgentArgumentParser(description="Control local llama.cpp and MLX profiles", allow_abbrev=False)
+    sub = parser.add_subparsers(dest="command", required=True, parser_class=AgentArgumentParser)
 
     status_cmd = sub.add_parser("status", help="Show status for profiles")
     status_cmd.add_argument("profiles", nargs="*", default=[])
@@ -2439,15 +3572,23 @@ def build_parser() -> argparse.ArgumentParser:
 
     start_cmd = sub.add_parser("start", help="Start one or more profiles")
     start_cmd.add_argument("profiles", nargs="+", help="Profile names or 'all'")
+    start_cmd.add_argument("--json", action="store_true", help="Print a structured result envelope")
+    start_cmd.add_argument("--dry-run", "--plan", action="store_true", help="Print the action plan without mutating")
 
     stop_cmd = sub.add_parser("stop", help="Stop one or more profiles")
     stop_cmd.add_argument("profiles", nargs="+", help="Profile names or 'all'")
+    stop_cmd.add_argument("--json", action="store_true", help="Print a structured result envelope")
+    stop_cmd.add_argument("--dry-run", "--plan", action="store_true", help="Print the action plan without mutating")
 
     restart_cmd = sub.add_parser("restart", help="Restart one or more profiles")
     restart_cmd.add_argument("profiles", nargs="+", help="Profile names or 'all'")
+    restart_cmd.add_argument("--json", action="store_true", help="Print a structured result envelope")
+    restart_cmd.add_argument("--dry-run", "--plan", action="store_true", help="Print the action plan without mutating")
 
     switch_cmd = sub.add_parser("switch", help="Stop other running profiles and start the selected one")
     switch_cmd.add_argument("profile", help="Profile name")
+    switch_cmd.add_argument("--json", action="store_true", help="Print a structured result envelope")
+    switch_cmd.add_argument("--dry-run", "--plan", action="store_true", help="Print the action plan without mutating")
 
     bench_cmd = sub.add_parser("benchmark", help="Run the benchmark harness")
     bench_cmd.add_argument("profiles", nargs="*", default=["all"], help="Profile names or 'all'")
@@ -2456,15 +3597,48 @@ def build_parser() -> argparse.ArgumentParser:
     bench_cmd.add_argument("--keep-running", action="store_true")
     bench_cmd.add_argument("--background", action="store_true")
 
+    capabilities_cmd = sub.add_parser("capabilities", help="Describe the machine-readable CLI contract")
+    capabilities_cmd.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
+    robot_docs_cmd = sub.add_parser("robot-docs", help="Print agent-facing CLI usage docs")
+    robot_docs_cmd.add_argument("topic", nargs="?", default="guide", choices=["guide"])
+
+    triage_cmd = sub.add_parser("triage", help="Print one-call agent triage")
+    triage_cmd.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+
     doctor_cmd = sub.add_parser("doctor", help="Validate profiles, controller, and launch agent")
-    doctor_cmd.add_argument("--json", action="store_true")
+    doctor_cmd.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+    doctor_cmd.add_argument("--fix", action="store_true", help="Apply safe, reversible repairs")
+    doctor_cmd.add_argument("--dry-run", action="store_true", help="Show the repair plan without mutating state")
+    doctor_cmd.add_argument("--run-id", help="Override the doctor run id for artifacts")
+    doctor_sub = doctor_cmd.add_subparsers(dest="doctor_command")
+    doctor_diagnose = doctor_sub.add_parser("diagnose", help="Run diagnostics (default)")
+    doctor_diagnose.add_argument("--json", action="store_true")
+    doctor_diagnose.add_argument("--fix", action="store_true")
+    doctor_diagnose.add_argument("--dry-run", action="store_true")
+    doctor_diagnose.add_argument("--run-id")
+    doctor_health = doctor_sub.add_parser("health", help="Print a compact health summary")
+    doctor_health.add_argument("--json", action="store_true")
+    doctor_capabilities = doctor_sub.add_parser("capabilities", help="Describe doctor capabilities")
+    doctor_capabilities.add_argument("--json", action="store_true")
+    doctor_robot_docs_cmd = doctor_sub.add_parser("robot-docs", help="Print agent-facing doctor usage docs")
+    doctor_robot_docs_cmd.add_argument("topic", nargs="?", default="guide", choices=["guide"])
+    doctor_explain = doctor_sub.add_parser("explain", help="Explain a current finding")
+    doctor_explain.add_argument("finding_id")
+    doctor_explain.add_argument("--json", action="store_true")
+    doctor_undo_cmd = doctor_sub.add_parser("undo", help="Undo a recorded doctor fix run")
+    doctor_undo_cmd.add_argument("run_id")
+    doctor_undo_cmd.add_argument("--json", action="store_true")
+    doctor_undo_cmd.add_argument("--no-strict", action="store_true", help="Continue past non-critical undo refusals")
 
     sub.add_parser("integrations", help="List optional backend integrations")
     integration_cmd = sub.add_parser("run-integration", help="Run an action on an optional integration")
     integration_cmd.add_argument("integration", help="Integration id")
     integration_cmd.add_argument("--action", default="sync", help="Integration action to run")
 
-    sub.add_parser("stop-all", help="Stop every managed model process")
+    stop_all_cmd = sub.add_parser("stop-all", help="Stop every managed model process")
+    stop_all_cmd.add_argument("--json", action="store_true", help="Print a structured result envelope")
+    stop_all_cmd.add_argument("--dry-run", "--plan", action="store_true", help="Print the action plan without mutating")
 
     web_cmd = sub.add_parser("serve-web", help="Serve the local model dashboard")
     web_cmd.add_argument("--host", default=None)
@@ -2477,9 +3651,85 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 
+def handle_doctor(args: argparse.Namespace) -> int:
+    doctor_command = args.doctor_command or "diagnose"
+    as_json = bool(getattr(args, "json", False))
+    if doctor_command == "capabilities":
+        payload = doctor_capabilities()
+        print(json.dumps(payload, indent=2) if as_json else json.dumps(payload, indent=2))
+        return 0
+    if doctor_command == "robot-docs":
+        print(doctor_robot_docs())
+        return 0
+    if doctor_command == "health":
+        payload = doctor_health_payload()
+        write_doctor_run_artifact(payload, run_id=doctor_run_id("health"), command="health")
+        if as_json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print_doctor_health(payload)
+        return 0 if payload["healthy"] else 1
+    if doctor_command == "explain":
+        payload, code = explain_doctor_finding(args.finding_id)
+        if as_json:
+            print(json.dumps(payload, indent=2))
+        elif code == 0:
+            finding = payload["finding"]
+            print(f"{finding['id']}: {finding['message']}")
+            print(f"evidence: {finding['evidence']}")
+            print(f"remediation: {finding['remediation']}")
+        else:
+            print(f"finding not present: {args.finding_id}", file=sys.stderr)
+        return code
+    if doctor_command == "undo":
+        payload, code = doctor_undo(args.run_id, strict=not args.no_strict)
+        if as_json:
+            print(json.dumps(payload, indent=2))
+        elif payload.get("ok"):
+            print(f"undone {args.run_id}: {len(payload.get('undone', []))} actions")
+        else:
+            print(f"undo failed for {args.run_id}: {payload.get('error')}", file=sys.stderr)
+        return code
+    if args.fix:
+        payload, code = doctor_fix(dry_run=bool(args.dry_run), run_id=args.run_id)
+        if as_json:
+            print(json.dumps(payload, indent=2))
+        else:
+            mode = "planned" if args.dry_run else "applied"
+            print(f"doctor fix {mode}: actions={payload['actions_taken']} run_id={payload['run_id']}")
+            for action in payload["actions"]:
+                print(f"action | {action['status']} | {action['action']} {action['path']}")
+        return code
+    report = doctor_report()
+    run_id = args.run_id or doctor_run_id("diagnose")
+    write_doctor_run_artifact(report, run_id=run_id, command="diagnose")
+    if as_json:
+        print(json.dumps(report, indent=2))
+    else:
+        print_doctor(report)
+    return 0 if report["healthy"] else 1
+
+
 def main() -> None:
     parser = build_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(normalize_cli_argv(sys.argv[1:]))
+
+    if args.command == "capabilities":
+        payload = modelctl_capabilities()
+        print(json.dumps(payload, indent=2) if args.json else json.dumps(payload, indent=2))
+        return
+
+    if args.command == "robot-docs":
+        print(modelctl_robot_docs(args.topic))
+        return
+
+    if args.command == "triage":
+        payload = modelctl_triage_payload()
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print_modelctl_triage(payload)
+        return
 
     if args.command == "list":
         profiles = load_profiles()
@@ -2525,7 +3775,9 @@ def main() -> None:
         return
 
     if args.command == "stop-all":
-        stop_all()
+        code = handle_mutating_command(args)
+        if code:
+            raise SystemExit(code)
         return
 
     if args.command == "serve-web":
@@ -2535,18 +3787,15 @@ def main() -> None:
         return
 
     if args.command == "doctor":
-        report = doctor_report()
-        if args.json:
-            print(json.dumps(report, indent=2))
-        else:
-            print_doctor(report)
+        code = handle_doctor(args)
+        if code:
+            raise SystemExit(code)
         return
 
     if args.command == "switch":
-        try:
-            switch_profile(args.profile)
-        except ProfileConflictError as exc:
-            raise SystemExit(str(exc)) from exc
+        code = handle_mutating_command(args)
+        if code:
+            raise SystemExit(code)
         return
 
     if args.command == "benchmark":
@@ -2567,20 +3816,9 @@ def main() -> None:
         run(cmd, capture=False)
         return
 
-    selected = resolve_selected(args)
-    if not selected:
-        raise SystemExit("No profiles selected")
-
-    for name in selected:
-        try:
-            if args.command == "start":
-                start_profile(name)
-            elif args.command == "stop":
-                stop_profile(name)
-            elif args.command == "restart":
-                restart_profile(name)
-        except ProfileConflictError as exc:
-            raise SystemExit(str(exc)) from exc
+    code = handle_mutating_command(args)
+    if code:
+        raise SystemExit(code)
 
 
 if __name__ == "__main__":

@@ -36,6 +36,9 @@ venv/
 
 # Local agent/run artifacts
 .code-upgrade/
+.doctor/runs/
+.doctor/latest
+agent_ergonomics_audit/
 refactor/artifacts/
 .skill-loop-progress.md
 .simplify-and-refactor-progress.md
