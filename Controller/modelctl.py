@@ -2295,30 +2295,20 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if not isinstance(raw_payload, dict):
             raise ControllerAPIError(400, "invalid_json", "request body must be a JSON object")
         request: ControllerRequest = {}
-        profile = raw_payload.get("profile")
-        if isinstance(profile, str):
-            request["profile"] = profile
+        for key in ("profile", "integration", "action", "suite"):
+            value = raw_payload.get(key)
+            if isinstance(value, str):
+                request[key] = value
         profiles = raw_payload.get("profiles")
         if profiles is not None:
             if not isinstance(profiles, list) or not all(isinstance(item, str) for item in profiles):
                 raise ControllerAPIError(400, "invalid_request", "profiles must be a list of strings")
             if profiles:
                 request["profiles"] = profiles
-        integration = raw_payload.get("integration")
-        if isinstance(integration, str):
-            request["integration"] = integration
-        action = raw_payload.get("action")
-        if isinstance(action, str):
-            request["action"] = action
-        suite = raw_payload.get("suite")
-        if isinstance(suite, str):
-            request["suite"] = suite
-        allow_concurrent = raw_payload.get("allow_concurrent")
-        if isinstance(allow_concurrent, bool):
-            request["allow_concurrent"] = allow_concurrent
-        keep_running = raw_payload.get("keep_running")
-        if isinstance(keep_running, bool):
-            request["keep_running"] = keep_running
+        for key in ("allow_concurrent", "keep_running"):
+            value = raw_payload.get(key)
+            if isinstance(value, bool):
+                request[key] = value
         return request
 
     def do_GET(self) -> None:

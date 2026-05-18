@@ -36,6 +36,9 @@ venv/
 
 # Local agent/run artifacts
 .code-upgrade/
+refactor/artifacts/
+.skill-loop-progress.md
+.simplify-and-refactor-progress.md
 .lean-ctx/
 
 # Logs / temp files
