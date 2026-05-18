@@ -1,0 +1,178 @@
+[
+  {
+    "id": "MSB-API-GET-001",
+    "section": "Dashboard read API",
+    "level": "MUST",
+    "description": "GET /api/status returns the controller status payload contract",
+    "arrange": "status_ok",
+    "request": {"method": "GET", "path": "/api/status"},
+    "expected": {
+      "status": 200,
+      "json_path_types": {
+        "statuses": "list",
+        "benchmark": "dict",
+        "integrations": "list",
+        "profiles_dir": "str",
+        "controller_root": "str"
+      }
+    }
+  },
+  {
+    "id": "MSB-API-GET-002",
+    "section": "Dashboard read API",
+    "level": "MUST",
+    "description": "GET /api/integrations returns integration metadata and controller paths",
+    "arrange": "integrations_ok",
+    "request": {"method": "GET", "path": "/api/integrations"},
+    "expected": {
+      "status": 200,
+      "json_path_types": {
+        "integrations": "list",
+        "profiles_dir": "str",
+        "controller_root": "str"
+      }
+    }
+  },
+  {
+    "id": "MSB-API-GET-003",
+    "section": "Dashboard read API",
+    "level": "SHOULD",
+    "description": "GET / serves the local dashboard HTML shell",
+    "arrange": "none",
+    "request": {"method": "GET", "path": "/"},
+    "expected": {"status": 200, "body_contains": "<!doctype html>"}
+  },
+  {
+    "id": "MSB-API-GET-004",
+    "section": "Dashboard read API",
+    "level": "MUST",
+    "description": "Unknown API reads return a structured 404",
+    "arrange": "none",
+    "request": {"method": "GET", "path": "/api/missing"},
+    "expected": {"status": 404, "json_path_equals": {"error": "not_found"}}
+  },
+  {
+    "id": "MSB-API-AUTH-001",
+    "section": "Authentication",
+    "level": "MUST",
+    "description": "Bearer-protected API requests without Authorization are rejected",
+    "arrange": "stop_all_ok",
+    "server_auth_token": "conformance-token-0000000000000001",
+    "request": {"method": "POST", "path": "/api/stop-all", "json": {}},
+    "expected": {"status": 401, "json_path_equals": {"error": "unauthorized"}}
+  },
+  {
+    "id": "MSB-API-AUTH-002",
+    "section": "Authentication",
+    "level": "MUST",
+    "description": "Bearer-protected API requests with the configured token are accepted",
+    "arrange": "stop_all_ok",
+    "server_auth_token": "conformance-token-0000000000000001",
+    "request": {
+      "method": "POST",
+      "path": "/api/stop-all",
+      "json": {},
+      "headers": {"Authorization": "Bearer conformance-token-0000000000000001"}
+    },
+    "expected": {"status": 200, "json_path_equals": {"ok": true}}
+  },
+  {
+    "id": "MSB-API-ACTION-001",
+    "section": "Mutating action API",
+    "level": "MUST",
+    "description": "POST /api/start starts the requested profile and returns an action response",
+    "arrange": "start_profile_ok",
+    "request": {"method": "POST", "path": "/api/start", "json": {"profile": "qwen35-a3b"}},
+    "expected": {"status": 200, "json_path_equals": {"ok": true}}
+  },
+  {
+    "id": "MSB-API-ACTION-002",
+    "section": "Mutating action API",
+    "level": "MUST",
+    "description": "POST /api/start requires a non-empty profile string",
+    "arrange": "none",
+    "request": {"method": "POST", "path": "/api/start", "json": {}},
+    "expected": {"status": 400, "json_path_equals": {"error": "invalid_request"}}
+  },
+  {
+    "id": "MSB-API-ACTION-003",
+    "section": "Mutating action API",
+    "level": "MUST",
+    "description": "Unknown profile actions map to profile_not_found",
+    "arrange": "unknown_profile",
+    "request": {"method": "POST", "path": "/api/start", "json": {"profile": "missing-profile"}},
+    "expected": {"status": 404, "json_path_equals": {"error": "profile_not_found"}}
+  },
+  {
+    "id": "MSB-API-ACTION-004",
+    "section": "Mutating action API",
+    "level": "MUST",
+    "description": "Profile endpoint conflicts map to a structured conflict response",
+    "arrange": "profile_conflict",
+    "request": {"method": "POST", "path": "/api/switch", "json": {"profile": "qwen35-a3b"}},
+    "expected": {"status": 409, "json_path_equals": {"error": "profile_conflict"}}
+  },
+  {
+    "id": "MSB-API-ACTION-005",
+    "section": "Mutating action API",
+    "level": "SHOULD",
+    "description": "Integration runs default to the sync action",
+    "arrange": "integration_run",
+    "request": {"method": "POST", "path": "/api/integrations/run", "json": {"integration": "droid"}},
+    "expected": {"status": 200, "json_path_equals": {"ok": true}}
+  },
+  {
+    "id": "MSB-API-BENCH-001",
+    "section": "Benchmark API",
+    "level": "MUST",
+    "description": "Benchmark start accepts selected profiles and boolean flags",
+    "arrange": "benchmark_start",
+    "request": {
+      "method": "POST",
+      "path": "/api/benchmark/start",
+      "json": {"profiles": ["qwen35-a3b"], "suite": "quick", "allow_concurrent": true}
+    },
+    "expected": {
+      "status": 200,
+      "json_path_equals": {"ok": true},
+      "json_path_suffix": {"benchmark.log_path": "benchmark.log"}
+    }
+  },
+  {
+    "id": "MSB-API-REQ-001",
+    "section": "Request validation",
+    "level": "MUST",
+    "description": "Malformed JSON bodies are rejected as invalid_json",
+    "arrange": "none",
+    "request": {"method": "POST", "path": "/api/stop-all", "raw_body": "{", "headers": {"Content-Type": "application/json"}},
+    "expected": {"status": 400, "json_path_equals": {"error": "invalid_json"}}
+  },
+  {
+    "id": "MSB-API-REQ-002",
+    "section": "Request validation",
+    "level": "MUST",
+    "description": "Invalid Content-Length headers are rejected before action dispatch",
+    "arrange": "none",
+    "request": {
+      "method": "POST",
+      "path": "/api/stop-all",
+      "headers": {"Content-Type": "application/json"},
+      "content_length": "not-a-number"
+    },
+    "expected": {"status": 400, "json_path_equals": {"error": "invalid_content_length"}}
+  },
+  {
+    "id": "MSB-API-REQ-003",
+    "section": "Request validation",
+    "level": "MUST",
+    "description": "Oversized JSON bodies are rejected with 413 before reading the body",
+    "arrange": "none",
+    "request": {
+      "method": "POST",
+      "path": "/api/stop-all",
+      "headers": {"Content-Type": "application/json"},
+      "content_length": 65537
+    },
+    "expected": {"status": 413, "json_path_equals": {"error": "payload_too_large"}}
+  }
+]

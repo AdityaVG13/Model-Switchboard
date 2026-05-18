@@ -46,6 +46,7 @@ venv/
 *.swo
 *.orig
 *.bak
+*.actual
 
 # Sensitive material (certs, keys, local secrets)
 *.p8
