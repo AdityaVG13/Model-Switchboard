@@ -5,10 +5,7 @@ import ast
 import json
 import re
 import subprocess
-import sys
-from collections import defaultdict
 from pathlib import Path
-from typing import Iterable
 
 ROOT = Path(__file__).resolve().parents[1]
 
