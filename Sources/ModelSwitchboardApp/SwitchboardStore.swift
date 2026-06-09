@@ -526,7 +526,9 @@ final class SwitchboardStore {
 
     private func run(
         _ action: @escaping (ControllerClient) async throws -> ControllerActionResponse,
-        verify: ((ControllerClient) async throws -> Void)? = nil
+        verify: ((ControllerClient) async throws -> Void)? = nil,
+        actionName: String? = nil,
+        profile: String? = nil
     ) async {
         do {
             let client = try self.client
@@ -546,7 +548,12 @@ final class SwitchboardStore {
             await refresh()
         } catch {
             if isBenignCancellation(error) { return }
-            lastError = error.localizedDescription
+            lastError = Self.userFacingErrorDescription(
+                for: error,
+                actionName: actionName,
+                status: profile.flatMap(statusForProfile),
+                diagnostic: profile.flatMap(diagnosticForProfile)
+            )
         }
     }
 
@@ -562,7 +569,54 @@ final class SwitchboardStore {
         pendingProfileActions[profile] = label
         optimisticUpdate()
         defer { pendingProfileActions.removeValue(forKey: profile) }
-        await run(action, verify: verify)
+        await run(action, verify: verify, actionName: Self.actionName(forPendingLabel: label), profile: profile)
+    }
+
+    static func userFacingErrorDescription(
+        for error: Error,
+        actionName: String? = nil,
+        status: ModelProfileStatus? = nil,
+        diagnostic: ProfileDiagnostic? = nil
+    ) -> String {
+        guard isTimeout(error) else { return error.localizedDescription }
+
+        let profileName = status?.displayName ?? diagnostic?.displayName
+        let subject = profileName.map { " for \($0)" } ?? ""
+        let action = actionName ?? "Request"
+        var message = "\(action) timed out\(subject)."
+
+        if let profileError = diagnostic?.errors.first {
+            message += " Profile issue: \(profileError)"
+        } else {
+            message += " The model may still be launching; refresh after it finishes or run Controller Doctor."
+        }
+        return message
+    }
+
+    private static func isTimeout(_ error: Error) -> Bool {
+        if let urlError = error as? URLError, urlError.code == .timedOut {
+            return true
+        }
+        let nsError = error as NSError
+        return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorTimedOut
+    }
+
+    private static func actionName(forPendingLabel label: String) -> String {
+        switch label {
+        case "ACTIVATING": return "Activate"
+        case "STARTING": return "Start"
+        case "STOPPING": return "Stop"
+        case "RESTARTING": return "Restart"
+        default: return label.capitalized
+        }
+    }
+
+    private func statusForProfile(_ profile: String) -> ModelProfileStatus? {
+        statuses.first { $0.profile == profile }
+    }
+
+    private func diagnosticForProfile(_ profile: String) -> ProfileDiagnostic? {
+        profileDiagnostics.first { $0.profile == profile }
     }
 
     private func verifyProfileStopped(_ profile: String, using client: ControllerClient) async throws {

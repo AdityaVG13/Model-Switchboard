@@ -137,6 +137,31 @@ private let stressIterationsKey = "MSW_STRESS_BUTTON_CLICKS"
     #expect(coordinator.show(nil) == nil)
 }
 
+@MainActor
+@Test func profileActionTimeoutMentionsProfileDiagnostics() {
+    let message = SwitchboardStore.userFacingErrorDescription(
+        for: URLError(.timedOut),
+        actionName: "Start",
+        status: StressController.status(running: true, ready: false),
+        diagnostic: ProfileDiagnostic(
+            profile: stressProfile,
+            displayName: "Stress Profile",
+            runtime: "llama.cpp",
+            runtimeLabel: "llama.cpp",
+            runtimeTags: ["llama.cpp"],
+            launchMode: "adapter",
+            errors: ["llama-server not found in controller PATH; set SERVER_BIN to an absolute executable path"],
+            warnings: [],
+            running: false,
+            ready: false,
+            pid: nil,
+            baseURL: "http://127.0.0.1:8999/v1"
+        )
+    )
+
+    #expect(message == "Start timed out for Stress Profile. Profile issue: llama-server not found in controller PATH; set SERVER_BIN to an absolute executable path")
+}
+
 private enum StressPanel {
     case settings
     case help
