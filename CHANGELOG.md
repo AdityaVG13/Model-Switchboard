@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## [1.1.7] - 2026-06-09
+
 ### Added
 - Installed `model-switchboardctl` and bash/zsh/fish completions from the source installer.
 - Added installer regression coverage for quiet installs, verification, and completion generation.
@@ -12,6 +14,11 @@ All notable changes to this project are documented in this file.
 ### Changed
 - Hardened the app and controller installers with help flags, quiet/no-gum modes, preflight checks, atomic locks, install verification, and final uninstall guidance.
 - `model-switchboardctl --json` output for mutating commands now uses structured result envelopes instead of passing through raw controller responses.
+
+### Fixed
+- Added a launchd `PATH` to the controller LaunchAgent so runtime tools installed in `~/.local/bin`, Homebrew, and system locations can be found without per-profile overrides.
+- Improved controller doctor findings for missing runtime executables with explicit `SERVER_BIN` remediation.
+- Replaced generic profile action timeout errors in the app with action/profile-specific messages that include doctor diagnostics when available.
 
 ## [1.1.6] - 2026-05-17
 
