@@ -2105,6 +2105,41 @@ class ModelCtlTests(unittest.TestCase):
                 ],
             )
             self.assertEqual(plist["WorkingDirectory"], str(selected_root))
+            self.assertEqual(
+                plist["EnvironmentVariables"]["PATH"],
+                f"{home_dir}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+            )
+
+    def test_diagnose_profile_explains_launchd_path_for_missing_llama_server(self) -> None:
+        env = {
+            "PROFILE_NAME": "broken-llama",
+            "DISPLAY_NAME": "Broken Llama",
+            "RUNTIME": "llama.cpp",
+            "MODEL_FILE": "model.gguf",
+            "REQUEST_MODEL": "broken-llama",
+        }
+
+        with (
+            mock.patch.object(MODULE, "resolve_llama_server_bin", return_value=None),
+            mock.patch.object(MODULE, "model_path_for_profile", return_value=Path("/tmp/model.gguf")),
+            mock.patch.object(Path, "exists", return_value=True),
+            mock.patch.object(
+                MODULE,
+                "status_for_profile",
+                return_value={
+                    "running": False,
+                    "ready": False,
+                    "pid": None,
+                    "base_url": "http://127.0.0.1:8080/v1",
+                },
+            ),
+        ):
+            report = MODULE.diagnose_profile("broken-llama", env)
+
+        self.assertIn(
+            "llama-server not found in controller PATH; set SERVER_BIN or LLAMA_SERVER_BIN to an absolute executable path",
+            report["errors"][0],
+        )
 
 
 if __name__ == "__main__":

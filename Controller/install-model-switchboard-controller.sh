@@ -10,6 +10,7 @@ HOST="${HOST:-127.0.0.1}"
 PORT="${PORT:-8877}"
 LOG_DIR="${LOG_DIR:-$HOME/Library/Logs/ModelSwitchboard}"
 PLIST_DIR="${PLIST_DIR:-$HOME/Library/LaunchAgents}"
+LAUNCHD_PATH="${LAUNCHD_PATH:-$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin}"
 UNSAFE_BIND=0
 AUTH_TOKEN_FILE="${AUTH_TOKEN_FILE:-}"
 QUIET=0
@@ -340,6 +341,11 @@ $(if ! is_loopback_host "$HOST"; then printf '    <string>--auth-token-file</str
   <true/>
   <key>KeepAlive</key>
   <true/>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>${LAUNCHD_PATH}</string>
+  </dict>
   <key>StandardOutPath</key>
   <string>${LOG_PATH}</string>
   <key>StandardErrorPath</key>

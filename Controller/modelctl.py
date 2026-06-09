@@ -2369,6 +2369,16 @@ def executable_configured(env: ProfileEnv, *keys: str) -> bool:
     return bool(resolve_executable(*(env.get(key) for key in keys)))
 
 
+def executable_not_found_message(executable: str, *profile_keys: str) -> str:
+    profile_hint = " or ".join(profile_keys)
+    if profile_hint:
+        profile_hint = f"set {profile_hint} to an absolute executable path, or "
+    return (
+        f"{executable} not found in controller PATH; "
+        f"{profile_hint}reinstall the LaunchAgent so ~/.local/bin and Homebrew paths are available"
+    )
+
+
 def launch_agent_status() -> LaunchAgentStatusPayload:
     try:
         output = run(["launchctl", "list"], check=False).stdout
@@ -3138,7 +3148,7 @@ def diagnose_profile(
             errors.append("missing BASE_URL or HEALTHCHECK_URL")
     elif runtime == "llama.cpp":
         if not resolve_llama_server_bin(env):
-            errors.append("llama-server not found")
+            errors.append(executable_not_found_message("llama-server", "SERVER_BIN", "LLAMA_SERVER_BIN"))
         model_path = model_path_for_profile(env)
         if not model_path:
             errors.append(
@@ -3149,7 +3159,7 @@ def diagnose_profile(
             errors.append(f"model file not found: {model_path}")
     elif runtime == "mlx":
         if not resolve_mlx_server_bin(env):
-            errors.append("mlx_lm.server not found")
+            errors.append(executable_not_found_message("mlx_lm.server", "SERVER_BIN", "MLX_SERVER_BIN"))
         model_dir = env.get("MODEL_DIR")
         model_repo = env.get("MODEL_REPO")
         if model_dir:
@@ -3172,7 +3182,7 @@ def diagnose_profile(
             errors.append(f"MODEL_DIR not found: {model_dir}")
     elif runtime == "vllm-mlx":
         if not resolve_vllm_mlx_server_bin(env):
-            errors.append("vllm-mlx not found")
+            errors.append(executable_not_found_message("vllm-mlx", "SERVER_BIN", "VLLM_MLX_BIN"))
         model_source = adapter_model_source(env)
         if not model_source:
             errors.append("missing MODEL_REPO, MODEL_ID, MODEL_DIR, MODEL_PATH, or MODEL_FILE for vllm-mlx")
