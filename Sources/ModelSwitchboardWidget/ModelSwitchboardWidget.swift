@@ -162,7 +162,7 @@ struct SwitchboardWidgetView: View {
     private let features = AppFeatures.current
 
     private var statuses: [ModelProfileStatus] {
-        (entry.payload?.statuses ?? []).sorted(by: ModelProfileStatus.compareForDisplay)
+        (entry.payload?.statuses ?? []).sortedForDisplay()
     }
 
     private var summary: DashboardSummary {

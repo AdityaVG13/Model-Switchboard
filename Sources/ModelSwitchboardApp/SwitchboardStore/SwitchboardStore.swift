@@ -42,7 +42,9 @@ final class SwitchboardStore {
 
     var controllerBaseURL: String
     let features: AppFeatures
-    var statuses: [ModelProfileStatus] = []
+    var statuses: [ModelProfileStatus] = [] {
+        didSet { sortedStatusesCache = nil }
+    }
     var benchmark: BenchmarkStatus?
     var doctorReport: DoctorReport?
     var profileDiagnostics: [ProfileDiagnostic] = []
@@ -59,6 +61,8 @@ final class SwitchboardStore {
     var lastActiveProfiles: [String] = []
     var lastBenchmarkStartedAt: Date?
     var activeBenchmarkProfiles: [String] = []
+
+    private var sortedStatusesCache: [ModelProfileStatus]?
 
     var refreshTask: Task<Void, Never>?
     var loopbackEndpointProbeTask: Task<Void, Never>?
@@ -105,7 +109,7 @@ final class SwitchboardStore {
     }
 
     var summary: DashboardSummary {
-        DashboardSummary(payload: currentPayload)
+        DashboardSummary(counts: ProfileRuntimeCounts(statuses: statuses), benchmark: benchmark)
     }
 
     var displayedRunningProfiles: Int {
@@ -117,7 +121,10 @@ final class SwitchboardStore {
     }
 
     var sortedStatuses: [ModelProfileStatus] {
-        statuses.sorted(by: ModelProfileStatus.compareForDisplay)
+        if let sortedStatusesCache { return sortedStatusesCache }
+        let sorted = statuses.sortedForDisplay()
+        sortedStatusesCache = sorted
+        return sorted
     }
 
     var menuBarHelp: String {
@@ -127,10 +134,14 @@ final class SwitchboardStore {
     var autoRefreshPolicy: AutoRefreshPolicy {
         AutoRefreshPolicy(
             payload: currentPayload,
-            hasPendingActions: !pendingProfileActions.isEmpty ||
-                !pendingGlobalActions.isEmpty ||
-                !pendingIntegrationActions.isEmpty
+            hasPendingActions: hasPendingActions
         )
+    }
+
+    var hasPendingActions: Bool {
+        !pendingProfileActions.isEmpty ||
+            !pendingGlobalActions.isEmpty ||
+            !pendingIntegrationActions.isEmpty
     }
 
     var client: ControllerClient {

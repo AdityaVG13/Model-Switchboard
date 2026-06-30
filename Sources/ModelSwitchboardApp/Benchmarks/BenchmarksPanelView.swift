@@ -187,15 +187,7 @@ struct BenchmarksPanelView: View {
 
     private var benchmarkCooldownLabel: String? {
         guard let cooldownEndsAt else { return nil }
-        let remaining = max(0, cooldownEndsAt.timeIntervalSince(now))
-        guard remaining > 0 else { return nil }
-        let seconds = Int(remaining.rounded(.up))
-        let minutesPart = seconds / 60
-        let secondsPart = seconds % 60
-        if minutesPart > 0 {
-            return "\(minutesPart)m \(secondsPart)s"
-        }
-        return "\(secondsPart)s"
+        return DurationFormatting.compactCountdown(endsAt: cooldownEndsAt, relativeTo: now)
     }
 
     private var canTriggerBenchmark: Bool {

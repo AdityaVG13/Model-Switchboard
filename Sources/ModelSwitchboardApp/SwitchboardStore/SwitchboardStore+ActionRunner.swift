@@ -23,7 +23,7 @@ extension SwitchboardStore {
             try await verify?(client)
             lastError = nil
             lastUpdated = Date()
-            await refresh()
+            await syncAuxiliaryStateAfterMutation()
         } catch {
             if isBenignCancellation(error) { return }
             lastError = Self.userFacingErrorDescription(
@@ -80,10 +80,10 @@ extension SwitchboardStore {
     }
 
     func markProfile(_ profile: String, running: Bool, ready: Bool) {
-        statuses = statuses.map { status in
-            guard status.profile == profile else { return status }
-            return status.updating(running: running, ready: ready)
-        }
+        guard let index = statuses.firstIndex(where: { $0.profile == profile }) else { return }
+        var updated = statuses
+        updated[index] = updated[index].updating(running: running, ready: ready)
+        statuses = updated
     }
 
     func apply(payload: ControllerStatusPayload) {
@@ -115,6 +115,13 @@ extension SwitchboardStore {
         if error is CancellationError { return true }
         let nsError = error as NSError
         return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
+    }
+
+    func syncAuxiliaryStateAfterMutation() async {
+        await probeLoopbackEndpointsIfNeeded()
+        if let report = try? await client.fetchDoctorReport() {
+            apply(doctorReport: report)
+        }
     }
 
     nonisolated static func compareDiagnostics(lhs: ProfileDiagnostic, rhs: ProfileDiagnostic) -> Bool {

@@ -46,10 +46,11 @@ extension SwitchboardStore {
         }
         guard !unreachableProfiles.isEmpty else { return }
 
-        statuses = statuses.map { status in
-            guard unreachableProfiles.contains(status.profile) else { return status }
-            return status.markingEndpointUnavailable()
+        var updated = statuses
+        for index in updated.indices where unreachableProfiles.contains(updated[index].profile) {
+            updated[index] = updated[index].markingEndpointUnavailable()
         }
+        statuses = updated
     }
 
     func startLoopbackEndpointProbe() {
@@ -78,10 +79,7 @@ extension SwitchboardStore {
     }
 
     func isLoopbackEndpointProbeSuppressed(relativeTo now: Date) -> Bool {
-        if let suppressedUntil = loopbackEndpointProbeSuppressedUntil, suppressedUntil > now {
-            return true
-        }
-        return false
+        loopbackEndpointProbeSuppressedUntil.map { $0 > now } ?? false
     }
 
     nonisolated static func makeLoopbackEndpointProbeSession() -> URLSession {
@@ -97,18 +95,25 @@ extension SwitchboardStore {
         in statuses: [ModelProfileStatus],
         using session: URLSession
     ) async -> Set<String> {
-        var unreachableProfiles: Set<String> = []
-        for status in statuses {
-            guard let request = loopbackProbeRequest(for: status) else { continue }
-            do {
-                _ = try await session.data(for: request)
-            } catch {
-                if isLoopbackConnectionRefused(error) {
-                    unreachableProfiles.insert(status.profile)
+        await withTaskGroup(of: (String, Bool).self) { group in
+            for status in statuses {
+                guard let request = loopbackProbeRequest(for: status) else { continue }
+                group.addTask {
+                    do {
+                        _ = try await session.data(for: request)
+                        return (status.profile, false)
+                    } catch {
+                        return (status.profile, isLoopbackConnectionRefused(error))
+                    }
                 }
             }
+
+            var unreachableProfiles: Set<String> = []
+            for await (profile, unreachable) in group where unreachable {
+                unreachableProfiles.insert(profile)
+            }
+            return unreachableProfiles
         }
-        return unreachableProfiles
     }
 
     nonisolated private static func loopbackProbeRequest(for status: ModelProfileStatus) -> URLRequest? {
@@ -136,25 +141,6 @@ extension SwitchboardStore {
 
 private extension ModelProfileStatus {
     func markingEndpointUnavailable() -> Self {
-        Self(
-            profile: profile,
-            displayName: displayName,
-            runtime: runtime,
-            runtimeLabel: runtimeLabel,
-            runtimeTags: runtimeTags,
-            launchMode: launchMode,
-            host: host,
-            port: port,
-            baseURL: baseURL,
-            requestModel: requestModel,
-            serverModelID: serverModelID,
-            pid: nil,
-            running: false,
-            ready: false,
-            serverIDs: [],
-            rssMB: nil,
-            command: command,
-            logPath: logPath
-        )
+        updating(pid: nil, running: false, ready: false, serverIDs: [], rssMB: nil)
     }
 }

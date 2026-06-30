@@ -103,11 +103,15 @@ public struct DashboardSummary: Equatable, Sendable {
     public let benchmarkSuite: String?
 
     public init(payload: ControllerStatusPayload) {
-        totalProfiles = payload.statuses.count
-        runningProfiles = payload.statuses.filter(\.running).count
-        readyProfiles = payload.statuses.filter(\.ready).count
-        benchmarkRunning = payload.benchmark?.running ?? false
-        benchmarkSuite = payload.benchmark?.latest?.suite
+        self.init(counts: ProfileRuntimeCounts(statuses: payload.statuses), benchmark: payload.benchmark)
+    }
+
+    public init(counts: ProfileRuntimeCounts, benchmark: BenchmarkStatus?) {
+        totalProfiles = counts.total
+        runningProfiles = counts.running
+        readyProfiles = counts.ready
+        benchmarkRunning = benchmark?.running ?? false
+        benchmarkSuite = benchmark?.latest?.suite
     }
 
     public var menuBarTitle: String {

@@ -11,7 +11,7 @@ extension SwitchboardStore {
         case .error where !statuses.isEmpty:
             return "Local model status is unavailable. Refresh to verify live status."
         case .error, .fresh:
-            let running = sortedStatuses.filter(\.running)
+            let running = statuses.lazy.filter(\.running)
             guard !running.isEmpty else {
                 return "No local models running"
             }

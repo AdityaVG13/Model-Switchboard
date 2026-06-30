@@ -185,3 +185,9 @@ public extension ModelProfileStatus {
         LoopbackHost.isLoopback(host)
     }
 }
+
+extension ModelProfileStatus {
+    var usesLoopbackEndpoint: Bool {
+        LoopbackHost.isLoopbackURL(baseURL, fallbackHost: host)
+    }
+}
