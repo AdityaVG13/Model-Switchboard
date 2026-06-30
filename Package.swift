@@ -24,13 +24,18 @@ let package = Package(
                 .product(name: "MenuBarExtraAccess", package: "MenuBarExtraAccess")
             ]
         ),
+        .target(
+            name: "ModelSwitchboardTestSupport",
+            dependencies: ["ModelSwitchboardCore"],
+            path: "Tests/ModelSwitchboardTestSupport"
+        ),
         .testTarget(
             name: "ModelSwitchboardCoreTests",
-            dependencies: ["ModelSwitchboardCore"]
+            dependencies: ["ModelSwitchboardCore", "ModelSwitchboardTestSupport"]
         ),
         .testTarget(
             name: "ModelSwitchboardAppTests",
-            dependencies: ["ModelSwitchboardApp"]
+            dependencies: ["ModelSwitchboardApp", "ModelSwitchboardTestSupport"]
         ),
     ]
 )

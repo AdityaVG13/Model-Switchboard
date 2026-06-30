@@ -116,11 +116,25 @@ targets:
       - package: ModelSwitchboardPackage
         product: ModelSwitchboardCore
 
+  ModelSwitchboardTestSupport:
+    type: framework
+    platform: macOS
+    sources:
+      - Tests/ModelSwitchboardTestSupport
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.modelswitchboard.app.testsupport
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - package: ModelSwitchboardPackage
+        product: ModelSwitchboardCore
+
   ModelSwitchboardTests:
     type: bundle.unit-test
     platform: macOS
     sources:
       - Tests/ModelSwitchboardCoreTests
+      - Tests/ModelSwitchboardAppTests
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.modelswitchboard.app.tests
@@ -128,3 +142,5 @@ targets:
     dependencies:
       - package: ModelSwitchboardPackage
         product: ModelSwitchboardCore
+      - target: ModelSwitchboard
+      - target: ModelSwitchboardTestSupport

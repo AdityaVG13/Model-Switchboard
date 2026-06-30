@@ -1,21 +1,18 @@
 import Foundation
 import Testing
 import ModelSwitchboardCore
+import ModelSwitchboardTestSupport
 @testable import ModelSwitchboardApp
-
-private let stressBaseURL = "http://model-switchboard-button-stress.test"
-private let stressProfile = "stress-profile"
-private let stressIterationsKey = "MSW_STRESS_BUTTON_CLICKS"
 
 @MainActor
 @Test func storeBackedButtonsSurviveRepeatedMockedClicks() async throws {
-    let iterations = stressIterations()
+    let iterations = StressTestConfig.iterations()
     let defaults = UserDefaults.standard
     let previousLastActiveProfiles = defaults.object(forKey: "modelswitchboard.last-active-profiles")
     let previousBenchmarkStartedAt = defaults.object(forKey: "modelswitchboard.last-benchmark-started-at")
     defer {
-        restore(previousLastActiveProfiles, forKey: "modelswitchboard.last-active-profiles", in: defaults)
-        restore(previousBenchmarkStartedAt, forKey: "modelswitchboard.last-benchmark-started-at", in: defaults)
+        UserDefaultsTestHelpers.restore(previousLastActiveProfiles, forKey: "modelswitchboard.last-active-profiles", in: defaults)
+        UserDefaultsTestHelpers.restore(previousBenchmarkStartedAt, forKey: "modelswitchboard.last-benchmark-started-at", in: defaults)
     }
 
     let controller = StressController()
@@ -28,7 +25,7 @@ private let stressIterationsKey = "MSW_STRESS_BUTTON_CLICKS"
     defer { session.invalidateAndCancel() }
 
     let store = SwitchboardStore(
-        controllerBaseURL: stressBaseURL,
+        controllerBaseURL: StressTestConfig.baseURL,
         features: .plus,
         autoStartRefresh: false,
         loopbackEndpointProbe: { _ in [] },
@@ -45,7 +42,7 @@ private let stressIterationsKey = "MSW_STRESS_BUTTON_CLICKS"
     }
 
     for _ in 0..<iterations {
-        store.controllerBaseURL = stressBaseURL
+        store.controllerBaseURL = StressTestConfig.baseURL
         await store.refresh()
         assertStoreClean(store, after: "Reconnect")
     }
@@ -56,22 +53,22 @@ private let stressIterationsKey = "MSW_STRESS_BUTTON_CLICKS"
     }
 
     for _ in 0..<iterations {
-        await store.start(stressProfile)
+        await store.start(StressTestConfig.profile)
         assertStoreClean(store, after: "Start")
     }
 
     for _ in 0..<iterations {
-        await store.stop(stressProfile)
+        await store.stop(StressTestConfig.profile)
         assertStoreClean(store, after: "Stop")
     }
 
     for _ in 0..<iterations {
-        await store.restart(stressProfile)
+        await store.restart(StressTestConfig.profile)
         assertStoreClean(store, after: "Restart")
     }
 
     for _ in 0..<iterations {
-        await store.activate(stressProfile)
+        await store.activate(StressTestConfig.profile)
         assertStoreClean(store, after: "Activate")
     }
 
@@ -96,13 +93,13 @@ private let stressIterationsKey = "MSW_STRESS_BUTTON_CLICKS"
     for _ in 0..<iterations {
         store.lastBenchmarkStartedAt = nil
         store.benchmark = StressController.idleBenchmark
-        await store.quickBenchmark([stressProfile])
+        await store.quickBenchmark([StressTestConfig.profile])
         assertStoreClean(store, after: "Benchmark Profile")
     }
 
     for _ in 0..<iterations {
         store.statuses = [StressController.status(running: false, ready: false)]
-        store.lastActiveProfiles = [stressProfile]
+        store.lastActiveProfiles = [StressTestConfig.profile]
         await store.reopenLastActive()
         assertStoreClean(store, after: "Reopen Last")
     }
@@ -120,7 +117,7 @@ private let stressIterationsKey = "MSW_STRESS_BUTTON_CLICKS"
 }
 
 @Test func inspectorPanelButtonsSurviveRepeatedToggles() {
-    let iterations = stressIterations()
+    let iterations = StressTestConfig.iterations()
     var coordinator = InspectorPanelCoordinator<StressPanel>()
 
     for _ in 0..<iterations {
@@ -144,7 +141,7 @@ private let stressIterationsKey = "MSW_STRESS_BUTTON_CLICKS"
         actionName: "Start",
         status: StressController.status(running: true, ready: false),
         diagnostic: ProfileDiagnostic(
-            profile: stressProfile,
+            profile: StressTestConfig.profile,
             displayName: "Stress Profile",
             runtime: "llama.cpp",
             runtimeLabel: "llama.cpp",
@@ -166,19 +163,6 @@ private enum StressPanel {
     case settings
     case help
     case benchmarks
-}
-
-private func stressIterations() -> Int {
-    let rawValue = ProcessInfo.processInfo.environment[stressIterationsKey] ?? "100"
-    return max(1, Int(rawValue) ?? 100)
-}
-
-private func restore(_ value: Any?, forKey key: String, in defaults: UserDefaults) {
-    if let value {
-        defaults.set(value, forKey: key)
-    } else {
-        defaults.removeObject(forKey: key)
-    }
 }
 
 @MainActor
@@ -287,7 +271,7 @@ private final class StressController: @unchecked Sendable {
 
     static func status(running: Bool, ready: Bool) -> ModelProfileStatus {
         ModelProfileStatus(
-            profile: stressProfile,
+            profile: StressTestConfig.profile,
             displayName: "Stress Profile",
             runtime: "mock",
             runtimeLabel: "Mock",
@@ -296,12 +280,12 @@ private final class StressController: @unchecked Sendable {
             host: "127.0.0.1",
             port: "8999",
             baseURL: "http://127.0.0.1:8999/v1",
-            requestModel: stressProfile,
-            serverModelID: stressProfile,
+            requestModel: StressTestConfig.profile,
+            serverModelID: StressTestConfig.profile,
             pid: running ? 4242 : nil,
             running: running,
             ready: ready,
-            serverIDs: ready ? [stressProfile] : [],
+            serverIDs: ready ? [StressTestConfig.profile] : [],
             rssMB: running ? 512 : nil,
             command: nil,
             logPath: "/tmp/stress-profile.log"
@@ -353,7 +337,7 @@ private final class StressController: @unchecked Sendable {
     private static func doctorReport() -> DoctorReport {
         DoctorReport(
             controller: ControllerHeartbeat(
-                url: "\(stressBaseURL)/api/status",
+                url: "\(StressTestConfig.baseURL)/api/status",
                 reachable: true,
                 profiles: 1,
                 integrations: 1
@@ -368,7 +352,7 @@ private final class StressController: @unchecked Sendable {
             controllerRoot: "/tmp/model-switchboard-stress",
             profiles: [
                 ProfileDiagnostic(
-                    profile: stressProfile,
+                    profile: StressTestConfig.profile,
                     displayName: "Stress Profile",
                     runtime: "mock",
                     runtimeLabel: "Mock",

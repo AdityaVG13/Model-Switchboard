@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import ModelSwitchboardCore
+import ModelSwitchboardTestSupport
 @testable import ModelSwitchboardApp
 
 @MainActor
@@ -15,49 +16,12 @@ private func makeStore(
     )
 }
 
-private func makeStatus(
-    profile: String = "qwen",
-    displayName: String = "Qwen",
-    host: String = "127.0.0.1",
-    port: String = "8080",
-    baseURL: String = "http://127.0.0.1:8080/v1",
-    running: Bool = true,
-    ready: Bool = true
-) -> ModelProfileStatus {
-    ModelProfileStatus(
-        profile: profile,
-        displayName: displayName,
-        runtime: "llama.cpp",
-        host: host,
-        port: port,
-        baseURL: baseURL,
-        requestModel: profile,
-        serverModelID: profile,
-        pid: running ? 42 : nil,
-        running: running,
-        ready: ready,
-        serverIDs: running ? [profile] : [],
-        rssMB: running ? 4096 : nil,
-        command: nil,
-        logPath: "/tmp/qwen.log"
-    )
-}
-
-actor ProbeRecorder {
-    private(set) var calls = 0
-
-    func record(_ profiles: [ModelProfileStatus]) -> [String] {
-        calls += 1
-        return profiles.map(\.profile)
-    }
-}
-
 @MainActor
 @Test func staleRunningStateIsHiddenFromLiveCounts() {
     let store = makeStore()
     let now = Date(timeIntervalSince1970: 200)
     let staleDate = now.addingTimeInterval(-60)
-    let status = makeStatus()
+    let status = ModelFixtures.profileStatus()
 
     store.statuses = [status]
     store.lastUpdated = staleDate
@@ -73,7 +37,7 @@ actor ProbeRecorder {
 @Test func cachedStateIsReportedDistinctly() {
     let store = makeStore()
     let now = Date(timeIntervalSince1970: 200)
-    let status = makeStatus()
+    let status = ModelFixtures.profileStatus()
 
     store.statuses = [status]
     store.lastUpdated = now
@@ -88,7 +52,7 @@ actor ProbeRecorder {
 @Test func freshStateKeepsLiveCountsAndRunningBadge() {
     let store = makeStore()
     let now = Date(timeIntervalSince1970: 200)
-    let status = makeStatus()
+    let status = ModelFixtures.profileStatus()
 
     store.statuses = [status]
     store.lastUpdated = now
@@ -107,7 +71,7 @@ actor ProbeRecorder {
     }
     let now = Date(timeIntervalSince1970: 200)
 
-    store.statuses = [makeStatus()]
+    store.statuses = [ModelFixtures.profileStatus()]
     store.lastUpdated = now
 
     await store.probeLoopbackEndpointsIfNeeded()
@@ -132,8 +96,8 @@ actor ProbeRecorder {
     }
 
     store.statuses = [
-        makeStatus(profile: "pending"),
-        makeStatus(
+        ModelFixtures.profileStatus(profile: "pending"),
+        ModelFixtures.profileStatus(
             profile: "remote",
             displayName: "Remote",
             host: "10.0.0.8",
@@ -155,7 +119,7 @@ actor ProbeRecorder {
     let store = makeStore()
     let now = Date(timeIntervalSince1970: 200)
 
-    store.statuses = [makeStatus()]
+    store.statuses = [ModelFixtures.profileStatus()]
     store.armLoopbackEndpointProbeFastWindow(relativeTo: now)
 
     #expect(store.shouldProbeLoopbackEndpoints(relativeTo: now) == true)
@@ -172,7 +136,7 @@ actor ProbeRecorder {
     }
     let now = Date(timeIntervalSince1970: 200)
 
-    store.statuses = [makeStatus()]
+    store.statuses = [ModelFixtures.profileStatus()]
     store.suppressLoopbackEndpointProbe(relativeTo: now)
 
     #expect(store.shouldProbeLoopbackEndpoints(relativeTo: now) == false)
