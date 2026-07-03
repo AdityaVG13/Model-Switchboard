@@ -159,6 +159,30 @@ import ModelSwitchboardTestSupport
     #expect(message == "Start timed out for Stress Profile. Profile issue: llama-server not found in controller PATH; set SERVER_BIN to an absolute executable path")
 }
 
+@MainActor
+@Test func failedBenchmarkStartDoesNotArmCooldown() async {
+    let defaults = UserDefaults.standard
+    let previousBenchmarkStartedAt = defaults.object(forKey: "modelswitchboard.last-benchmark-started-at")
+    defer {
+        UserDefaultsTestHelpers.restore(previousBenchmarkStartedAt, forKey: "modelswitchboard.last-benchmark-started-at", in: defaults)
+    }
+    defaults.removeObject(forKey: "modelswitchboard.last-benchmark-started-at")
+
+    let store = SwitchboardStore(
+        controllerBaseURL: StressTestConfig.baseURL,
+        features: .plus,
+        autoStartRefresh: false,
+        controllerClientFactory: { _ in throw URLError(.cannotConnectToHost) },
+        cachePayloadWriter: { _, _ in }
+    )
+
+    await store.quickBenchmark([StressTestConfig.profile])
+
+    #expect(store.lastBenchmarkStartedAt == nil)
+    #expect(store.benchmarkCooldownRemaining == 0)
+    #expect(store.activeBenchmarkProfiles.isEmpty)
+}
+
 private enum StressPanel {
     case settings
     case help

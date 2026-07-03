@@ -74,11 +74,14 @@ extension SwitchboardStore {
         }
         guard pendingGlobalActions.insert(key).inserted else { return }
         activeBenchmarkProfiles = profiles ?? []
-        markBenchmarkStarted()
         defer {
             pendingGlobalActions.remove(key)
         }
-        await run { try await $0.quickBenchmark(profiles: profiles) }
+        if await run({ try await $0.quickBenchmark(profiles: profiles) }) {
+            markBenchmarkStarted()
+        } else {
+            activeBenchmarkProfiles = []
+        }
     }
 
     func reopenLastActive() async {
