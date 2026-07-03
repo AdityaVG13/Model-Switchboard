@@ -33,7 +33,7 @@
   <img src="Resources/Brand/terminal-demo.gif" alt="Terminal demo: model-switchboardctl summary, inventory, and profile directory" width="560"/>
 </td>
 <td align="center" width="42%" valign="middle">
-  <img src="Resources/Brand/screenshot-plus.jpg" alt="Model Switchboard Plus menu bar panel showing CPU/RAM/GPU stats, optional integrations, and profile cards with Activate / Start / Stop / Restart / Benchmark actions" width="360"/>
+  <img src="Resources/Brand/panel-plus-dark.png" alt="Model Switchboard Plus menu bar panel: ready count, CPU/RAM/GPU sparklines, runtime filter, active-model hero card with live tok/s, and a dense standby model list" width="360"/>
 </td>
 </tr>
 </table>
@@ -74,16 +74,16 @@ Running local models on an Apple Silicon Mac usually means a sprawl of terminal 
 <table>
 <tr>
 <td align="center" width="33%" valign="top">
-  <img src="Resources/Brand/screenshot-base.jpg" alt="Base edition panel: profile fleet with Activate, Start, Stop, Restart actions" width="320"/>
-  <p><strong>Base</strong><br/>Profile fleet with <code>Activate</code> / <code>Start</code> / <code>Stop</code> / <code>Restart</code>.</p>
+  <img src="Resources/Brand/panel-base-dark.png" alt="Base edition panel: ready count, runtime filter, active-model hero card, and the standby model list with activate/stop and overflow actions" width="320"/>
+  <p><strong>Base</strong><br/>One-tap <code>Activate</code> / <code>Stop</code> per model, hero card for the live model, additive <code>Start</code>, <code>Restart</code>, and <code>Copy Endpoint URL</code> in the overflow menu.</p>
 </td>
 <td align="center" width="33%" valign="top">
-  <img src="Resources/Brand/screenshot-plus.jpg" alt="Plus edition with CPU/RAM/GPU header, Benchmark All, Reopen Last, Sync Droid" width="320"/>
-  <p><strong>Plus</strong><br/>Adds live CPU / RAM / GPU, <code>Benchmark All</code>, <code>Reopen Last</code>, <code>Sync Droid</code>.</p>
+  <img src="Resources/Brand/panel-plus-dark.png" alt="Plus edition with CPU/RAM/GPU sparklines, live tok/s on the hero card, Benchmarks, and Sync Droid" width="320"/>
+  <p><strong>Plus</strong><br/>Adds live CPU / RAM / GPU sparklines, benchmark tok/s inline, <code>Sync Droid</code>, and the Benchmarks side panel.</p>
 </td>
 <td align="center" width="33%" valign="top">
-  <img src="Resources/Brand/screenshot-benchmark-square.jpg" alt="In-app Benchmarks panel showing TTFT, Decode, E2E, RSS per profile" width="320"/>
-  <p><strong>Benchmarks panel</strong><br/>TTFT, Decode, E2E, RSS per profile. <code>Export CSV</code> and every run lands as JSON + Markdown under <code>Controller/benchmark-results/</code>.</p>
+  <img src="Resources/Brand/panel-benchmarks.png" alt="In-app Benchmarks panel: latest-run summary, prefill scaling (TTFT by context), and ranked best-decode bars per model" width="320"/>
+  <p><strong>Benchmarks panel</strong><br/>Latest-run summary, <em>prefill scaling</em> (TTFT at 1k/4k/8k context), and ranked decode bars. <code>Export CSV</code>; every run lands as JSON + Markdown under <code>Controller/benchmark-results/</code>.</p>
 </td>
 </tr>
 </table>

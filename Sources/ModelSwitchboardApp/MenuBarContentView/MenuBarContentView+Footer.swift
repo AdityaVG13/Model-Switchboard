@@ -81,6 +81,8 @@ extension MenuBarContentView {
                 }
                 Text(title)
                     .font(.system(size: 11.5))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
             }
             .contentShape(Rectangle())
         }

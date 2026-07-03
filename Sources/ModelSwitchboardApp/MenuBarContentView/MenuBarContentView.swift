@@ -33,6 +33,24 @@ struct MenuBarContentView: View {
     let reconnect: () -> Void
     let updateMenuBarHelp: (String) -> Void
 
+    init(
+        store: SwitchboardStore,
+        features: AppFeatures,
+        launchAtLoginManager: LaunchAtLoginManager,
+        controllerBaseURL: Binding<String>,
+        reconnect: @escaping () -> Void,
+        updateMenuBarHelp: @escaping (String) -> Void,
+        systemMetrics: SystemMetricsMonitor? = nil
+    ) {
+        self.store = store
+        self.features = features
+        self.launchAtLoginManager = launchAtLoginManager
+        self._controllerBaseURL = controllerBaseURL
+        self.reconnect = reconnect
+        self.updateMenuBarHelp = updateMenuBarHelp
+        self._systemMetrics = StateObject(wrappedValue: systemMetrics ?? SystemMetricsMonitor())
+    }
+
     @AppStorage("menuPanelWidth")
     var storedMainPanelWidth: Double = 372
 
@@ -59,11 +77,15 @@ struct MenuBarContentView: View {
     @State var inspectorCoordinator = InspectorPanelCoordinator<InspectorPanel>()
     @State var hostWindow: NSWindow?
     @State var inspectorController = InspectorPanelController()
-    @StateObject var systemMetrics = SystemMetricsMonitor()
+    @StateObject var systemMetrics: SystemMetricsMonitor
     @State var activeResizeStartFrame: NSRect?
 
     static let appVersion: String = {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
+        // Override hook for preview/screenshot tooling running outside the app bundle.
+        if let override = ProcessInfo.processInfo.environment["MSW_VERSION_OVERRIDE"], !override.isEmpty {
+            return override
+        }
+        return Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
     }()
 
     var mainPanelWidth: CGFloat {
