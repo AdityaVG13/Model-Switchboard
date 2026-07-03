@@ -17,21 +17,20 @@ public struct AutoRefreshPolicy: Equatable, Sendable {
     public let interval: TimeInterval
 
     public init(payload: ControllerStatusPayload, hasPendingActions: Bool = false) {
-        let summary = DashboardSummary(payload: payload)
-
         if hasPendingActions {
             mode = .pendingAction
             interval = Self.pendingActionInterval
             return
         }
 
-        if summary.benchmarkRunning {
+        if payload.benchmark?.running == true {
             mode = .benchmarking
             interval = Self.benchmarkingInterval
             return
         }
 
-        if summary.runningProfiles > 0 || summary.readyProfiles > 0 {
+        let counts = ProfileRuntimeCounts(statuses: payload.statuses)
+        if counts.running > 0 || counts.ready > 0 {
             mode = .activeRuntime
             interval = Self.activeRuntimeInterval
             return
