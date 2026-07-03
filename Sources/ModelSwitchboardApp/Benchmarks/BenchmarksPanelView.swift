@@ -100,15 +100,10 @@ struct BenchmarksPanelView: View {
         let interRowSpacing: CGFloat = 4
         let contentPadding: CGFloat = 10
         let scrollbarGutter: CGFloat = displayRows.count > 7 ? 14 : 0
-        let desiredHeight = min(
-            maxTableHeight,
-            max(
-                rowHeight + contentPadding,
-                CGFloat(displayRows.count) * rowHeight +
-                    CGFloat(max(0, displayRows.count - 1)) * interRowSpacing +
-                    contentPadding
-            )
-        )
+        let rowCount = CGFloat(displayRows.count)
+        let spacingCount = CGFloat(max(0, displayRows.count - 1))
+        let contentHeight: CGFloat = rowCount * rowHeight + spacingCount * interRowSpacing + contentPadding
+        let desiredHeight: CGFloat = min(maxTableHeight, max(rowHeight + contentPadding, contentHeight))
         let comparisonHeight: CGFloat = displayRows.count > 1 ? 44 : 0
 
         return GeometryReader { proxy in

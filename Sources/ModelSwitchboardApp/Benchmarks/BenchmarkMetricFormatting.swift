@@ -1,4 +1,5 @@
 import Foundation
+import ModelSwitchboardCore
 
 enum BenchmarkMetricFormatting {
     static func milliseconds(_ value: Double?) -> String {

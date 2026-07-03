@@ -43,6 +43,7 @@ enum BenchmarkCSVExport {
         return lines.joined(separator: "\n")
     }
 
+    @MainActor
     static func presentSavePanel(
         for latest: BenchmarkLatestReport,
         onComplete: @escaping (Notice) -> Void
@@ -60,7 +61,8 @@ enum BenchmarkCSVExport {
         panel.canCreateDirectories = true
         panel.isExtensionHidden = false
 
-        panel.begin { response in
+        Task { @MainActor in
+            let response = await panel.begin()
             guard response == .OK, let url = panel.url else { return }
             do {
                 try makeCSV(from: latest).write(to: url, atomically: true, encoding: .utf8)
