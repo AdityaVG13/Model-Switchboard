@@ -7,7 +7,7 @@ extension MenuBarContentView {
 
     /// The model featured in the hero card: the first running profile in display order.
     var heroProfile: ModelProfileStatus? {
-        store.sortedStatuses.first { $0.running }
+        store.sortedStatuses.first { isDisplayedRunning($0) }
     }
 
     var standbyProfiles: [ModelProfileStatus] {
@@ -22,12 +22,24 @@ extension MenuBarContentView {
         case .all:
             true
         case .running:
-            status.running || store.isBusy(profile: status.profile)
+            isDisplayedRunning(status) || store.isBusy(profile: status.profile)
         case .mlx:
             Self.runtimeKind(status) == .mlx
         case .llamaCpp:
             Self.runtimeKind(status) == .llamaCpp
         }
+    }
+
+    func isDisplayedRunning(_ status: ModelProfileStatus, relativeTo now: Date = .now) -> Bool {
+        Self.isDisplayedRunning(status, in: store, relativeTo: now)
+    }
+
+    static func isDisplayedRunning(
+        _ status: ModelProfileStatus,
+        in store: SwitchboardStore,
+        relativeTo now: Date = .now
+    ) -> Bool {
+        store.profileBadgeState(for: status, relativeTo: now) == .running
     }
 
     static func runtimeKind(_ status: ModelProfileStatus) -> ProfileFilter? {
@@ -56,7 +68,7 @@ extension MenuBarContentView {
             parts.append(pending.lowercased() + "…")
         } else if let tok = decodeTokensPerSecond(for: status.profile) {
             parts.append(String(format: "%.1f t/s", tok))
-        } else if let rssMB = status.rssMB, status.running {
+        } else if let rssMB = status.rssMB, isDisplayedRunning(status) {
             parts.append(String(format: "%.1f GB", rssMB / 1024))
         }
         return parts.joined(separator: " · ")
@@ -247,8 +259,14 @@ extension MenuBarContentView {
     }
 
     func rowDotColor(_ profile: ModelProfileStatus, pending: String?) -> Color {
-        if pending != nil { return DashboardTheme.pendingOrange }
-        if profile.running { return DashboardTheme.runningGreen }
+        switch store.profileBadgeState(for: profile, relativeTo: .now) {
+        case .pending:
+            return DashboardTheme.pendingOrange
+        case .running:
+            return DashboardTheme.runningGreen
+        case .stale, .notRunning:
+            break
+        }
         return theme.dotOff
     }
 
@@ -259,7 +277,7 @@ extension MenuBarContentView {
                 ProgressView()
                     .controlSize(.mini)
             }
-        } else if profile.running {
+        } else if isDisplayedRunning(profile) {
             rowActionIcon("stop.fill", color: DashboardTheme.stopRed, label: "Stop \(profile.displayName)") {
                 Task { await store.stop(profile.profile) }
             }

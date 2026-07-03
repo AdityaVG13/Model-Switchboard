@@ -43,6 +43,7 @@ import ModelSwitchboardTestSupport
 
 // MARK: - Runtime filter classification
 
+@MainActor
 @Test func runtimeFilterClassifiesMLXAndLlamaCppFamilies() {
     let llama = ModelFixtures.profileStatus(profile: "a", runtime: "llama.cpp", runtimeLabel: "llama.cpp")
     let mlx = ModelFixtures.profileStatus(profile: "b", runtime: "MLX", runtimeLabel: "MLX")
@@ -53,4 +54,20 @@ import ModelSwitchboardTestSupport
     #expect(MenuBarContentView.runtimeKind(mlx) == .mlx)
     #expect(MenuBarContentView.runtimeKind(vllmMLX) == .mlx)
     #expect(MenuBarContentView.runtimeKind(unknown) == nil)
+}
+
+@MainActor
+@Test func staleRunningStateIsNotTreatedAsDisplayedRunning() {
+    let store = SwitchboardStore(
+        controllerBaseURL: "http://127.0.0.1:8877",
+        features: .base,
+        autoStartRefresh: false
+    )
+    let now = Date(timeIntervalSince1970: 200)
+    let status = ModelFixtures.profileStatus()
+
+    store.statuses = [status]
+    store.lastUpdated = now.addingTimeInterval(-60)
+
+    #expect(MenuBarContentView.isDisplayedRunning(status, in: store, relativeTo: now) == false)
 }
