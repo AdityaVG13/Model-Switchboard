@@ -4,6 +4,22 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## [1.2.0] - 2026-07-03
+
+### Added
+- Added the redesigned Switchboard panel with ready-count header, system sparklines, runtime filters, active-model hero card, and compact model rows.
+- Added full-width Benchmarks and Settings side panels with design-token styling.
+- Added prefill-scaling benchmark data in controller payloads and the Benchmarks panel.
+
+### Changed
+- Refreshed README screenshots and release imagery for the new panel design.
+- Let the menu bar item show ready counts and added theme, accent, and side-panel preferences.
+
+### Fixed
+- Prevented stale or cached running state from rendering as live active model state.
+- Avoided caching stopped state before stop verification succeeds.
+- Kept failed benchmark starts from arming the benchmark cooldown.
+
 ## [1.1.7] - 2026-06-09
 
 ### Added
