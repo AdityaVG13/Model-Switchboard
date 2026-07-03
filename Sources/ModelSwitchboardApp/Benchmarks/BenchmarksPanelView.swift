@@ -27,7 +27,13 @@ struct BenchmarksPanelView: View {
                     }
 
                     if let latest = benchmark?.latest, !latest.rows.isEmpty {
+                        let best = BenchmarkMetricFormatting.sortedRowsForDisplay(latest.rows).first
                         summaryCard(latest)
+                        if let cases = best?.prefillCases, !cases.isEmpty {
+                            prefillSection(cases)
+                            theme.line.frame(height: 1)
+                                .padding(.bottom, 4)
+                        }
                         rankedRows(latest)
                     } else {
                         noticeText("No benchmark recorded yet. Run a benchmark to populate this panel.", color: theme.sub)
@@ -90,6 +96,62 @@ struct BenchmarksPanelView: View {
                 .foregroundStyle(theme.sub)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: - Prefill scaling
+
+    private func prefillSection(_ cases: [BenchmarkPrefillCase]) -> some View {
+        let maxTTFT = max(cases.compactMap(\.ttftMS).max() ?? 1, 1)
+
+        return VStack(alignment: .leading, spacing: 0) {
+            Text("PREFILL SCALING \u{00b7} TTFT BY CONTEXT")
+                .font(.system(size: 10, weight: .semibold))
+                .kerning(0.8)
+                .foregroundStyle(theme.faint)
+                .padding(EdgeInsets(top: 0, leading: 4, bottom: 4, trailing: 4))
+
+            ForEach(Array(cases.enumerated()), id: \.offset) { _, benchCase in
+                prefillRow(benchCase, maxTTFT: maxTTFT)
+            }
+        }
+        .padding(EdgeInsets(top: 0, leading: 10, bottom: 8, trailing: 10))
+    }
+
+    private func prefillRow(_ benchCase: BenchmarkPrefillCase, maxTTFT: Double) -> some View {
+        let fraction = max(0, min(1, (benchCase.ttftMS ?? 0) / maxTTFT))
+
+        return HStack(spacing: 10) {
+            Text(benchCase.label)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(theme.sub)
+                .frame(width: 30, alignment: .leading)
+
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(theme.cellBg)
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(accent)
+                        .frame(width: proxy.size.width * CGFloat(fraction))
+                }
+            }
+            .frame(height: 6)
+            .frame(maxWidth: .infinity)
+
+            Text("\(BenchmarkMetricFormatting.milliseconds(benchCase.ttftMS)) ms")
+                .font(.system(size: 11, design: .monospaced).monospacedDigit())
+                .frame(width: 62, alignment: .trailing)
+
+            Text("\(BenchmarkMetricFormatting.tokensPerSecond(benchCase.decodeTokensPerSec)) t/s")
+                .font(.system(size: 10, design: .monospaced).monospacedDigit())
+                .foregroundStyle(theme.sub)
+                .frame(width: 52, alignment: .trailing)
+        }
+        .padding(EdgeInsets(top: 6, leading: 4, bottom: 6, trailing: 4))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            "\(benchCase.label) context: \(BenchmarkMetricFormatting.milliseconds(benchCase.ttftMS)) milliseconds to first token"
+        )
     }
 
     // MARK: - Ranked rows

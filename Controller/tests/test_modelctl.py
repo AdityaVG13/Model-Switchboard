@@ -2142,5 +2142,92 @@ class ModelCtlTests(unittest.TestCase):
         )
 
 
+class LatestBenchmarkReportTests(unittest.TestCase):
+    def test_prefill_cases_extracted_sorted_and_omitted_when_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bench_dir = Path(tmpdir)
+            (bench_dir / "latest.json").write_text(
+                json.dumps(
+                    {
+                        "generated_at": "2026-07-03T00:00:00Z",
+                        "suite": "context",
+                        "profiles": ["turbo", "plain"],
+                        "benchmarks": [
+                            {
+                                "profile": "turbo",
+                                "runtime": "vLLM MLX",
+                                "rss_mb": 15258,
+                                "averages": {
+                                    "ttft_ms": 953.0,
+                                    "decode_tokens_per_sec": 113.5,
+                                    "e2e_tokens_per_sec": 50.4,
+                                },
+                                "results": [
+                                    # Out of order on purpose: payload must sort by prompt size.
+                                    {
+                                        "benchmark": "prefill-8k",
+                                        "category": "prefill",
+                                        "prompt_est_tokens": 8192,
+                                        "ttft_ms": 1700.0,
+                                        "decode_tokens_per_sec": 103.3,
+                                    },
+                                    {
+                                        "benchmark": "prefill-1k",
+                                        "category": "prefill",
+                                        "prompt_est_tokens": 1024,
+                                        "ttft_ms": 308.0,
+                                        "decode_tokens_per_sec": 117.4,
+                                    },
+                                    # Failed case (no TTFT) must be dropped.
+                                    {
+                                        "benchmark": "prefill-4k",
+                                        "category": "prefill",
+                                        "prompt_est_tokens": 4096,
+                                        "ttft_ms": None,
+                                        "decode_tokens_per_sec": None,
+                                    },
+                                    # Non-prefill categories never leak into prefill cases.
+                                    {
+                                        "benchmark": "sustained-decode",
+                                        "category": "decode",
+                                        "prompt_est_tokens": 60,
+                                        "ttft_ms": 100.0,
+                                        "decode_tokens_per_sec": 90.0,
+                                    },
+                                ],
+                            },
+                            {
+                                "profile": "plain",
+                                "runtime": "llama.cpp",
+                                "rss_mb": None,
+                                "averages": {
+                                    "ttft_ms": 1.0,
+                                    "decode_tokens_per_sec": 2.0,
+                                    "e2e_tokens_per_sec": 3.0,
+                                },
+                                "results": [],
+                            },
+                        ],
+                    }
+                )
+            )
+
+            with mock.patch.object(MODULE, "BENCH_RESULTS_DIR", bench_dir):
+                report = MODULE.latest_benchmark_report()
+
+            assert report is not None
+            turbo, plain = report["rows"]
+
+            cases = turbo["prefill_cases"]
+            self.assertEqual([case["label"] for case in cases], ["1k", "8k"])
+            self.assertEqual(cases[0]["prompt_est_tokens"], 1024)
+            self.assertEqual(cases[0]["ttft_ms"], 308.0)
+            self.assertEqual(cases[0]["decode_tokens_per_sec"], 117.4)
+            self.assertEqual(cases[1]["ttft_ms"], 1700.0)
+
+            # Rows without prefill results omit the key entirely (backward-compatible payload).
+            self.assertNotIn("prefill_cases", plain)
+
+
 if __name__ == "__main__":
     unittest.main()

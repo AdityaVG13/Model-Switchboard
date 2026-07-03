@@ -36,13 +36,26 @@ class ModelProfileStatusPayload(ModelProfileStatusPayloadBase, total=False):
     launch_mode: str
 
 
-class BenchmarkLatestRowPayload(TypedDict):
+class BenchmarkPrefillCasePayload(TypedDict):
+    """One prefill-scaling measurement (e.g. the 1k/4k/8k cases of the context suite)."""
+
+    label: str
+    prompt_est_tokens: int | None
+    ttft_ms: float | None
+    decode_tokens_per_sec: float | None
+
+
+class BenchmarkLatestRowPayloadBase(TypedDict):
     profile: str | None
     runtime: str | None
     ttft_ms: float | None
     decode_tokens_per_sec: float | None
     e2e_tokens_per_sec: float | None
     rss_mb: float | int | None
+
+
+class BenchmarkLatestRowPayload(BenchmarkLatestRowPayloadBase, total=False):
+    prefill_cases: list[BenchmarkPrefillCasePayload]
 
 
 class BenchmarkLatestReportPayload(TypedDict):
