@@ -7,6 +7,7 @@ import MenuBarExtraAccess
 struct ModelSwitchboardApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @AppStorage("controllerBaseURL") private var controllerBaseURL = "http://127.0.0.1:8877"
+    @AppStorage(DashboardAppearanceKeys.menuBarShowsReadyCount) private var menuBarShowsReadyCount = true
     @State private var store = SwitchboardStore(controllerBaseURL: "http://127.0.0.1:8877", features: AppFeatures.current)
     @StateObject private var launchAtLoginManager = LaunchAtLoginManager.shared
     @State private var isMenuPresented = false
@@ -38,21 +39,30 @@ struct ModelSwitchboardApp: App {
                     Task { await store.refresh() }
                 }
         } label: {
-            LeverSwitchIcon(
-                hasReadyModels: store.displayedReadyProfiles > 0,
-                hasRunningModels: store.displayedRunningProfiles > 0,
-                size: 18
-            )
+            HStack(spacing: 3) {
+                LeverSwitchIcon(
+                    hasReadyModels: store.displayedReadyProfiles > 0,
+                    hasRunningModels: store.displayedRunningProfiles > 0,
+                    size: 18
+                )
+                if menuBarShowsReadyCount {
+                    Text("\(store.displayedReadyProfiles)/\(store.summary.totalProfiles)")
+                        .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                }
+            }
             .task {
                 statusItem?.button?.toolTip = store.menuBarHelp
             }
             .onChange(of: store.menuBarHelp) { _, newValue in
                 statusItem?.button?.toolTip = newValue
             }
+            .onChange(of: menuBarShowsReadyCount) { _, newValue in
+                statusItem?.length = newValue ? NSStatusItem.variableLength : NSStatusItem.squareLength
+            }
         }
         .menuBarExtraAccess(isPresented: $isMenuPresented) { item in
             statusItem = item
-            item.length = NSStatusItem.squareLength
+            item.length = menuBarShowsReadyCount ? NSStatusItem.variableLength : NSStatusItem.squareLength
             item.button?.toolTip = store.menuBarHelp
             item.button?.title = ""
             item.button?.imagePosition = .imageOnly

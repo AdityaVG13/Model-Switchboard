@@ -5,8 +5,12 @@ extension MenuBarContentView {
     var mainPanelCard: some View {
         mainPanel
             .frame(width: mainPanelWidth, height: panelHeight)
-            .background(.thickMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .background(theme.panelBg)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(theme.panelBorder, lineWidth: 1)
+            }
             .overlay {
                 HStack(spacing: 0) {
                     resizeHandle(.leading)
@@ -17,24 +21,35 @@ extension MenuBarContentView {
     }
 
     var mainPanel: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 0) {
             header
-            globalActions
+            panelDivider
             if let error = store.lastError {
-                Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.red)
+                errorBanner(error)
             }
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    ForEach(store.sortedStatuses) { profile in
-                        profileCard(profile)
-                    }
+                VStack(alignment: .leading, spacing: 0) {
+                    heroSection
+                    modelListSection
                 }
             }
+            .frame(maxHeight: .infinity)
+            panelDivider
             footer
         }
-        .padding(16)
+    }
+
+    var panelDivider: some View {
+        theme.line.frame(height: 1)
+    }
+
+    func errorBanner(_ error: String) -> some View {
+        Label(error, systemImage: "exclamationmark.triangle.fill")
+            .font(.caption)
+            .foregroundStyle(DashboardTheme.stopRed)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
     }
 
     func resizeHandle(_ edge: DashboardResizeEdge) -> some View {
