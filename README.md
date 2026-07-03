@@ -12,7 +12,7 @@
 
 <p>
   <a href="https://github.com/AdityaVG13/Model-Switchboard/releases/latest"><img alt="Download DMG" src="https://img.shields.io/badge/Download-DMG-007AFF?style=for-the-badge&logo=apple&logoColor=white"></a>
-  <a href="https://github.com/AdityaVG13/Model-Switchboard/stargazers"><img alt="Star on GitHub" src="https://img.shields.io/badge/stars-4-181717?style=for-the-badge&logo=github&logoColor=white"></a>
+  <a href="https://github.com/AdityaVG13/Model-Switchboard/stargazers"><img alt="Star on GitHub" src="https://img.shields.io/github/stars/AdityaVG13/Model-Switchboard?style=for-the-badge&logo=github&label=Stars&color=181717&cacheSeconds=300"></a>
   <a href="SETUP.md"><img alt="Docs" src="https://img.shields.io/badge/Docs-SETUP.md-1F6FEB?style=for-the-badge&logo=readthedocs&logoColor=white"></a>
 </p>
 
