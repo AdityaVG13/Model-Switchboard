@@ -2,7 +2,7 @@ import Testing
 import ModelSwitchboardTestSupport
 @testable import ModelSwitchboardCore
 
-@Test func profileRuntimeCountsScanStatusesOnce() {
+@Test func profileRuntimeCountsCountRunningAndReadyProfiles() {
     let counts = ProfileRuntimeCounts(statuses: [
         ModelFixtures.profileStatus(profile: "a", running: true, ready: true),
         ModelFixtures.profileStatus(profile: "b", running: true, ready: false),
