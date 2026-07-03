@@ -9,252 +9,348 @@ struct SettingsView: View {
     let profileDiagnostics: [ProfileDiagnostic]
     let isRunningControllerDoctor: Bool
     @ObservedObject var launchAtLoginManager: LaunchAtLoginManager
+    let theme: DashboardTheme
+    let accent: Color
+    let appVersion: String
     let openProfilesDirectory: () -> Void
     let openControllerRoot: () -> Void
     let runControllerDoctor: () -> Void
     let reconnect: () -> Void
+
+    @AppStorage(DashboardAppearanceKeys.theme)
+    private var themePreferenceRaw: String = DashboardThemePreference.system.rawValue
+
+    @AppStorage(DashboardAppearanceKeys.accent)
+    private var accentRaw: String = DashboardAccent.orange.rawValue
+
+    @AppStorage(DashboardAppearanceKeys.sidePanel)
+    private var sidePreferenceRaw: String = DashboardSidePreference.right.rawValue
+
+    @AppStorage(DashboardAppearanceKeys.menuBarShowsReadyCount)
+    private var menuBarShowsReadyCount = true
+
     private let defaultControllerBaseURL = "http://127.0.0.1:8877"
-    private let scrollContentTrailingPadding: CGFloat = 22
 
     var body: some View {
-        ScrollView(.vertical, showsIndicators: true) {
-            VStack(alignment: .leading, spacing: 14) {
-                Text("These preferences only control app connectivity. Model paths and launch commands stay in controller profile files.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Controller Base URL")
-                        .font(.caption.bold())
-                    TextField(defaultControllerBaseURL, text: $controllerBaseURL)
-                        .textFieldStyle(.roundedBorder)
-                        .textSelection(.enabled)
-                    Text("Use the loopback controller unless you intentionally moved the control plane to another host or port.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 0) {
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(alignment: .leading, spacing: 12) {
+                    appearanceGroup
+                    connectionGroup
+                    behaviorGroup
+                    controllerGroup
                 }
-
-                Divider()
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Model Profile Source Of Truth")
-                        .font(.caption.bold())
-
-                    Text("Model Switchboard does not store model locations. It reads profile metadata from the running controller so the app stays user-agnostic.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    if let profilesDirectory, !profilesDirectory.isEmpty {
-                        pathBlock(title: "Profiles Folder", value: profilesDirectory)
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            Button("Open Profiles Folder", action: openProfilesDirectory)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            if let controllerRoot, !controllerRoot.isEmpty {
-                                Button("Open Controller Root", action: openControllerRoot)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                        }
-                    } else {
-                        Text("No profile folder reported yet. Start the controller and reconnect to load its configured `model-profiles` path.")
-                            .font(.footnote)
-                            .foregroundStyle(.orange)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-
-                Divider()
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Controller Doctor")
-                        .font(.caption.bold())
-
-                    Text("Run the controller doctor to re-check controller reachability, launch-agent status, and every profile manifest against the live adapter rules.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    if let doctorReport {
-                        doctorSummaryCard(doctorReport)
-                    } else {
-                        Text("No doctor report loaded yet. Run it once after the controller comes up.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    Button(action: runControllerDoctor) {
-                        if isRunningControllerDoctor {
-                            HStack(spacing: 6) {
-                                ProgressView()
-                                    .controlSize(.small)
-                                Text("Running Controller Doctor")
-                            }
-                        } else {
-                            Label("Run Controller Doctor", systemImage: "stethoscope")
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(isRunningControllerDoctor)
-                }
-
-                Divider()
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Profile Validation")
-                        .font(.caption.bold())
-
-                    Text("These checks come from the controller doctor report. Fix these profile errors before expecting `Activate` or health checks to behave correctly.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    if profileDiagnostics.isEmpty {
-                        Text("No profile errors or warnings on the latest controller refresh.")
-                            .font(.footnote)
-                            .foregroundStyle(.green)
-                            .fixedSize(horizontal: false, vertical: true)
-                    } else {
-                        ForEach(profileDiagnostics) { diagnostic in
-                            profileDiagnosticCard(diagnostic)
-                        }
-                    }
-                }
-
-                Divider()
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Launch At Login")
-                        .font(.caption.bold())
-
-                    if launchAtLoginManager.isAvailable {
-                        Toggle(
-                            "Open Model Switchboard when you log in",
-                            isOn: Binding(
-                                get: {
-                                    launchAtLoginManager.isEnabled || launchAtLoginManager.requiresApproval
-                                },
-                                set: { launchAtLoginManager.setEnabled($0) }
-                            )
-                        )
-
-                        Text("The app is idle when closed in the menu bar. When the menu is open, it refreshes every 10 minutes while idle, every 30 seconds while a model is live, and faster only during active actions or benchmarks.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-
-                        if launchAtLoginManager.requiresApproval {
-                            Text("macOS needs you to approve the login item in System Settings > General > Login Items.")
-                                .font(.footnote)
-                                .foregroundStyle(.orange)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    } else {
-                        Text("Launch at login requires a newer macOS Service Management API.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if let error = launchAtLoginManager.lastError {
-                        Text(error)
-                            .font(.footnote)
-                            .foregroundStyle(.red)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-
-                HStack {
-                    Button("Use Default") {
-                        controllerBaseURL = defaultControllerBaseURL
-                    }
-                    Button("Reconnect") {
-                        reconnect()
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
+                .padding(EdgeInsets(top: 10, leading: 10, bottom: 8, trailing: 10))
             }
-            .padding(.trailing, scrollContentTrailingPadding)
-            .padding(.bottom, 8)
+            .frame(maxHeight: .infinity)
+
+            theme.line.frame(height: 1)
+            HStack {
+                Text("Model Switchboard v\(appVersion)")
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.faint)
+                Spacer()
+            }
+            .padding(EdgeInsets(top: 10, leading: 14, bottom: 10, trailing: 14))
         }
-        .scrollIndicators(.visible)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear {
             launchAtLoginManager.refresh()
         }
     }
 
-    private func pathBlock(title: String, value: String) -> some View {
+    // MARK: - Appearance
+
+    private var appearanceGroup: some View {
+        settingsGroup("APPEARANCE") {
+            settingsRow("Theme") {
+                segmented(
+                    options: DashboardThemePreference.allCases.map(\.rawValue),
+                    labels: DashboardThemePreference.allCases.map(\.label),
+                    selection: $themePreferenceRaw
+                )
+            }
+            groupDivider
+            settingsRow("Accent color") {
+                HStack(spacing: 6) {
+                    ForEach(DashboardAccent.allCases, id: \.rawValue) { choice in
+                        Circle()
+                            .fill(choice.color)
+                            .frame(width: 20, height: 20)
+                            .overlay {
+                                Circle()
+                                    .stroke(choice.rawValue == accentRaw ? Color.primary : .clear, lineWidth: 2)
+                            }
+                            .contentShape(Circle())
+                            .onTapGesture { accentRaw = choice.rawValue }
+                            .accessibilityLabel("\(choice.rawValue) accent")
+                            .accessibilityAddTraits(choice.rawValue == accentRaw ? [.isButton, .isSelected] : .isButton)
+                    }
+                }
+            }
+            groupDivider
+            settingsRow("Side panel opens") {
+                segmented(
+                    options: DashboardSidePreference.allCases.map(\.rawValue),
+                    labels: DashboardSidePreference.allCases.map(\.label),
+                    selection: $sidePreferenceRaw
+                )
+            }
+            groupDivider
+            settingsRow("Menu bar shows") {
+                segmented(
+                    options: ["icon", "count"],
+                    labels: ["Icon", "Ready count"],
+                    selection: Binding(
+                        get: { menuBarShowsReadyCount ? "count" : "icon" },
+                        set: { menuBarShowsReadyCount = $0 == "count" }
+                    )
+                )
+            }
+        }
+    }
+
+    // MARK: - Connection
+
+    private var connectionGroup: some View {
+        settingsGroup("CONNECTION") {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Controller base URL")
+                    .font(.system(size: 12.5))
+                TextField(defaultControllerBaseURL, text: $controllerBaseURL)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 11.5, design: .monospaced))
+                HStack(spacing: 10) {
+                    settingsLinkButton("Use Default") {
+                        controllerBaseURL = defaultControllerBaseURL
+                    }
+                    settingsLinkButton("Reconnect", emphasized: true, action: reconnect)
+                }
+                Text("Use the loopback controller unless you intentionally moved the control plane to another host or port. Model paths and launch commands stay in controller profile files.")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(theme.sub)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(EdgeInsets(top: 9, leading: 12, bottom: 9, trailing: 12))
+        }
+    }
+
+    // MARK: - Behavior
+
+    private var behaviorGroup: some View {
+        settingsGroup("BEHAVIOR") {
+            VStack(alignment: .leading, spacing: 6) {
+                toggleRow(
+                    "Launch at login",
+                    subtitle: "Start Model Switchboard with macOS",
+                    isOn: Binding(
+                        get: { launchAtLoginManager.isEnabled || launchAtLoginManager.requiresApproval },
+                        set: { launchAtLoginManager.setEnabled($0) }
+                    ),
+                    disabled: !launchAtLoginManager.isAvailable
+                )
+
+                if !launchAtLoginManager.isAvailable {
+                    settingsFootnote("Launch at login requires a newer macOS Service Management API.", color: theme.sub)
+                }
+                if launchAtLoginManager.requiresApproval {
+                    settingsFootnote("macOS needs you to approve the login item in System Settings > General > Login Items.", color: DashboardTheme.pendingOrange)
+                }
+                if let error = launchAtLoginManager.lastError {
+                    settingsFootnote(error, color: DashboardTheme.stopRed)
+                }
+                settingsFootnote("The app is idle when closed in the menu bar. Open, it refreshes every 10 minutes while idle and every 30 seconds while a model is live.", color: theme.sub)
+            }
+            .padding(EdgeInsets(top: 9, leading: 12, bottom: 9, trailing: 12))
+        }
+    }
+
+    // MARK: - Controller
+
+    private var controllerGroup: some View {
+        settingsGroup("CONTROLLER") {
+            VStack(alignment: .leading, spacing: 8) {
+                if let profilesDirectory, !profilesDirectory.isEmpty {
+                    Text(profilesDirectory)
+                        .font(.system(size: 10.5, design: .monospaced))
+                        .foregroundStyle(theme.sub)
+                        .lineLimit(2)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                    HStack(spacing: 10) {
+                        settingsLinkButton("Open Profiles Folder", action: openProfilesDirectory)
+                        if let controllerRoot, !controllerRoot.isEmpty {
+                            settingsLinkButton("Open Controller Root", action: openControllerRoot)
+                        }
+                    }
+                } else {
+                    settingsFootnote("No profile folder reported yet. Start the controller and reconnect to load its configured model-profiles path.", color: DashboardTheme.pendingOrange)
+                }
+
+                groupDivider
+
+                if let doctorReport {
+                    doctorSummary(doctorReport)
+                }
+
+                settingsLinkButton(
+                    isRunningControllerDoctor ? "Running Controller Doctor\u{2026}" : "Run Controller Doctor",
+                    emphasized: true,
+                    disabled: isRunningControllerDoctor,
+                    action: runControllerDoctor
+                )
+
+                if profileDiagnostics.isEmpty {
+                    settingsFootnote("No profile errors or warnings on the latest controller refresh.", color: DashboardTheme.runningGreen)
+                } else {
+                    ForEach(profileDiagnostics) { diagnostic in
+                        diagnosticCard(diagnostic)
+                    }
+                }
+            }
+            .padding(EdgeInsets(top: 9, leading: 12, bottom: 9, trailing: 12))
+        }
+    }
+
+    private func doctorSummary(_ report: DoctorReport) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.secondary)
-
-            Text(value)
-                .font(.caption.monospaced())
-                .textSelection(.enabled)
-                .padding(8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.quaternary.opacity(0.22), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        }
-    }
-
-    private func profileDiagnosticCard(_ diagnostic: ProfileDiagnostic) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(diagnostic.displayName)
-                .font(.footnote.weight(.semibold))
-
-            if !diagnostic.errors.isEmpty {
-                ForEach(diagnostic.errors, id: \.self) { error in
-                    Label(error, systemImage: "xmark.octagon.fill")
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-
-            if !diagnostic.warnings.isEmpty {
-                ForEach(diagnostic.warnings, id: \.self) { warning in
-                    Label(warning, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-
-            Text(diagnostic.baseURL)
-                .font(.caption.monospaced())
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.22), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
-
-    private func doctorSummaryCard(_ report: DoctorReport) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
             Label(
                 report.controller.reachable ? "Controller reachable" : "Controller unreachable",
                 systemImage: report.controller.reachable ? "checkmark.circle.fill" : "xmark.circle.fill"
             )
-            .font(.caption)
-            .foregroundStyle(report.controller.reachable ? .green : .red)
+            .font(.system(size: 11))
+            .foregroundStyle(report.controller.reachable ? DashboardTheme.runningGreen : DashboardTheme.stopRed)
 
             Label(
                 report.launchAgent.running ? "Launch agent running" : "Launch agent not running",
                 systemImage: report.launchAgent.running ? "bolt.circle.fill" : "bolt.slash.circle.fill"
             )
-            .font(.caption)
-            .foregroundStyle(report.launchAgent.running ? .green : .orange)
+            .font(.system(size: 11))
+            .foregroundStyle(report.launchAgent.running ? DashboardTheme.runningGreen : DashboardTheme.pendingOrange)
 
             Text(report.controller.url)
-                .font(.caption.monospaced())
-                .foregroundStyle(.secondary)
+                .font(.system(size: 10.5, design: .monospaced))
+                .foregroundStyle(theme.sub)
                 .textSelection(.enabled)
         }
-        .padding(10)
+    }
+
+    private func diagnosticCard(_ diagnostic: ProfileDiagnostic) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(diagnostic.displayName)
+                .font(.system(size: 11.5, weight: .semibold))
+            ForEach(diagnostic.errors, id: \.self) { error in
+                Label(error, systemImage: "xmark.octagon.fill")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(DashboardTheme.stopRed)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            ForEach(diagnostic.warnings, id: \.self) { warning in
+                Label(warning, systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(DashboardTheme.pendingOrange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text(diagnostic.baseURL)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(theme.sub)
+                .textSelection(.enabled)
+        }
+        .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.22), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(theme.hoverBg, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    // MARK: - Building blocks
+
+    private func settingsGroup(_ label: String, @ViewBuilder content: () -> some View) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            DashboardSectionLabel(text: label, theme: theme)
+                .padding(.horizontal, 4)
+            VStack(alignment: .leading, spacing: 0) {
+                content()
+            }
+            .background(theme.cellBg, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+    }
+
+    private func settingsRow(_ label: String, @ViewBuilder trailing: () -> some View) -> some View {
+        HStack {
+            Text(label)
+                .font(.system(size: 12.5))
+            Spacer()
+            trailing()
+        }
+        .padding(EdgeInsets(top: 9, leading: 12, bottom: 9, trailing: 12))
+    }
+
+    private var groupDivider: some View {
+        theme.line
+            .frame(height: 1)
+            .padding(.horizontal, 12)
+    }
+
+    private func segmented(options: [String], labels: [String], selection: Binding<String>) -> some View {
+        HStack(spacing: 2) {
+            ForEach(Array(zip(options, labels)), id: \.0) { option, label in
+                let isOn = selection.wrappedValue == option
+                Text(label)
+                    .font(.system(size: 11, weight: isOn ? .semibold : .regular))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 3)
+                    .background(
+                        isOn ? theme.tabOnBg : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    )
+                    .foregroundStyle(isOn ? theme.tabOnFg : theme.tabOffFg)
+                    .contentShape(Rectangle())
+                    .onTapGesture { selection.wrappedValue = option }
+                    .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
+            }
+        }
+        .padding(2)
+        .background(theme.btnBg, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+    }
+
+    private func toggleRow(_ label: String, subtitle: String, isOn: Binding<Bool>, disabled: Bool = false) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label)
+                    .font(.system(size: 12.5))
+                Text(subtitle)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(theme.sub)
+            }
+            Spacer()
+            Toggle("", isOn: isOn)
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .labelsHidden()
+                .tint(accent)
+                .disabled(disabled)
+                .accessibilityLabel(label)
+        }
+    }
+
+    private func settingsLinkButton(
+        _ title: String,
+        emphasized: Bool = false,
+        disabled: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 11.5, weight: emphasized ? .semibold : .regular))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(disabled ? theme.faint : (emphasized ? accent : theme.btnFg))
+        .disabled(disabled)
+    }
+
+    private func settingsFootnote(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(.system(size: 10.5))
+            .foregroundStyle(color)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }

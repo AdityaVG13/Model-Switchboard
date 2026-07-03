@@ -2,12 +2,13 @@ import Foundation
 import ModelSwitchboardCore
 
 extension SwitchboardStore {
+    @discardableResult
     func run(
         _ action: @escaping (ControllerClient) async throws -> ControllerActionResponse,
         verify: ((ControllerClient) async throws -> Void)? = nil,
         actionName: String? = nil,
         profile: String? = nil
-    ) async {
+    ) async -> Bool {
         do {
             let client = try self.client
             let response = try await action(client)
@@ -19,19 +20,21 @@ extension SwitchboardStore {
             if let integrations = response.integrations { self.integrations = integrations }
             if let profilesDirectory = response.profilesDirectory { self.profilesDirectory = profilesDirectory }
             if let controllerRoot = response.controllerRoot { self.controllerRoot = controllerRoot }
-            cacheCurrentState()
             try await verify?(client)
+            cacheCurrentState()
             lastError = nil
             lastUpdated = Date()
             await syncAuxiliaryStateAfterMutation()
+            return true
         } catch {
-            if isBenignCancellation(error) { return }
+            if isBenignCancellation(error) { return false }
             lastError = Self.userFacingErrorDescription(
                 for: error,
                 actionName: actionName,
                 status: profile.flatMap(statusForProfile),
                 diagnostic: profile.flatMap(diagnosticForProfile)
             )
+            return false
         }
     }
 
@@ -58,9 +61,11 @@ extension SwitchboardStore {
         guard !profiles.isEmpty else { return }
         let deadline = Date().addingTimeInterval(Constants.stopVerificationTimeoutSeconds)
         var survivingProfiles: [String] = []
+        var lastPayload: ControllerStatusPayload?
 
         while true {
             let payload = try await client.fetchStatus()
+            lastPayload = payload
             let surviving = payload.statuses.filter { profiles.contains($0.profile) && ($0.running || $0.ready) }
             if surviving.isEmpty {
                 apply(payload: payload)
@@ -72,6 +77,11 @@ extension SwitchboardStore {
                 break
             }
             try await Task.sleep(for: .seconds(Constants.stopVerificationPollSeconds))
+        }
+
+        if let lastPayload {
+            apply(payload: lastPayload)
+            cachePayload(lastPayload, context: "stop-verification-timeout")
         }
 
         throw ControllerClientError.serverError(

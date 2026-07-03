@@ -7,6 +7,11 @@ final class SystemMetricsMonitor: ObservableObject {
     @Published var cpuUsagePercent: Double?
     @Published var memoryUsagePercent: Double?
     @Published var gpuUsagePercent: Double?
+    @Published var cpuHistory: [Double] = []
+    @Published var memoryHistory: [Double] = []
+    @Published var gpuHistory: [Double] = []
+
+    static let historyLimit = 16
 
     private struct CPUSample {
         let totalTicks: UInt64
@@ -41,6 +46,17 @@ final class SystemMetricsMonitor: ObservableObject {
         cpuUsagePercent = sampleCPUUsage()
         memoryUsagePercent = sampleMemoryUsage()
         gpuUsagePercent = sampleGPUUsage()
+        appendHistory(cpuUsagePercent, to: &cpuHistory)
+        appendHistory(memoryUsagePercent, to: &memoryHistory)
+        appendHistory(gpuUsagePercent, to: &gpuHistory)
+    }
+
+    private func appendHistory(_ value: Double?, to history: inout [Double]) {
+        guard let value else { return }
+        history.append(value)
+        if history.count > Self.historyLimit {
+            history.removeFirst(history.count - Self.historyLimit)
+        }
     }
 
     private func sampleCPUUsage() -> Double? {

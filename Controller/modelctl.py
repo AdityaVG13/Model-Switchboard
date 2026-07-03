@@ -28,6 +28,7 @@ from typing import BinaryIO, TypedDict
 from contracts import (
     BenchmarkLatestReportPayload,
     BenchmarkLatestRowPayload,
+    BenchmarkPrefillCasePayload,
     BenchmarkStatusPayload,
     ControllerActionResponsePayload,
     ControllerHeartbeatPayload,
@@ -2128,6 +2129,32 @@ def run_active_profile_watchdog(interval: float = 30.0) -> None:
         time.sleep(interval)
 
 
+def prefill_cases_from_results(results: list[dict]) -> list[BenchmarkPrefillCasePayload]:
+    """Extract prefill-scaling cases (context suite: prefill-1k/4k/8k) from raw case results."""
+    cases: list[BenchmarkPrefillCasePayload] = []
+    for result in results:
+        if not isinstance(result, dict) or result.get("category") != "prefill":
+            continue
+        ttft_ms = result.get("ttft_ms")
+        if ttft_ms is None:
+            continue
+        prompt_tokens = result.get("prompt_est_tokens")
+        name = str(result.get("benchmark") or "")
+        label = name.removeprefix("prefill-")
+        if not label:
+            label = f"{round(prompt_tokens / 1024)}k" if prompt_tokens else "?"
+        cases.append(
+            {
+                "label": label,
+                "prompt_est_tokens": prompt_tokens if isinstance(prompt_tokens, int) else None,
+                "ttft_ms": ttft_ms,
+                "decode_tokens_per_sec": result.get("decode_tokens_per_sec"),
+            }
+        )
+    cases.sort(key=lambda case: (case["prompt_est_tokens"] is None, case["prompt_est_tokens"] or 0))
+    return cases
+
+
 def latest_benchmark_report() -> BenchmarkLatestReportPayload | None:
     latest_json = BENCH_RESULTS_DIR / "latest.json"
     latest_md = BENCH_RESULTS_DIR / "latest.md"
@@ -2140,16 +2167,18 @@ def latest_benchmark_report() -> BenchmarkLatestReportPayload | None:
     rows: list[BenchmarkLatestRowPayload] = []
     for item in payload.get("benchmarks", []):
         avg = item.get("averages", {})
-        rows.append(
-            {
-                "profile": item.get("profile"),
-                "runtime": item.get("runtime"),
-                "ttft_ms": avg.get("ttft_ms"),
-                "decode_tokens_per_sec": avg.get("decode_tokens_per_sec"),
-                "e2e_tokens_per_sec": avg.get("e2e_tokens_per_sec"),
-                "rss_mb": item.get("rss_mb"),
-            }
-        )
+        row: BenchmarkLatestRowPayload = {
+            "profile": item.get("profile"),
+            "runtime": item.get("runtime"),
+            "ttft_ms": avg.get("ttft_ms"),
+            "decode_tokens_per_sec": avg.get("decode_tokens_per_sec"),
+            "e2e_tokens_per_sec": avg.get("e2e_tokens_per_sec"),
+            "rss_mb": item.get("rss_mb"),
+        }
+        prefill_cases = prefill_cases_from_results(item.get("results", []))
+        if prefill_cases:
+            row["prefill_cases"] = prefill_cases
+        rows.append(row)
     return {
         "generated_at": payload.get("generated_at"),
         "suite": payload.get("suite"),

@@ -1,6 +1,11 @@
 import AppKit
 import SwiftUI
 
+enum InspectorPanelSide {
+    case leading
+    case trailing
+}
+
 @MainActor
 final class InspectorPanelWindow: NSPanel {
     override var canBecomeKey: Bool { true }
@@ -30,6 +35,7 @@ final class InspectorPanelController {
         width: CGFloat,
         height: CGFloat,
         gap: CGFloat,
+        side: InspectorPanelSide = .leading,
         content: AnyView
     ) {
         visibilityGeneration += 1
@@ -77,7 +83,13 @@ final class InspectorPanelController {
         }
 
         let frame = NSRect(
-            x: parent.frame.minX - gap - width,
+            x: Self.panelOriginX(
+                parentFrame: parent.frame,
+                screenVisibleFrame: parent.screen?.visibleFrame,
+                width: width,
+                gap: gap,
+                side: side
+            ),
             y: parent.frame.minY,
             width: width,
             height: height
@@ -93,6 +105,30 @@ final class InspectorPanelController {
             }
         } else {
             window.orderFront(nil)
+        }
+    }
+
+    /// Resolves the panel's x origin for the requested side, flipping to the
+    /// opposite side when the preferred placement would leave the visible screen.
+    nonisolated static func panelOriginX(
+        parentFrame: NSRect,
+        screenVisibleFrame: NSRect?,
+        width: CGFloat,
+        gap: CGFloat,
+        side: InspectorPanelSide
+    ) -> CGFloat {
+        let leadingX = parentFrame.minX - gap - width
+        let trailingX = parentFrame.maxX + gap
+
+        guard let screen = screenVisibleFrame else {
+            return side == .leading ? leadingX : trailingX
+        }
+
+        switch side {
+        case .leading:
+            return leadingX >= screen.minX ? leadingX : trailingX
+        case .trailing:
+            return trailingX + width <= screen.maxX ? trailingX : leadingX
         }
     }
 
