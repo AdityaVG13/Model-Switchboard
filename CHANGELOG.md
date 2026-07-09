@@ -7,6 +7,7 @@ All notable changes to this project are documented in this file.
 ### Added
 - Recognized `llama-swap` as an external OpenAI-compatible proxy runtime, with an example profile and docs for request-driven model swapping alongside menu-bar Activate.
 - Optional controller bearer-token field in Settings (and widget AppStorage) so token-protected / `--unsafe-bind` controllers work from the menu bar.
+- Split the controller implementation into the `Controller/msctl/` package (`paths`, `security`, `runtimes`, `profiles`, `mutations`, `benchmarks`, `doctor`, `agent_contracts`, `web`, `cli`) while keeping `modelctl.py` as the stable CLI/import facade.
 
 ### Changed
 - Extracted the controller web dashboard HTML into `Controller/web/dashboard.html` (first step toward decomposing the `modelctl.py` god file).

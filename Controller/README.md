@@ -12,7 +12,9 @@ This directory contains the local control plane used by the app.
 
 ## Key Files
 
-- `modelctl.py` -- HTTP control plane and CLI entrypoint
+- `modelctl.py` -- stable CLI/HTTP entrypoint (thin facade over `msctl/`)
+- `msctl/` -- controller implementation package (profiles, doctor, web, CLI, runtimes)
+- `web/dashboard.html` -- local dashboard UI served by `serve-web`
 - `ModelSwitchboardController.swift` -- lightweight launcher used by `launchd`
 - `install-model-switchboard-controller.sh` -- installs the background service
 - `start-model-dashboard.sh` -- launches the local dashboard in a browser
