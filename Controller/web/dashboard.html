@@ -1,0 +1,582 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Model Switchboard Dashboard</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0f1218;
+      --panel: #171c24;
+      --panel-soft: #1f2530;
+      --line: rgba(255, 255, 255, 0.08);
+      --line-strong: rgba(255, 255, 255, 0.14);
+      --text: #f3f5f7;
+      --muted: #a7b0bc;
+      --good: #69d18f;
+      --warn: #f0c06b;
+      --bad: #ef7d7d;
+      --accent: #8bb8ff;
+      --accent-strong: #5e94f0;
+      --shadow: 0 18px 48px rgba(0, 0, 0, 0.26);
+      --radius: 18px;
+      --radius-sm: 12px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: linear-gradient(180deg, #0d1015 0%, #11151d 100%);
+      color: var(--text);
+      font-family: "SF Pro Text", "Inter", system-ui, sans-serif;
+    }
+
+    button,
+    code {
+      font: inherit;
+    }
+
+    code {
+      font-family: "SF Mono", "JetBrains Mono", monospace;
+    }
+
+    .shell {
+      width: min(1040px, calc(100vw - 32px));
+      margin: 20px auto 28px;
+      display: grid;
+      gap: 16px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .header {
+      display: flex;
+      align-items: start;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 20px 22px;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--accent);
+    }
+
+    h1 {
+      margin: 0 0 6px;
+      font-size: 30px;
+      line-height: 1.05;
+      letter-spacing: -0.03em;
+    }
+
+    .header p,
+    .muted {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.5;
+      font-size: 14px;
+    }
+
+    .heartbeat {
+      color: var(--muted);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .toolbar,
+    .section,
+    .footer {
+      padding: 16px 18px;
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+    }
+
+    .stat {
+      padding: 14px 16px;
+      background: var(--panel-soft);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+    }
+
+    .stat .label {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 8px;
+    }
+
+    .stat .value {
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+    }
+
+    .stat .subvalue {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .section-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: start;
+      margin-bottom: 12px;
+    }
+
+    .section-header h2 {
+      margin: 0;
+      font-size: 18px;
+    }
+
+    .integration-actions,
+    .card-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .cards {
+      display: grid;
+      gap: 12px;
+    }
+
+    .card {
+      padding: 16px;
+      background: var(--panel-soft);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      display: grid;
+      gap: 12px;
+    }
+
+    .card-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: start;
+    }
+
+    .card-title {
+      margin: 0 0 4px;
+      font-size: 21px;
+      line-height: 1.15;
+    }
+
+    .card-meta,
+    .card-endpoint,
+    .card-inspect {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 5px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .badge.running {
+      background: rgba(105, 209, 143, 0.16);
+      color: var(--good);
+    }
+
+    .badge.booting {
+      background: rgba(240, 192, 107, 0.16);
+      color: var(--warn);
+    }
+
+    .badge.offline {
+      background: rgba(239, 125, 125, 0.16);
+      color: var(--bad);
+    }
+
+    button {
+      appearance: none;
+      border: 1px solid var(--line-strong);
+      background: #262d39;
+      color: var(--text);
+      border-radius: 10px;
+      padding: 9px 13px;
+      cursor: pointer;
+      transition: background 0.14s ease, border-color 0.14s ease;
+    }
+
+    button:hover {
+      background: #2d3645;
+      border-color: rgba(255, 255, 255, 0.22);
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+
+    button.primary {
+      background: rgba(94, 148, 240, 0.18);
+      border-color: rgba(94, 148, 240, 0.46);
+    }
+
+    button.warn {
+      background: rgba(239, 125, 125, 0.12);
+      border-color: rgba(239, 125, 125, 0.36);
+    }
+
+    .footer {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 18px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    @media (max-width: 720px) {
+      .shell {
+        width: calc(100vw - 18px);
+        margin: 10px auto 18px;
+      }
+
+      .header,
+      .toolbar,
+      .section,
+      .footer {
+        padding: 14px;
+      }
+
+      .card-top,
+      .section-header,
+      .header {
+        flex-direction: column;
+      }
+
+      h1 {
+        font-size: 24px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="panel header">
+      <div>
+        <div class="eyebrow">Model Switchboard Dashboard</div>
+        <h1>Local model control plane</h1>
+        <p>Compact browser view for the same actions exposed in the menu bar. No oversized hero, no selection deck, no extra drag.</p>
+      </div>
+      <div class="heartbeat" id="heartbeat">Refreshing controller state...</div>
+    </section>
+
+    <section class="panel toolbar">
+      <button class="primary" id="refresh-button">Refresh</button>
+      <button id="bench-all-button">Run Benchmark</button>
+      <button class="warn" id="stop-all-button">Stop All</button>
+    </section>
+
+    <section class="summary" id="summary"></section>
+
+    <section class="panel section" id="integrations-section" hidden>
+      <div class="section-header">
+        <h2>Optional integrations</h2>
+        <div class="muted" id="integration-summary"></div>
+      </div>
+      <div class="integration-actions" id="integration-actions"></div>
+    </section>
+
+    <section class="panel section">
+      <div class="section-header">
+        <h2>Profiles</h2>
+        <div class="muted" id="profile-summary"></div>
+      </div>
+      <div class="cards" id="cards"></div>
+    </section>
+
+    <section class="panel footer" id="footer"></section>
+  </main>
+
+  <script>
+    const REFRESH_INTERVAL_MS = 5000;
+    const heartbeatEl = document.getElementById('heartbeat');
+    const summaryEl = document.getElementById('summary');
+    const integrationsSectionEl = document.getElementById('integrations-section');
+    const integrationSummaryEl = document.getElementById('integration-summary');
+    const integrationActionsEl = document.getElementById('integration-actions');
+    const profileSummaryEl = document.getElementById('profile-summary');
+    const cardsEl = document.getElementById('cards');
+    const footerEl = document.getElementById('footer');
+    const refreshButton = document.getElementById('refresh-button');
+    const benchAllButton = document.getElementById('bench-all-button');
+    const stopAllButton = document.getElementById('stop-all-button');
+
+    function escapeHTML(value) {
+      return String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+
+    function statusTone(item) {
+      if (item.ready) return 'running';
+      if (item.running) return 'booting';
+      return 'offline';
+    }
+
+    function statusLabel(item) {
+      if (item.ready) return 'Running';
+      if (item.running) return 'Starting';
+      return 'Not Running';
+    }
+
+    function formatMemory(value) {
+      if (value === null || value === undefined || value === '') return 'n/a';
+      return `${Number(value).toFixed(1)} MB`;
+    }
+
+    function metric(label, value, subvalue = '') {
+      return `
+        <article class="panel stat">
+          <div class="label">${escapeHTML(label)}</div>
+          <div class="value">${escapeHTML(value)}</div>
+          <div class="subvalue">${escapeHTML(subvalue)}</div>
+        </article>
+      `;
+    }
+
+    function suiteLabel(value) {
+      if (!value) return 'Idle';
+      const normalized = String(value).trim().toLowerCase();
+      if (normalized === 'quick') return 'Default';
+      return normalized
+        .replaceAll('_', ' ')
+        .replaceAll('-', ' ')
+        .replace(/\b\w/g, (char) => char.toUpperCase());
+    }
+
+    // Prefer #token=... (not sent in Referer/access logs). Legacy ?token=
+    // still bootstraps auth, then is stripped from the address bar.
+    const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+    const queryParams = new URLSearchParams(window.location.search);
+    const bootstrapToken = hashParams.get('token') || queryParams.get('token');
+    if (bootstrapToken) {
+      sessionStorage.setItem('controllerToken', bootstrapToken);
+      queryParams.delete('token');
+      const cleanSearch = queryParams.toString();
+      history.replaceState(
+        null,
+        '',
+        window.location.pathname + (cleanSearch ? `?${cleanSearch}` : '')
+      );
+    }
+    const controllerToken = bootstrapToken || sessionStorage.getItem('controllerToken') || '';
+
+    async function api(path, options = {}) {
+      const { headers: optionHeaders = {}, ...fetchOptions } = options;
+      const headers = { 'Content-Type': 'application/json', ...optionHeaders };
+      if (controllerToken) headers.Authorization = `Bearer ${controllerToken}`;
+      const response = await fetch(path, {
+        ...fetchOptions,
+        headers,
+      });
+      if (!response.ok) {
+        throw new Error((await response.text()) || `HTTP ${response.status}`);
+      }
+      return response.json();
+    }
+
+    async function postAction(path, payload = {}) {
+      try {
+        heartbeatEl.textContent = 'Executing action...';
+        await api(path, { method: 'POST', body: JSON.stringify(payload) });
+        await refreshStatus();
+      } catch (error) {
+        heartbeatEl.textContent = `Action failed: ${error.message}`;
+        alert(error.message);
+      }
+    }
+
+    function renderSummary(data) {
+      const statuses = data.statuses || [];
+      const running = statuses.filter(item => item.running).length;
+      const ready = statuses.filter(item => item.ready).length;
+      const benchmark = data.benchmark || {};
+      const latest = benchmark.latest || {};
+
+      summaryEl.innerHTML = [
+        metric('Ready', `${ready}/${statuses.length}`, `${running} process${running === 1 ? '' : 'es'} live`),
+        metric('Benchmark', benchmark.running ? 'Running' : suiteLabel(latest.suite), latest.generated_at ? new Date(latest.generated_at).toLocaleTimeString() : 'No recent benchmark'),
+        metric('Profiles folder', statuses.length ? 'Live' : 'Waiting', data.profiles_dir || 'not reported'),
+      ].join('');
+
+      profileSummaryEl.textContent = `${statuses.length} profiles • auto-refresh ${REFRESH_INTERVAL_MS / 1000}s`;
+    }
+
+    function renderIntegrations(integrations) {
+      const syncable = (integrations || []).filter(item => (item.capabilities || []).includes('sync'));
+      integrationsSectionEl.hidden = syncable.length === 0;
+      if (syncable.length === 0) {
+        integrationActionsEl.innerHTML = '';
+        integrationSummaryEl.textContent = '';
+        return;
+      }
+
+      integrationActionsEl.innerHTML = syncable.map(item => `
+        <button data-integration="${escapeHTML(item.id)}" data-integration-action="sync">${escapeHTML(item.sync_label || ('Sync ' + item.display_name))}</button>
+      `).join('');
+      integrationSummaryEl.textContent = syncable.map(item => item.description || item.display_name).join(' ');
+    }
+
+    function renderCards(data) {
+      const normalizeHost = (value) => {
+        const normalized = (value || '').trim().toLowerCase();
+        if (normalized === '127.0.0.1' || normalized === 'localhost' || normalized === '::1') return 'localhost';
+        return normalized;
+      };
+      const hostRank = (value) => normalizeHost(value) === 'localhost' ? 0 : 1;
+      const portRank = (value) => {
+        const parsed = Number.parseInt(String(value || '').trim(), 10);
+        return Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER;
+      };
+      const statuses = [...(data.statuses || [])].sort((a, b) => {
+        if (a.running !== b.running) return Number(b.running) - Number(a.running);
+        if (a.running && a.ready !== b.ready) return Number(b.ready) - Number(a.ready);
+        if (hostRank(a.host) !== hostRank(b.host)) return hostRank(a.host) - hostRank(b.host);
+        const aHost = normalizeHost(a.host);
+        const bHost = normalizeHost(b.host);
+        const hostCompare = aHost.localeCompare(bHost);
+        if (hostCompare !== 0) return hostCompare;
+        if (portRank(a.port) !== portRank(b.port)) return portRank(a.port) - portRank(b.port);
+        return a.display_name.localeCompare(b.display_name);
+      });
+
+      cardsEl.innerHTML = statuses.map(item => {
+        const tone = statusTone(item);
+        const runtime = item.runtime || 'unknown';
+        const pid = item.pid || 'none';
+        return `
+          <article class="card">
+            <div class="card-top">
+              <div>
+                <h3 class="card-title">${escapeHTML(item.display_name)}</h3>
+                <div class="card-meta">${escapeHTML(runtime)} • ${escapeHTML(statusLabel(item))}</div>
+                <div class="card-endpoint"><code>${escapeHTML(item.base_url || 'no endpoint')}</code></div>
+              </div>
+              <span class="badge ${tone}">${escapeHTML(statusLabel(item))}</span>
+            </div>
+            <div class="card-inspect">Profile: <code>${escapeHTML(item.profile)}</code> • Request model: <code>${escapeHTML(item.request_model || 'n/a')}</code> • PID: <code>${escapeHTML(pid)}</code> • RSS: <code>${escapeHTML(formatMemory(item.rss_mb))}</code></div>
+            <div class="card-actions">
+              <button class="primary" data-action="switch" data-profile="${escapeHTML(item.profile)}">Activate</button>
+              <button data-action="start" data-profile="${escapeHTML(item.profile)}">Start</button>
+              <button class="warn" data-action="stop" data-profile="${escapeHTML(item.profile)}">Stop</button>
+              <button data-action="restart" data-profile="${escapeHTML(item.profile)}">Restart</button>
+              <button data-action="bench" data-profile="${escapeHTML(item.profile)}">Bench</button>
+            </div>
+          </article>
+        `;
+      }).join('');
+    }
+
+    function renderFooter(data) {
+      const benchmark = data.benchmark || {};
+      const latest = benchmark.latest || {};
+      footerEl.innerHTML = `
+        <div><strong>Controller:</strong> ${escapeHTML(window.location.origin)}</div>
+        <div><strong>Profiles:</strong> ${escapeHTML(data.profiles_dir || 'not reported')}</div>
+        <div><strong>Benchmark:</strong> ${escapeHTML(benchmark.running ? 'Running' : suiteLabel(latest.suite))}</div>
+      `;
+    }
+
+    function render(data) {
+      renderSummary(data);
+      renderIntegrations(data.integrations || []);
+      renderCards(data);
+      renderFooter(data);
+      heartbeatEl.textContent = 'Controller online';
+    }
+
+    async function refreshStatus() {
+      try {
+        refreshButton.disabled = true;
+        heartbeatEl.textContent = 'Refreshing controller state...';
+        const data = await api('/api/status');
+        render(data);
+      } catch (error) {
+        heartbeatEl.textContent = `Refresh failed: ${error.message}`;
+      } finally {
+        refreshButton.disabled = false;
+      }
+    }
+
+    integrationActionsEl.addEventListener('click', async (event) => {
+      const button = event.target.closest('button[data-integration]');
+      if (!button) return;
+      await postAction('/api/integrations/run', {
+        integration: button.dataset.integration,
+        action: button.dataset.integrationAction || 'sync',
+      });
+    });
+
+    cardsEl.addEventListener('click', async (event) => {
+      const button = event.target.closest('button[data-action]');
+      if (!button) return;
+      const action = button.dataset.action;
+      const profile = button.dataset.profile;
+      if (action === 'start') await postAction('/api/start', { profile });
+      if (action === 'stop') await postAction('/api/stop', { profile });
+      if (action === 'restart') await postAction('/api/restart', { profile });
+      if (action === 'switch') await postAction('/api/switch', { profile });
+      if (action === 'bench') await postAction('/api/benchmark/start', { suite: 'quick', profiles: [profile] });
+    });
+
+    refreshButton.addEventListener('click', () => refreshStatus());
+    benchAllButton.addEventListener('click', () => postAction('/api/benchmark/start', { suite: 'quick' }));
+    stopAllButton.addEventListener('click', () => postAction('/api/stop-all'));
+
+    refreshStatus();
+    setInterval(refreshStatus, REFRESH_INTERVAL_MS);
+  </script>
+</body>
+</html>

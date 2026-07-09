@@ -505,6 +505,97 @@ class ModelCtlTests(unittest.TestCase):
     def test_controller_bind_accepts_unsafe_non_loopback_with_token(self) -> None:
         MODULE.validate_controller_bind("0.0.0.0", unsafe_bind=True, auth_token="x" * 32)
 
+    def test_request_path_strips_query_and_fragment(self) -> None:
+        self.assertEqual(MODULE.request_path("/api/status?token=abc"), "/api/status")
+        self.assertEqual(MODULE.request_path("/?token=abc#token=xyz"), "/")
+        self.assertEqual(MODULE.request_path("/index.html"), "/index.html")
+
+    def test_dashboard_serves_html_when_query_token_present(self) -> None:
+        server = MODULE.ThreadingHTTPServer(("127.0.0.1", 0), MODULE.DashboardHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{server.server_port}/?token=bootstrap-secret") as response:
+                body = response.read().decode()
+            self.assertEqual(response.status, 200)
+            self.assertIn("Model Switchboard Dashboard", body)
+            self.assertIn("sessionStorage.setItem('controllerToken'", body)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_dashboard_api_status_ignores_query_string(self) -> None:
+        server = MODULE.ThreadingHTTPServer(("127.0.0.1", 0), MODULE.DashboardHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        status_payload = {
+            "statuses": [],
+            "benchmark": {"running": False, "pid": None, "log_path": "", "latest": None},
+            "integrations": [],
+            "profiles_dir": str(ROOT / "model-profiles"),
+            "controller_root": str(ROOT),
+        }
+        try:
+            with (
+                mock.patch.object(MODULE, "status_payload", return_value=status_payload),
+                mock.patch.object(MODULE, "write_status_cache"),
+                urllib.request.urlopen(f"http://127.0.0.1:{server.server_port}/api/status?x=1") as response,
+            ):
+                body = json.loads(response.read().decode())
+            self.assertEqual(response.status, 200)
+            self.assertEqual(body["statuses"], [])
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_pid_matches_profile_rejects_short_markers(self) -> None:
+        with mock.patch.object(MODULE, "pid_command", return_value="/usr/bin/python3 -m http.server"):
+            self.assertFalse(
+                MODULE.pid_matches_profile(
+                    1,
+                    "v1",
+                    {"PROFILE_NAME": "v1", "MODEL_ALIAS": "v1", "REQUEST_MODEL": "ab"},
+                )
+            )
+
+    def test_terminate_profile_processes_requires_command_match_for_listener(self) -> None:
+        env = {"PROFILE_NAME": "qwen", "PORT": "8080", "HOST": "127.0.0.1"}
+        with (
+            mock.patch.object(MODULE, "port_listener_pid", return_value=999),
+            mock.patch.object(MODULE, "probe_health", return_value=(True, [])),
+            mock.patch.object(MODULE, "pid_matches_profile", return_value=False) as matches,
+            mock.patch.object(MODULE, "terminate_pid") as terminate_pid,
+        ):
+            terminated = MODULE.terminate_profile_processes("qwen", env, None)
+        self.assertFalse(terminated)
+        matches.assert_called_once()
+        terminate_pid.assert_not_called()
+
+    def test_doctor_run_dir_rejects_path_traversal(self) -> None:
+        with self.assertRaisesRegex(ValueError, "invalid doctor run id"):
+            MODULE.doctor_run_dir("../etc/passwd")
+        with self.assertRaisesRegex(ValueError, "invalid doctor run id"):
+            MODULE.doctor_run_dir("runs/../../tmp")
+
+    def test_llama_swap_runtime_metadata(self) -> None:
+        self.assertEqual(MODULE.canonical_runtime("llamaswap"), "llama-swap")
+        spec = MODULE.runtime_spec({"RUNTIME": "llama-swap"})
+        self.assertEqual(spec["launch_mode"], "external")
+        self.assertIn("on-demand-swap", spec["tags"])
+
+    def test_active_profile_watchdog_skips_while_suppressed(self) -> None:
+        MODULE.suppress_active_profile_watchdog(30)
+        with (
+            mock.patch.object(MODULE, "read_active_profile", return_value="qwen35-a3b") as read_active,
+            mock.patch.object(MODULE, "start_profile") as start_profile,
+        ):
+            MODULE.active_profile_watchdog_once()
+        read_active.assert_not_called()
+        start_profile.assert_not_called()
+        MODULE._WATCHDOG_SUPPRESS_UNTIL = 0.0
+
     def test_dashboard_api_requires_bearer_token_when_configured(self) -> None:
         token = "x" * 32
         server = MODULE.ThreadingHTTPServer(("127.0.0.1", 0), MODULE.DashboardHandler)
@@ -1183,6 +1274,7 @@ class ModelCtlTests(unittest.TestCase):
         write_active_profile.assert_called_once_with("qwen35-a3b")
 
     def test_active_profile_watchdog_restarts_dead_active_profile(self) -> None:
+        MODULE._WATCHDOG_SUPPRESS_UNTIL = 0.0
         profiles = {
             "qwen35-a3b": {
                 "PROFILE_NAME": "qwen35-a3b",
@@ -1257,6 +1349,7 @@ class ModelCtlTests(unittest.TestCase):
             MODULE.stop_profile("qwen35-a3b")
 
         clear_active_profile.assert_called_once_with("qwen35-a3b")
+        MODULE._WATCHDOG_SUPPRESS_UNTIL = 0.0
 
     def test_diagnose_profile_accepts_valid_rvllm_mlx_profile(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

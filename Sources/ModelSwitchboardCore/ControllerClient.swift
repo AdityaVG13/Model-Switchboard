@@ -35,22 +35,24 @@ public struct ControllerClient: Sendable {
     private struct EmptyRequest: Encodable {}
 
     public let baseURL: URL
+    public let authToken: String?
     public let session: URLSession
     public let decoder: JSONDecoder
     public let encoder: JSONEncoder
 
-    public init(baseURL: URL, session: URLSession = .shared) {
+    public init(baseURL: URL, authToken: String? = nil, session: URLSession = .shared) {
         self.baseURL = baseURL
+        self.authToken = Self.normalizedAuthToken(authToken)
         self.session = session
         self.decoder = JSONDecoder()
         self.encoder = JSONEncoder()
     }
 
-    public init(baseURLString: String, session: URLSession = .shared) throws {
+    public init(baseURLString: String, authToken: String? = nil, session: URLSession = .shared) throws {
         guard let url = URL(string: baseURLString) else {
             throw ControllerClientError.invalidBaseURL(baseURLString)
         }
-        self.init(baseURL: url, session: session)
+        self.init(baseURL: url, authToken: authToken, session: session)
     }
 
     public func fetchStatus() async throws -> ControllerStatusPayload {
@@ -94,17 +96,30 @@ public struct ControllerClient: Sendable {
         return try await post("/api/benchmark/start", payload: payload)
     }
 
+    /// Builds an API URL without percent-encoding path separators.
+    /// Passing `"api/status"` to a single `appendingPathComponent` call can encode `/`
+    /// as `%2F`, which the controller matches with exact path equality and would 404.
+    public static func apiURL(baseURL: URL, path: String) -> URL {
+        var url = baseURL
+        for segment in path.split(separator: "/") where !segment.isEmpty {
+            url = url.appendingPathComponent(String(segment))
+        }
+        return url
+    }
+
     private func get<T: Decodable>(_ path: String, as type: T.Type) async throws -> T {
-        let request = URLRequest(url: baseURL.appendingPathComponent(path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))))
+        var request = URLRequest(url: Self.apiURL(baseURL: baseURL, path: path))
+        applyAuth(to: &request)
         let (data, response) = try await session.data(for: request)
         try validate(response: response, data: data)
         return try decoder.decode(T.self, from: data)
     }
 
     private func post<Payload: Encodable>(_ path: String, payload: Payload) async throws -> ControllerActionResponse {
-        var request = URLRequest(url: baseURL.appendingPathComponent(path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))))
+        var request = URLRequest(url: Self.apiURL(baseURL: baseURL, path: path))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuth(to: &request)
         request.httpBody = try encoder.encode(payload)
         let (data, response) = try await session.data(for: request)
         try validate(response: response, data: data)
@@ -115,6 +130,11 @@ public struct ControllerClient: Sendable {
         return decoded
     }
 
+    private func applyAuth(to request: inout URLRequest) {
+        guard let authToken, !authToken.isEmpty else { return }
+        request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
+    }
+
     private func validate(response: URLResponse, data: Data) throws {
         guard let http = response as? HTTPURLResponse else {
             throw ControllerClientError.invalidResponse
@@ -123,5 +143,11 @@ public struct ControllerClient: Sendable {
             let message = String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
             throw ControllerClientError.serverError(message)
         }
+    }
+
+    private static func normalizedAuthToken(_ token: String?) -> String? {
+        guard let token else { return nil }
+        let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }

@@ -4,6 +4,25 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+### Added
+- Recognized `llama-swap` as an external OpenAI-compatible proxy runtime, with an example profile and docs for request-driven model swapping alongside menu-bar Activate.
+- Optional controller bearer-token field in Settings (and widget AppStorage) so token-protected / `--unsafe-bind` controllers work from the menu bar.
+
+### Changed
+- Extracted the controller web dashboard HTML into `Controller/web/dashboard.html` (first step toward decomposing the `modelctl.py` god file).
+- Extended doctor report contracts (Python + Swift) to include `findings`, `next_steps`, and schema/version metadata the API already emitted.
+- `stop-all-models.sh` now stops only PID-file-tracked processes by default; set `FORCE_ORPHANS=1` for the previous broad pgrep sweep.
+
+### Fixed
+- Serialized start/stop/switch/benchmark mutations with a process-wide lock so concurrent HTTP workers cannot interleave lifecycle actions.
+- Cleared the active-profile marker and suppressed the crash-recovery watchdog at the start of Stop so intentional stops are not undone mid-flight.
+- Parsed HTTP request paths without query/fragment so `/?token=…` serves the dashboard and `/api/*?…` routes match correctly; prefer `#token=` bootstrap and strip `?token=` from the address bar.
+- Refused to kill port listeners based on health-check success alone; require a strong command match, and ignore short PID markers that over-match.
+- Default-denied non-loopback health/model-list probes unless `ALLOW_REMOTE_HEALTHCHECK=1` is set.
+- Constrained `doctor undo` run ids to a safe character set under `.doctor/runs`.
+- Hardened status-cache file permissions (`0700`/`0600`).
+- Built Swift controller API URLs without percent-encoding `/` in multi-segment paths, and rolled back optimistic profile UI state when an action fails.
+
 ## [1.2.0] - 2026-07-03
 
 ### Added

@@ -30,6 +30,7 @@ struct MenuBarContentView: View {
     let features: AppFeatures
     @ObservedObject var launchAtLoginManager: LaunchAtLoginManager
     @Binding var controllerBaseURL: String
+    @Binding var controllerAuthToken: String
     let reconnect: () -> Void
     let updateMenuBarHelp: (String) -> Void
 
@@ -38,6 +39,7 @@ struct MenuBarContentView: View {
         features: AppFeatures,
         launchAtLoginManager: LaunchAtLoginManager,
         controllerBaseURL: Binding<String>,
+        controllerAuthToken: Binding<String>,
         reconnect: @escaping () -> Void,
         updateMenuBarHelp: @escaping (String) -> Void,
         systemMetrics: SystemMetricsMonitor? = nil
@@ -46,6 +48,7 @@ struct MenuBarContentView: View {
         self.features = features
         self.launchAtLoginManager = launchAtLoginManager
         self._controllerBaseURL = controllerBaseURL
+        self._controllerAuthToken = controllerAuthToken
         self.reconnect = reconnect
         self.updateMenuBarHelp = updateMenuBarHelp
         self._systemMetrics = StateObject(wrappedValue: systemMetrics ?? SystemMetricsMonitor())

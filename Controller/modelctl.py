@@ -12,6 +12,7 @@ import ipaddress
 import json
 import os
 import pathlib
+import re
 import secrets
 import shutil
 import signal
@@ -113,6 +114,12 @@ CLI_COMMAND_NAMES = [
     "stop-all",
     "serve-web",
 ]
+MUTATION_LOCK = threading.RLock()
+_WATCHDOG_SUPPRESS_UNTIL = 0.0
+_MIN_PID_MARKER_LEN = 4
+DOCTOR_RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
+ALLOW_REMOTE_HEALTHCHECK_ENV = "ALLOW_REMOTE_HEALTHCHECK"
+
 CLI_KNOWN_FLAGS = [
     "--allow-concurrent",
     "--auth-token",
@@ -223,6 +230,53 @@ def validate_controller_bind(host: str, *, unsafe_bind: bool = False, auth_token
         raise ValueError("non-loopback controller bind requires a bearer auth token")
 
 
+def suppress_active_profile_watchdog(seconds: float = 45.0) -> None:
+    """Prevent the crash-recovery watchdog from fighting intentional stops."""
+    global _WATCHDOG_SUPPRESS_UNTIL
+    _WATCHDOG_SUPPRESS_UNTIL = max(_WATCHDOG_SUPPRESS_UNTIL, time.time() + seconds)
+
+
+def is_active_profile_watchdog_suppressed() -> bool:
+    return time.time() < _WATCHDOG_SUPPRESS_UNTIL
+
+
+def request_path(raw_path: str) -> str:
+    """Return the URL path without query/fragment for exact route matching."""
+    return urllib.parse.urlsplit(raw_path).path or "/"
+
+
+def is_safe_healthcheck_url(url: str) -> bool:
+    """Default-deny non-loopback health probes unless explicitly opted in."""
+    if os.environ.get(ALLOW_REMOTE_HEALTHCHECK_ENV, "").strip() in {"1", "true", "TRUE", "yes", "YES"}:
+        return True
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except ValueError:
+        return False
+    host = parsed.hostname or ""
+    return is_loopback_host(host)
+
+
+def sanitize_doctor_run_id(run_id: str) -> str:
+    value = (run_id or "").strip()
+    if not DOCTOR_RUN_ID_PATTERN.fullmatch(value):
+        raise ValueError("invalid doctor run id")
+    return value
+
+
+def with_mutation_lock(fn):
+    """Serialize profile/benchmark mutations across HTTP worker threads."""
+
+    def wrapped(*args, **kwargs):
+        with MUTATION_LOCK:
+            return fn(*args, **kwargs)
+
+    wrapped.__name__ = getattr(fn, "__name__", "wrapped")
+    wrapped.__doc__ = getattr(fn, "__doc__", None)
+    return wrapped
+
+
+
 class ControllerRequest(TypedDict, total=False):
     profile: str
     profiles: list[str]
@@ -300,6 +354,8 @@ RUNTIME_ALIASES = {
     "nexaai": "nexa",
     "litellm": "litellm",
     "litellm-proxy": "litellm",
+    "llama-swap": "llama-swap",
+    "llamaswap": "llama-swap",
     "transformers": "transformers",
     "hf-transformers": "transformers",
     "huggingface-transformers": "transformers",
@@ -473,6 +529,11 @@ RUNTIME_SPECS: dict[str, RuntimeSpec] = {
         "tags": ["external", "openai-compatible", "proxy"],
         "launch_mode": "external",
     },
+    "llama-swap": {
+        "label": "llama-swap",
+        "tags": ["external", "openai-compatible", "proxy", "on-demand-swap", "anthropic-compatible"],
+        "launch_mode": "external",
+    },
     "transformers": {
         "label": "Transformers",
         "tags": ["managed", "openai-compatible", "python", "hugging-face"],
@@ -568,579 +629,16 @@ def runtime_tags(env: ProfileEnv) -> list[str]:
     return tags
 
 
-HTML_PAGE = r"""<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Model Switchboard Dashboard</title>
-  <style>
-    :root {
-      color-scheme: dark;
-      --bg: #0f1218;
-      --panel: #171c24;
-      --panel-soft: #1f2530;
-      --line: rgba(255, 255, 255, 0.08);
-      --line-strong: rgba(255, 255, 255, 0.14);
-      --text: #f3f5f7;
-      --muted: #a7b0bc;
-      --good: #69d18f;
-      --warn: #f0c06b;
-      --bad: #ef7d7d;
-      --accent: #8bb8ff;
-      --accent-strong: #5e94f0;
-      --shadow: 0 18px 48px rgba(0, 0, 0, 0.26);
-      --radius: 18px;
-      --radius-sm: 12px;
-    }
+def load_dashboard_html() -> str:
+    html_path = BASE / "web" / "dashboard.html"
+    try:
+        return html_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise RuntimeError(f"dashboard HTML missing: {html_path}") from exc
 
-    * { box-sizing: border-box; }
 
-    body {
-      margin: 0;
-      min-height: 100vh;
-      background: linear-gradient(180deg, #0d1015 0%, #11151d 100%);
-      color: var(--text);
-      font-family: "SF Pro Text", "Inter", system-ui, sans-serif;
-    }
+HTML_PAGE = load_dashboard_html()
 
-    button,
-    code {
-      font: inherit;
-    }
-
-    code {
-      font-family: "SF Mono", "JetBrains Mono", monospace;
-    }
-
-    .shell {
-      width: min(1040px, calc(100vw - 32px));
-      margin: 20px auto 28px;
-      display: grid;
-      gap: 16px;
-    }
-
-    .panel {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      box-shadow: var(--shadow);
-    }
-
-    .header {
-      display: flex;
-      align-items: start;
-      justify-content: space-between;
-      gap: 16px;
-      padding: 20px 22px;
-    }
-
-    .eyebrow {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 8px;
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-    }
-
-    .eyebrow::before {
-      content: "";
-      width: 8px;
-      height: 8px;
-      border-radius: 999px;
-      background: var(--accent);
-    }
-
-    h1 {
-      margin: 0 0 6px;
-      font-size: 30px;
-      line-height: 1.05;
-      letter-spacing: -0.03em;
-    }
-
-    .header p,
-    .muted {
-      margin: 0;
-      color: var(--muted);
-      line-height: 1.5;
-      font-size: 14px;
-    }
-
-    .heartbeat {
-      color: var(--muted);
-      font-size: 13px;
-      white-space: nowrap;
-    }
-
-    .toolbar,
-    .section,
-    .footer {
-      padding: 16px 18px;
-    }
-
-    .toolbar {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      align-items: center;
-    }
-
-    .summary {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 12px;
-    }
-
-    .stat {
-      padding: 14px 16px;
-      background: var(--panel-soft);
-      border: 1px solid var(--line);
-      border-radius: var(--radius-sm);
-    }
-
-    .stat .label {
-      color: var(--muted);
-      font-size: 12px;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      margin-bottom: 8px;
-    }
-
-    .stat .value {
-      font-size: 24px;
-      font-weight: 700;
-      letter-spacing: -0.03em;
-    }
-
-    .stat .subvalue {
-      margin-top: 6px;
-      color: var(--muted);
-      font-size: 13px;
-    }
-
-    .section-header {
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-      align-items: start;
-      margin-bottom: 12px;
-    }
-
-    .section-header h2 {
-      margin: 0;
-      font-size: 18px;
-    }
-
-    .integration-actions,
-    .card-actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-    }
-
-    .cards {
-      display: grid;
-      gap: 12px;
-    }
-
-    .card {
-      padding: 16px;
-      background: var(--panel-soft);
-      border: 1px solid var(--line);
-      border-radius: var(--radius-sm);
-      display: grid;
-      gap: 12px;
-    }
-
-    .card-top {
-      display: flex;
-      justify-content: space-between;
-      gap: 16px;
-      align-items: start;
-    }
-
-    .card-title {
-      margin: 0 0 4px;
-      font-size: 21px;
-      line-height: 1.15;
-    }
-
-    .card-meta,
-    .card-endpoint,
-    .card-inspect {
-      color: var(--muted);
-      font-size: 14px;
-      line-height: 1.45;
-    }
-
-    .badge {
-      display: inline-flex;
-      align-items: center;
-      padding: 5px 10px;
-      border-radius: 999px;
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      white-space: nowrap;
-    }
-
-    .badge.running {
-      background: rgba(105, 209, 143, 0.16);
-      color: var(--good);
-    }
-
-    .badge.booting {
-      background: rgba(240, 192, 107, 0.16);
-      color: var(--warn);
-    }
-
-    .badge.offline {
-      background: rgba(239, 125, 125, 0.16);
-      color: var(--bad);
-    }
-
-    button {
-      appearance: none;
-      border: 1px solid var(--line-strong);
-      background: #262d39;
-      color: var(--text);
-      border-radius: 10px;
-      padding: 9px 13px;
-      cursor: pointer;
-      transition: background 0.14s ease, border-color 0.14s ease;
-    }
-
-    button:hover {
-      background: #2d3645;
-      border-color: rgba(255, 255, 255, 0.22);
-    }
-
-    button:disabled {
-      opacity: 0.5;
-      cursor: default;
-    }
-
-    button.primary {
-      background: rgba(94, 148, 240, 0.18);
-      border-color: rgba(94, 148, 240, 0.46);
-    }
-
-    button.warn {
-      background: rgba(239, 125, 125, 0.12);
-      border-color: rgba(239, 125, 125, 0.36);
-    }
-
-    .footer {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px 18px;
-      color: var(--muted);
-      font-size: 13px;
-    }
-
-    @media (max-width: 720px) {
-      .shell {
-        width: calc(100vw - 18px);
-        margin: 10px auto 18px;
-      }
-
-      .header,
-      .toolbar,
-      .section,
-      .footer {
-        padding: 14px;
-      }
-
-      .card-top,
-      .section-header,
-      .header {
-        flex-direction: column;
-      }
-
-      h1 {
-        font-size: 24px;
-      }
-    }
-  </style>
-</head>
-<body>
-  <main class="shell">
-    <section class="panel header">
-      <div>
-        <div class="eyebrow">Model Switchboard Dashboard</div>
-        <h1>Local model control plane</h1>
-        <p>Compact browser view for the same actions exposed in the menu bar. No oversized hero, no selection deck, no extra drag.</p>
-      </div>
-      <div class="heartbeat" id="heartbeat">Refreshing controller state...</div>
-    </section>
-
-    <section class="panel toolbar">
-      <button class="primary" id="refresh-button">Refresh</button>
-      <button id="bench-all-button">Run Benchmark</button>
-      <button class="warn" id="stop-all-button">Stop All</button>
-    </section>
-
-    <section class="summary" id="summary"></section>
-
-    <section class="panel section" id="integrations-section" hidden>
-      <div class="section-header">
-        <h2>Optional integrations</h2>
-        <div class="muted" id="integration-summary"></div>
-      </div>
-      <div class="integration-actions" id="integration-actions"></div>
-    </section>
-
-    <section class="panel section">
-      <div class="section-header">
-        <h2>Profiles</h2>
-        <div class="muted" id="profile-summary"></div>
-      </div>
-      <div class="cards" id="cards"></div>
-    </section>
-
-    <section class="panel footer" id="footer"></section>
-  </main>
-
-  <script>
-    const REFRESH_INTERVAL_MS = 5000;
-    const heartbeatEl = document.getElementById('heartbeat');
-    const summaryEl = document.getElementById('summary');
-    const integrationsSectionEl = document.getElementById('integrations-section');
-    const integrationSummaryEl = document.getElementById('integration-summary');
-    const integrationActionsEl = document.getElementById('integration-actions');
-    const profileSummaryEl = document.getElementById('profile-summary');
-    const cardsEl = document.getElementById('cards');
-    const footerEl = document.getElementById('footer');
-    const refreshButton = document.getElementById('refresh-button');
-    const benchAllButton = document.getElementById('bench-all-button');
-    const stopAllButton = document.getElementById('stop-all-button');
-
-    function escapeHTML(value) {
-      return String(value ?? '')
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#39;');
-    }
-
-    function statusTone(item) {
-      if (item.ready) return 'running';
-      if (item.running) return 'booting';
-      return 'offline';
-    }
-
-    function statusLabel(item) {
-      if (item.ready) return 'Running';
-      if (item.running) return 'Starting';
-      return 'Not Running';
-    }
-
-    function formatMemory(value) {
-      if (value === null || value === undefined || value === '') return 'n/a';
-      return `${Number(value).toFixed(1)} MB`;
-    }
-
-    function metric(label, value, subvalue = '') {
-      return `
-        <article class="panel stat">
-          <div class="label">${escapeHTML(label)}</div>
-          <div class="value">${escapeHTML(value)}</div>
-          <div class="subvalue">${escapeHTML(subvalue)}</div>
-        </article>
-      `;
-    }
-
-    function suiteLabel(value) {
-      if (!value) return 'Idle';
-      const normalized = String(value).trim().toLowerCase();
-      if (normalized === 'quick') return 'Default';
-      return normalized
-        .replaceAll('_', ' ')
-        .replaceAll('-', ' ')
-        .replace(/\b\w/g, (char) => char.toUpperCase());
-    }
-
-    const queryToken = new URLSearchParams(window.location.search).get('token');
-    if (queryToken) {
-      sessionStorage.setItem('controllerToken', queryToken);
-      history.replaceState(null, '', window.location.pathname);
-    }
-    const controllerToken = queryToken || sessionStorage.getItem('controllerToken') || '';
-
-    async function api(path, options = {}) {
-      const { headers: optionHeaders = {}, ...fetchOptions } = options;
-      const headers = { 'Content-Type': 'application/json', ...optionHeaders };
-      if (controllerToken) headers.Authorization = `Bearer ${controllerToken}`;
-      const response = await fetch(path, {
-        ...fetchOptions,
-        headers,
-      });
-      if (!response.ok) {
-        throw new Error((await response.text()) || `HTTP ${response.status}`);
-      }
-      return response.json();
-    }
-
-    async function postAction(path, payload = {}) {
-      try {
-        heartbeatEl.textContent = 'Executing action...';
-        await api(path, { method: 'POST', body: JSON.stringify(payload) });
-        await refreshStatus();
-      } catch (error) {
-        heartbeatEl.textContent = `Action failed: ${error.message}`;
-        alert(error.message);
-      }
-    }
-
-    function renderSummary(data) {
-      const statuses = data.statuses || [];
-      const running = statuses.filter(item => item.running).length;
-      const ready = statuses.filter(item => item.ready).length;
-      const benchmark = data.benchmark || {};
-      const latest = benchmark.latest || {};
-
-      summaryEl.innerHTML = [
-        metric('Ready', `${ready}/${statuses.length}`, `${running} process${running === 1 ? '' : 'es'} live`),
-        metric('Benchmark', benchmark.running ? 'Running' : suiteLabel(latest.suite), latest.generated_at ? new Date(latest.generated_at).toLocaleTimeString() : 'No recent benchmark'),
-        metric('Profiles folder', statuses.length ? 'Live' : 'Waiting', data.profiles_dir || 'not reported'),
-      ].join('');
-
-      profileSummaryEl.textContent = `${statuses.length} profiles • auto-refresh ${REFRESH_INTERVAL_MS / 1000}s`;
-    }
-
-    function renderIntegrations(integrations) {
-      const syncable = (integrations || []).filter(item => (item.capabilities || []).includes('sync'));
-      integrationsSectionEl.hidden = syncable.length === 0;
-      if (syncable.length === 0) {
-        integrationActionsEl.innerHTML = '';
-        integrationSummaryEl.textContent = '';
-        return;
-      }
-
-      integrationActionsEl.innerHTML = syncable.map(item => `
-        <button data-integration="${escapeHTML(item.id)}" data-integration-action="sync">${escapeHTML(item.sync_label || ('Sync ' + item.display_name))}</button>
-      `).join('');
-      integrationSummaryEl.textContent = syncable.map(item => item.description || item.display_name).join(' ');
-    }
-
-    function renderCards(data) {
-      const normalizeHost = (value) => {
-        const normalized = (value || '').trim().toLowerCase();
-        if (normalized === '127.0.0.1' || normalized === 'localhost' || normalized === '::1') return 'localhost';
-        return normalized;
-      };
-      const hostRank = (value) => normalizeHost(value) === 'localhost' ? 0 : 1;
-      const portRank = (value) => {
-        const parsed = Number.parseInt(String(value || '').trim(), 10);
-        return Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER;
-      };
-      const statuses = [...(data.statuses || [])].sort((a, b) => {
-        if (a.running !== b.running) return Number(b.running) - Number(a.running);
-        if (a.running && a.ready !== b.ready) return Number(b.ready) - Number(a.ready);
-        if (hostRank(a.host) !== hostRank(b.host)) return hostRank(a.host) - hostRank(b.host);
-        const aHost = normalizeHost(a.host);
-        const bHost = normalizeHost(b.host);
-        const hostCompare = aHost.localeCompare(bHost);
-        if (hostCompare !== 0) return hostCompare;
-        if (portRank(a.port) !== portRank(b.port)) return portRank(a.port) - portRank(b.port);
-        return a.display_name.localeCompare(b.display_name);
-      });
-
-      cardsEl.innerHTML = statuses.map(item => {
-        const tone = statusTone(item);
-        const runtime = item.runtime || 'unknown';
-        const pid = item.pid || 'none';
-        return `
-          <article class="card">
-            <div class="card-top">
-              <div>
-                <h3 class="card-title">${escapeHTML(item.display_name)}</h3>
-                <div class="card-meta">${escapeHTML(runtime)} • ${escapeHTML(statusLabel(item))}</div>
-                <div class="card-endpoint"><code>${escapeHTML(item.base_url || 'no endpoint')}</code></div>
-              </div>
-              <span class="badge ${tone}">${escapeHTML(statusLabel(item))}</span>
-            </div>
-            <div class="card-inspect">Profile: <code>${escapeHTML(item.profile)}</code> • Request model: <code>${escapeHTML(item.request_model || 'n/a')}</code> • PID: <code>${escapeHTML(pid)}</code> • RSS: <code>${escapeHTML(formatMemory(item.rss_mb))}</code></div>
-            <div class="card-actions">
-              <button class="primary" data-action="switch" data-profile="${escapeHTML(item.profile)}">Activate</button>
-              <button data-action="start" data-profile="${escapeHTML(item.profile)}">Start</button>
-              <button class="warn" data-action="stop" data-profile="${escapeHTML(item.profile)}">Stop</button>
-              <button data-action="restart" data-profile="${escapeHTML(item.profile)}">Restart</button>
-              <button data-action="bench" data-profile="${escapeHTML(item.profile)}">Bench</button>
-            </div>
-          </article>
-        `;
-      }).join('');
-    }
-
-    function renderFooter(data) {
-      const benchmark = data.benchmark || {};
-      const latest = benchmark.latest || {};
-      footerEl.innerHTML = `
-        <div><strong>Controller:</strong> ${escapeHTML(window.location.origin)}</div>
-        <div><strong>Profiles:</strong> ${escapeHTML(data.profiles_dir || 'not reported')}</div>
-        <div><strong>Benchmark:</strong> ${escapeHTML(benchmark.running ? 'Running' : suiteLabel(latest.suite))}</div>
-      `;
-    }
-
-    function render(data) {
-      renderSummary(data);
-      renderIntegrations(data.integrations || []);
-      renderCards(data);
-      renderFooter(data);
-      heartbeatEl.textContent = 'Controller online';
-    }
-
-    async function refreshStatus() {
-      try {
-        refreshButton.disabled = true;
-        heartbeatEl.textContent = 'Refreshing controller state...';
-        const data = await api('/api/status');
-        render(data);
-      } catch (error) {
-        heartbeatEl.textContent = `Refresh failed: ${error.message}`;
-      } finally {
-        refreshButton.disabled = false;
-      }
-    }
-
-    integrationActionsEl.addEventListener('click', async (event) => {
-      const button = event.target.closest('button[data-integration]');
-      if (!button) return;
-      await postAction('/api/integrations/run', {
-        integration: button.dataset.integration,
-        action: button.dataset.integrationAction || 'sync',
-      });
-    });
-
-    cardsEl.addEventListener('click', async (event) => {
-      const button = event.target.closest('button[data-action]');
-      if (!button) return;
-      const action = button.dataset.action;
-      const profile = button.dataset.profile;
-      if (action === 'start') await postAction('/api/start', { profile });
-      if (action === 'stop') await postAction('/api/stop', { profile });
-      if (action === 'restart') await postAction('/api/restart', { profile });
-      if (action === 'switch') await postAction('/api/switch', { profile });
-      if (action === 'bench') await postAction('/api/benchmark/start', { suite: 'quick', profiles: [profile] });
-    });
-
-    refreshButton.addEventListener('click', () => refreshStatus());
-    benchAllButton.addEventListener('click', () => postAction('/api/benchmark/start', { suite: 'quick' }));
-    stopAllButton.addEventListener('click', () => postAction('/api/stop-all'));
-
-    refreshStatus();
-    setInterval(refreshStatus, REFRESH_INTERVAL_MS);
-  </script>
-</body>
-</html>
-"""
 
 
 def run(
@@ -1422,7 +920,16 @@ def pid_matches_profile(pid: int | None, name: str, env: ProfileEnv) -> bool:
         env.get("MODEL_FILE"),
         env.get("MODEL_REPO"),
     }
-    return any(marker and marker.lower() in normalized_command for marker in markers)
+    for marker in markers:
+        if not marker:
+            continue
+        value = marker.strip().lower()
+        # Short aliases like "v1" / "server" over-match unrelated argv.
+        if len(value) < _MIN_PID_MARKER_LEN:
+            continue
+        if value in normalized_command:
+            return True
+    return False
 
 
 def pid_rss_mb(pid: int | None) -> float | None:
@@ -1458,6 +965,8 @@ def fetch_openai_models(url: str, timeout: float = 1.5) -> list[str]:
         url = validate_http_url(url)
     except ValueError:
         return []
+    if not is_safe_healthcheck_url(url):
+        return []
     request = urllib.request.Request(url, headers={"Accept": "application/json"})
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected -- validate_http_url rejects non-http profile URLs before this request.
@@ -1474,6 +983,8 @@ def probe_health(env: ProfileEnv, timeout: float = 1.5) -> tuple[bool, list[str]
     except ValueError:
         return False, []
     if mode == "disabled":
+        return False, []
+    if url and not is_safe_healthcheck_url(url):
         return False, []
     if mode == "http-200":
         if not url:
@@ -1569,12 +1080,20 @@ def action_response_from_status(
 
 def write_status_cache(payload: ControllerStatusPayload) -> None:
     STATUS_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        STATUS_CACHE_PATH.parent.chmod(0o700)
+    except OSError:
+        pass
     cache_payload = make_cached_status_payload(
         cached_at=dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
         payload=payload,
     )
     temp_path = STATUS_CACHE_PATH.with_suffix(".tmp")
     temp_path.write_text(json.dumps(cache_payload, indent=2, sort_keys=True), encoding="utf-8")
+    try:
+        temp_path.chmod(0o600)
+    except OSError:
+        pass
     temp_path.replace(STATUS_CACHE_PATH)
 
 
@@ -1903,6 +1422,7 @@ def handle_mutating_command(args: argparse.Namespace) -> int:
 
 
 
+@with_mutation_lock
 def start_profile(name: str) -> None:
     profiles = load_profiles()
     if name not in profiles:
@@ -1962,14 +1482,13 @@ def terminate_profile_processes(name: str, env: ProfileEnv, pid: int | None) -> 
         terminate_pid(pid)
         terminated = True
 
-    # A stale PID file should not leave a model server behind. If the profile
-    # endpoint is still answering, reclaim the listener too.
+    # A stale PID file should not leave a model server behind. Only reclaim the
+    # listener when the process command clearly belongs to this profile — never
+    # kill solely because a health URL returned 200 (shared ports / SSRF).
     listener_pid = port_listener_pid(endpoint_port(env))
-    if listener_pid and listener_pid != pid:
-        ready, _ = probe_health(env)
-        if ready or pid_matches_profile(listener_pid, name, env):
-            terminate_pid(listener_pid)
-            terminated = True
+    if listener_pid and listener_pid != pid and pid_matches_profile(listener_pid, name, env):
+        terminate_pid(listener_pid)
+        terminated = True
     return terminated
 
 
@@ -1977,12 +1496,17 @@ def wait_for_profile_stopped(name: str, env: ProfileEnv, pid: int | None, *, tim
     deadline = time.time() + timeout
     while time.time() < deadline:
         listener_pid = port_listener_pid(endpoint_port(env))
-        ready, _ = probe_health(env, timeout=0.5)
         primary_alive = process_alive(pid)
+        # Mirror terminate_profile_processes: only treat a foreign listener as
+        # "ours" when the command matches. A shared-port 200 OK must not block stop.
         listener_alive = bool(
-            listener_pid and (listener_pid == pid or ready or pid_matches_profile(listener_pid, name, env))
+            listener_pid
+            and (
+                listener_pid == pid
+                or pid_matches_profile(listener_pid, name, env)
+            )
         )
-        if not primary_alive and not listener_alive and not ready:
+        if not primary_alive and not listener_alive:
             return True
         time.sleep(0.5)
     return False
@@ -1995,7 +1519,12 @@ def run_profile_shell(command: str, env: ProfileEnv) -> subprocess.CompletedProc
 
 
 
+@with_mutation_lock
 def stop_profile(name: str) -> None:
+    # Clear desired-active before killing so the crash-recovery watchdog cannot
+    # race an intentional stop and bring the profile back up.
+    suppress_active_profile_watchdog()
+    clear_active_profile(name)
     env = require_profile(name)
     status = status_for_profile(name, env)
     pid = status["pid"]
@@ -2013,7 +1542,6 @@ def stop_profile(name: str) -> None:
             if terminated and not wait_for_profile_stopped(name, env, None):
                 raise RuntimeError(f"failed to stop {name}: endpoint or process is still alive")
         pid_path(name).unlink(missing_ok=True)
-        clear_active_profile(name)
         if stop_error:
             raise RuntimeError(f"STOP_COMMAND failed for {name}: {stop_error}") from stop_error
         if terminated:
@@ -2026,13 +1554,13 @@ def stop_profile(name: str) -> None:
         if not wait_for_profile_stopped(name, env, pid):
             raise RuntimeError(f"failed to stop {name}: endpoint or process is still alive")
     pid_path(name).unlink(missing_ok=True)
-    clear_active_profile(name)
     if stop_error:
         raise RuntimeError(f"STOP_COMMAND failed for {name}: {stop_error}") from stop_error
     print(f"[INFO] stopped {name} (pid {pid})")
 
 
 
+@with_mutation_lock
 def restart_profile(name: str) -> None:
     profiles = load_profiles()
     if name not in profiles:
@@ -2043,6 +1571,7 @@ def restart_profile(name: str) -> None:
 
 
 
+@with_mutation_lock
 def stop_all(*, capture_script: bool = False) -> None:
     benchmark_pid = read_pid("benchmark")
     if benchmark_pid:
@@ -2093,6 +1622,7 @@ def run_integration_action(integration_id: str, action: str = "sync") -> None:
     raise SystemExit(f"Unsupported integration action: {integration_id}:{action}")
 
 
+@with_mutation_lock
 def switch_profile(name: str) -> None:
     profiles = load_profiles()
     if name not in profiles:
@@ -2106,6 +1636,8 @@ def switch_profile(name: str) -> None:
 
 
 def active_profile_watchdog_once() -> None:
+    if is_active_profile_watchdog_suppressed():
+        return
     name = read_active_profile()
     if not name:
         return
@@ -2261,6 +1793,7 @@ def benchmark_status() -> BenchmarkStatusPayload:
     }
 
 
+@with_mutation_lock
 def start_benchmark(
     profiles: list[str] | None = None,
     *,
@@ -2477,7 +2010,12 @@ def doctor_run_id(label: str = "doctor") -> str:
 
 
 def doctor_run_dir(run_id: str) -> pathlib.Path:
-    return DOCTOR_RUNS_DIR / run_id
+    safe_id = sanitize_doctor_run_id(run_id)
+    run_dir = (DOCTOR_RUNS_DIR / safe_id).resolve()
+    runs_root = DOCTOR_RUNS_DIR.resolve()
+    if run_dir != runs_root and runs_root not in run_dir.parents:
+        raise ValueError("doctor run id escapes runs directory")
+    return run_dir
 
 
 def write_json_atomic(path: pathlib.Path, payload: object) -> None:
@@ -3485,23 +3023,24 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         try:
-            if self.path.startswith("/api/") and not self._check_auth():
+            path = request_path(self.path)
+            if path.startswith("/api/") and not self._check_auth():
                 return
-            if self.path in {"/", "/index.html"}:
+            if path in {"/", "/index.html"}:
                 self._send_html(HTML_PAGE)
                 return
-            if self.path == "/api/status":
+            if path == "/api/status":
                 payload = status_payload()
                 write_status_cache(payload)
                 self._send_json(payload)
                 return
-            if self.path == "/api/doctor":
+            if path == "/api/doctor":
                 self._send_json(doctor_report())
                 return
-            if self.path == "/api/benchmark/status":
+            if path == "/api/benchmark/status":
                 self._send_json(benchmark_status())
                 return
-            if self.path == "/api/integrations":
+            if path == "/api/integrations":
                 self._send_json(
                     {
                         "integrations": integration_status(),
@@ -3522,23 +3061,24 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if not self._check_auth():
             return
         try:
+            path = request_path(self.path)
             payload = self._read_json()
-            if self.path == "/api/start":
+            if path == "/api/start":
                 start_profile(self._required_string(payload, "profile"))
-            elif self.path == "/api/stop":
+            elif path == "/api/stop":
                 stop_profile(self._required_string(payload, "profile"))
-            elif self.path == "/api/restart":
+            elif path == "/api/restart":
                 restart_profile(self._required_string(payload, "profile"))
-            elif self.path == "/api/switch":
+            elif path == "/api/switch":
                 switch_profile(self._required_string(payload, "profile"))
-            elif self.path == "/api/stop-all":
+            elif path == "/api/stop-all":
                 stop_all()
-            elif self.path == "/api/integrations/run":
+            elif path == "/api/integrations/run":
                 run_integration_action(
                     self._required_string(payload, "integration"),
                     payload.get("action", "sync"),
                 )
-            elif self.path == "/api/benchmark/start":
+            elif path == "/api/benchmark/start":
                 status = start_benchmark(
                     self._optional_profiles(payload),
                     suite=payload.get("suite", "quick"),

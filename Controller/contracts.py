@@ -122,13 +122,32 @@ class ProfileDiagnosticPayload(TypedDict):
     base_url: str
 
 
-class DoctorReportPayload(TypedDict):
+class DoctorFindingPayload(TypedDict, total=False):
+    id: str
+    severity: str
+    subsystem: str
+    message: str
+    evidence: str
+    remediation: str
+    auto_fixable: bool
+    fixer: str | None
+    online_required: bool
+
+
+class DoctorReportPayload(TypedDict, total=False):
     controller: ControllerHeartbeatPayload
     launch_agent: LaunchAgentStatusPayload
     integrations: list[ControllerIntegrationPayload]
     profiles_dir: str
     controller_root: str
     profiles: list[ProfileDiagnosticPayload]
+    schema_version: str
+    doctor_contract_version: str
+    tool_version: str
+    generated_at: str
+    healthy: bool
+    findings: list[DoctorFindingPayload]
+    next_steps: list[str]
 
 
 class PromptSpec(TypedDict):

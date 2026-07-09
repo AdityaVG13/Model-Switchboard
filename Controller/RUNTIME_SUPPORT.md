@@ -55,6 +55,7 @@ Known runtime ids and aliases:
 | `openllm` | `bentoml-openllm` | command, generic binary, or external | `managed`, `openai-compatible`, `server`, `bentoml` |
 | `nexa` | `nexa-sdk`, `nexaai` | command, generic binary, or external | `managed`, `openai-compatible`, `multimodal`, `cross-platform` |
 | `litellm` | `litellm-proxy` | external by default | `external`, `openai-compatible`, `proxy` |
+| `llama-swap` | `llamaswap` | external by default | `external`, `openai-compatible`, `proxy`, `on-demand-swap`, `anthropic-compatible` |
 | `transformers` | `hf-transformers`, `huggingface-transformers` | command or generic binary | `managed`, `openai-compatible`, `python`, `hugging-face` |
 | `triton` | `nvidia-triton` | external by default | `external`, `openai-compatible`, `server`, `nvidia` |
 | `tensorrt-llm` | `tensorrtllm` | command, generic binary, or external | `managed`, `openai-compatible`, `server`, `nvidia` |
@@ -78,7 +79,7 @@ RUNTIME_TAGS="coding long-context q8"
 
 ### External Endpoint
 
-Use this for LM Studio, Jan, LocalAI, manually started llama.cpp, or any already-running OpenAI-compatible server.
+Use this for LM Studio, Jan, LocalAI, llama-swap, LiteLLM, manually started llama.cpp, or any already-running OpenAI-compatible server.
 
 ```env
 DISPLAY_NAME="LM Studio Qwen"
@@ -87,6 +88,18 @@ BASE_URL=http://127.0.0.1:1234/v1
 REQUEST_MODEL=qwen-local
 SERVER_MODEL_ID=qwen-local
 HEALTHCHECK_MODE=openai-models
+```
+
+For [llama-swap](https://github.com/mostlygeek/llama-swap), point `BASE_URL` at the proxy listen address (often `http://127.0.0.1:8080/v1`). Clients keep one stable endpoint; llama-swap hot-swaps upstream servers from the requested `model` field. Model Switchboard still owns Activate/Stop for *other* managed profiles — treat llama-swap as the external front door when you want request-driven swapping instead of menu-bar exclusive activation.
+
+```env
+DISPLAY_NAME="llama-swap"
+RUNTIME=llama-swap
+BASE_URL=http://127.0.0.1:8080/v1
+REQUEST_MODEL=coding
+SERVER_MODEL_ID=coding
+HEALTHCHECK_MODE=openai-models
+LAUNCH_MODE=external
 ```
 
 ### Managed Command

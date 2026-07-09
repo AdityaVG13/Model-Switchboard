@@ -7,8 +7,13 @@ import MenuBarExtraAccess
 struct ModelSwitchboardApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @AppStorage("controllerBaseURL") private var controllerBaseURL = "http://127.0.0.1:8877"
+    @AppStorage("controllerAuthToken") private var controllerAuthToken = ""
     @AppStorage(DashboardAppearanceKeys.menuBarShowsReadyCount) private var menuBarShowsReadyCount = true
-    @State private var store = SwitchboardStore(controllerBaseURL: "http://127.0.0.1:8877", features: AppFeatures.current)
+    @State private var store = SwitchboardStore(
+        controllerBaseURL: "http://127.0.0.1:8877",
+        controllerAuthToken: "",
+        features: AppFeatures.current
+    )
     @StateObject private var launchAtLoginManager = LaunchAtLoginManager.shared
     @State private var isMenuPresented = false
     @State private var statusItem: NSStatusItem?
@@ -21,8 +26,10 @@ struct ModelSwitchboardApp: App {
                 features: features,
                 launchAtLoginManager: launchAtLoginManager,
                 controllerBaseURL: $controllerBaseURL,
+                controllerAuthToken: $controllerAuthToken,
                 reconnect: {
                     store.controllerBaseURL = controllerBaseURL
+                    store.controllerAuthToken = controllerAuthToken
                     Task { await store.refresh() }
                 },
                 updateMenuBarHelp: { helpText in
@@ -33,9 +40,16 @@ struct ModelSwitchboardApp: App {
                     if store.controllerBaseURL != controllerBaseURL {
                         store.controllerBaseURL = controllerBaseURL
                     }
+                    if store.controllerAuthToken != controllerAuthToken {
+                        store.controllerAuthToken = controllerAuthToken
+                    }
                 }
                 .onChange(of: controllerBaseURL) { _, newValue in
                     store.controllerBaseURL = newValue
+                    Task { await store.refresh() }
+                }
+                .onChange(of: controllerAuthToken) { _, newValue in
+                    store.controllerAuthToken = newValue
                     Task { await store.refresh() }
                 }
         } label: {

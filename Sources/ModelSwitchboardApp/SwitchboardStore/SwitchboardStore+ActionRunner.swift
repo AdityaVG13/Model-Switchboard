@@ -48,9 +48,19 @@ extension SwitchboardStore {
         guard pendingProfileActions[profile] == nil else { return }
         noteManagedLoopbackTransition()
         pendingProfileActions[profile] = label
+        let previousStatuses = statuses
         optimisticUpdate()
         defer { pendingProfileActions.removeValue(forKey: profile) }
-        await run(action, verify: verify, actionName: Self.actionName(forPendingLabel: label), profile: profile)
+        let succeeded = await run(
+            action,
+            verify: verify,
+            actionName: Self.actionName(forPendingLabel: label),
+            profile: profile
+        )
+        if !succeeded, lastError != nil {
+            // Roll back optimistic running/ready flips when the controller call fails.
+            statuses = previousStatuses
+        }
     }
 
     func verifyProfileStopped(_ profile: String, using client: ControllerClient) async throws {

@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
-# Stop all managed local model server processes for the current user.
+# Stop managed local model server processes for the current user.
+#
+# Default: only PIDs recorded under Controller/run/*.pid (plus the active
+# profile marker cleanup). Broad pgrep orphan sweeps require FORCE_ORPHANS=1
+# so manually started llama-server / mlx_lm.server processes are left alone.
 
 set -euo pipefail
 
 MODE="${1:-stop}"
 WAIT_SECONDS="${WAIT_SECONDS:-10}"
+FORCE_ORPHANS="${FORCE_ORPHANS:-0}"
+ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+RUN_DIR="${ROOT_DIR}/run"
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -28,8 +35,32 @@ section() {
     printf "\n${CYAN}%s${NC}\n" "$*"
 }
 
-list_model_pids() {
+list_pidfile_pids() {
+    local pid_file pid
+    [ -d "$RUN_DIR" ] || return 0
+    for pid_file in "$RUN_DIR"/*.pid; do
+        [ -f "$pid_file" ] || continue
+        case "$(basename "$pid_file")" in
+            benchmark.pid) continue ;;
+        esac
+        pid="$(tr -d '[:space:]' < "$pid_file" 2>/dev/null || true)"
+        if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+            printf '%s\n' "$pid"
+        fi
+    done
+}
+
+list_orphan_pids() {
     pgrep -u "$(id -u)" -f '(^|/)(llama-server|llama\.cpp-server|mlx_lm\.server)( |$)' || true
+}
+
+list_model_pids() {
+    local pids
+    pids="$(list_pidfile_pids | sort -u)"
+    if [ "$FORCE_ORPHANS" = "1" ]; then
+        pids="$(printf '%s\n%s\n' "$pids" "$(list_orphan_pids)" | awk 'NF' | sort -u)"
+    fi
+    printf '%s\n' "$pids" | awk 'NF'
 }
 
 pids_csv() {
@@ -51,22 +82,26 @@ kill_pids() {
 }
 
 print_status() {
-    section "Active model servers"
+    section "Active managed model servers"
 
     local pids
     pids="$(list_model_pids)"
 
     if [ -z "$pids" ]; then
         ok "No managed local model servers are running for user $(id -un)"
+        if [ "$FORCE_ORPHANS" != "1" ]; then
+            local orphans
+            orphans="$(list_orphan_pids)"
+            if [ -n "$orphans" ]; then
+                warn "Untracked llama-server/mlx_lm.server processes exist; re-run with FORCE_ORPHANS=1 to stop them"
+            fi
+        fi
         return 0
     fi
 
     ps -o pid=,etime=,rss=,command= -p "$(pids_csv "$pids")" | while read -r pid etime rss command; do
         printf 'pid=%s  etime=%s  rss_kb=%s  cmd=%s\n' "$pid" "$etime" "$rss" "$command"
     done
-
-    echo
-    lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | awk 'NR==1 || /llama-server|llama\.cpp-server|mlx_lm\.server/'
 }
 
 stop_models() {
@@ -75,10 +110,11 @@ stop_models() {
 
     if [ -z "$pids" ]; then
         ok "No managed local model servers are running"
+        find "$RUN_DIR" -type f -name '*.pid' -delete 2>/dev/null || true
         return 0
     fi
 
-    section "Stopping model servers"
+    section "Stopping managed model servers"
     ps -o pid=,command= -p "$(pids_csv "$pids")"
     kill_pids "" "$pids"
 
@@ -89,7 +125,7 @@ stop_models() {
         pids="$(list_model_pids)"
         if [ -z "$pids" ]; then
             ok "All managed local model servers stopped cleanly"
-            find "$(cd "$(dirname "$0")" && pwd)/run" -type f -name '*.pid' -delete 2>/dev/null || true
+            find "$RUN_DIR" -type f -name '*.pid' -delete 2>/dev/null || true
             return 0
         fi
         sleep 1
@@ -103,7 +139,7 @@ stop_models() {
     pids="$(list_model_pids)"
     if [ -z "$pids" ]; then
         ok "All lingering managed local model servers were force stopped"
-        find "$(cd "$(dirname "$0")" && pwd)/run" -type f -name '*.pid' -delete 2>/dev/null || true
+        find "$RUN_DIR" -type f -name '*.pid' -delete 2>/dev/null || true
         return 0
     fi
 
@@ -123,6 +159,7 @@ case "$MODE" in
     *)
         err "Unknown mode: $MODE"
         echo "Usage: $0 [status|stop]"
+        echo "Set FORCE_ORPHANS=1 to also stop untracked llama-server/mlx_lm.server processes."
         exit 1
         ;;
 esac

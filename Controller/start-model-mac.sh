@@ -251,6 +251,9 @@ canonical_runtime() {
         litellm-proxy)
             printf '%s\n' "litellm"
             ;;
+        llama-swap|llamaswap)
+            printf '%s\n' "llama-swap"
+            ;;
         hf-transformers|huggingface-transformers)
             printf '%s\n' "transformers"
             ;;
@@ -282,6 +285,9 @@ runtime_default_port() {
             ;;
         litellm)
             printf '%s\n' "4000"
+            ;;
+        llama-swap)
+            printf '%s\n' "8080"
             ;;
         sglang)
             printf '%s\n' "30000"
@@ -794,7 +800,7 @@ elif [ "$RUNTIME" = "llama-cpp-python" ]; then
             die "llama-cpp-python failed to become ready for $MODEL_PROFILE"
         fi
     fi
-elif [ "$RUNTIME" = "external" ] || [ "$RUNTIME" = "lm-studio" ] || [ "$RUNTIME" = "localai" ] || [ "$RUNTIME" = "jan" ]; then
+elif [ "$RUNTIME" = "external" ] || [ "$RUNTIME" = "lm-studio" ] || [ "$RUNTIME" = "localai" ] || [ "$RUNTIME" = "jan" ] || [ "$RUNTIME" = "litellm" ] || [ "$RUNTIME" = "llama-swap" ]; then
     if wait_for_profile_ready "$HEALTHCHECK_MODE" "$HEALTHCHECK_URL" "${HEALTHCHECK_EXPECT_ID:-${SERVER_MODEL_ID:-}}" 1; then
         log "External profile responding on $HEALTHCHECK_URL"
     elif [ "$HEALTHCHECK_MODE" = "disabled" ]; then
