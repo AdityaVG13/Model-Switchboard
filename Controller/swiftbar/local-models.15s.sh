@@ -3,16 +3,14 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 CTL="$ROOT_DIR/modelctl.py"
-DASHBOARD="$ROOT_DIR/start-model-dashboard.sh"
 STATUS_JSON="$($CTL status --json 2>/dev/null || echo '{"statuses": []}')"
 
-STATUS_JSON="$STATUS_JSON" python3 - "$CTL" "$DASHBOARD" <<'PY'
+STATUS_JSON="$STATUS_JSON" python3 - "$CTL" <<'PY'
 import json
 import os
 import sys
 
 ctl = sys.argv[1]
-dashboard = sys.argv[2]
 data = json.loads(os.environ.get("STATUS_JSON", "{}") or "{}")
 statuses = data.get("statuses", [])
 running = sum(1 for item in statuses if item.get("running"))
@@ -24,7 +22,6 @@ print(f"LLMs {ready}/{total}")
 print("---")
 print(f"Ready endpoints: {ready}/{total}")
 print(f"Running processes: {running}")
-print(f"Open dashboard | bash={dashboard} terminal=false refresh=false")
 print(f"Refresh now | bash={ctl} param1=status terminal=false refresh=true")
 for integration in integrations:
     if "sync" in integration.get("capabilities", []):

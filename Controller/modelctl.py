@@ -121,7 +121,6 @@ def is_active_profile_watchdog_suppressed() -> bool:
     return time.time() < _paths._WATCHDOG_SUPPRESS_UNTIL
 
 
-HTML_PAGE = _web.HTML_PAGE
 DashboardHandler = _rebind_class(_web.DashboardHandler)
 serve_web = _rebind(_web.serve_web)
 main = _rebind(_cli.main)

@@ -28,6 +28,7 @@ MODULE_PATH = ROOT / "modelctl.py"
 SPEC = importlib.util.spec_from_file_location("modelctl", MODULE_PATH)
 assert SPEC and SPEC.loader
 MODULE = importlib.util.module_from_spec(SPEC)
+sys.modules["modelctl"] = MODULE
 SPEC.loader.exec_module(MODULE)
 
 
@@ -510,16 +511,20 @@ class ModelCtlTests(unittest.TestCase):
         self.assertEqual(MODULE.request_path("/?token=abc#token=xyz"), "/")
         self.assertEqual(MODULE.request_path("/index.html"), "/index.html")
 
-    def test_dashboard_serves_html_when_query_token_present(self) -> None:
+    def test_dashboard_rejects_browser_ui_routes(self) -> None:
         server = MODULE.ThreadingHTTPServer(("127.0.0.1", 0), MODULE.DashboardHandler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            with urllib.request.urlopen(f"http://127.0.0.1:{server.server_port}/?token=bootstrap-secret") as response:
-                body = response.read().decode()
-            self.assertEqual(response.status, 200)
-            self.assertIn("Model Switchboard Dashboard", body)
-            self.assertIn("sessionStorage.setItem('controllerToken'", body)
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(f"http://127.0.0.1:{server.server_port}/")
+            self.assertEqual(ctx.exception.code, 404)
+            body = json.loads(ctx.exception.read().decode())
+            self.assertEqual(body["error"], "not_found")
+
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(f"http://127.0.0.1:{server.server_port}/?token=bootstrap-secret")
+            self.assertEqual(ctx.exception.code, 404)
         finally:
             server.shutdown()
             server.server_close()

@@ -159,7 +159,7 @@ def modelctl_command_contracts() -> list[dict[str, object]]:
             "aliases": [],
             "mutates": "starts a local HTTP server",
             "json": False,
-            "purpose": "Serve the local model dashboard.",
+            "purpose": "Serve the local controller JSON API used by the menu bar app (no browser UI).",
             "safe_alternative": "./Controller/modelctl.py doctor --json",
         },
     ]
@@ -278,6 +278,7 @@ def modelctl_robot_docs(topic: str = "guide") -> str:
             "",
             "Mutation safety:",
             "- `start`, `stop`, `restart`, `switch`, `benchmark --background`, `stop-all`, and `serve-web` mutate local runtime state.",
+            "- `serve-web` exposes only `/api/*` JSON routes for the menu bar app; it does not serve a browser dashboard.",
             "- Use `status --json`, `doctor --json`, or `triage --json` before mutating when you need a safe probe.",
             "- Use `start|stop|restart|switch <profile> --dry-run --json` or `stop-all --dry-run --json` to preview profile mutations.",
             "- Use `--json` on applied profile mutations to receive a stable envelope with plan, captured output, errors, and post-action status.",

@@ -10,14 +10,17 @@ All notable changes to this project are documented in this file.
 - Split the controller implementation into the `Controller/msctl/` package (`paths`, `security`, `runtimes`, `profiles`, `mutations`, `benchmarks`, `doctor`, `agent_contracts`, `web`, `cli`) while keeping `modelctl.py` as the stable CLI/import facade.
 
 ### Changed
-- Extracted the controller web dashboard HTML into `Controller/web/dashboard.html` (first step toward decomposing the `modelctl.py` god file).
+- Controller HTTP server is menu-bar / API-only: removed the browser dashboard HTML, `/` and `/index.html` routes, and `start-model-dashboard.sh`. `serve-web` still exposes `/api/*` for the app.
 - Extended doctor report contracts (Python + Swift) to include `findings`, `next_steps`, and schema/version metadata the API already emitted.
 - `stop-all-models.sh` now stops only PID-file-tracked processes by default; set `FORCE_ORPHANS=1` for the previous broad pgrep sweep.
+
+### Removed
+- Browser-local dashboard UI (`Controller/web/dashboard.html`) and the `start-model-dashboard.sh` launcher that opened it.
 
 ### Fixed
 - Serialized start/stop/switch/benchmark mutations with a process-wide lock so concurrent HTTP workers cannot interleave lifecycle actions.
 - Cleared the active-profile marker and suppressed the crash-recovery watchdog at the start of Stop so intentional stops are not undone mid-flight.
-- Parsed HTTP request paths without query/fragment so `/?token=…` serves the dashboard and `/api/*?…` routes match correctly; prefer `#token=` bootstrap and strip `?token=` from the address bar.
+- Parsed HTTP request paths without query/fragment so `/api/*?…` routes match correctly against exact path equality.
 - Refused to kill port listeners based on health-check success alone; require a strong command match, and ignore short PID markers that over-match.
 - Default-denied non-loopback health/model-list probes unless `ALLOW_REMOTE_HEALTHCHECK=1` is set.
 - Constrained `doctor undo` run ids to a safe character set under `.doctor/runs`.

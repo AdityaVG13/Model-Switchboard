@@ -222,7 +222,7 @@ def doctor_findings(report: DoctorReportPayload) -> list[dict[str, object]]:
                 subsystem="controller",
                 message="controller API is not reachable",
                 evidence=controller["url"],
-                remediation="./Controller/modelctl.py serve-web",
+                remediation="bash ./Controller/install-model-switchboard-controller.sh",
             )
         )
     launch_agent = report["launch_agent"]

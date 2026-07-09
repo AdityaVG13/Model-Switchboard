@@ -172,7 +172,10 @@ def build_parser() -> argparse.ArgumentParser:
     stop_all_cmd.add_argument("--json", action="store_true", help="Print a structured result envelope")
     stop_all_cmd.add_argument("--dry-run", "--plan", action="store_true", help="Print the action plan without mutating")
 
-    web_cmd = sub.add_parser("serve-web", help="Serve the local model dashboard")
+    web_cmd = sub.add_parser(
+        "serve-web",
+        help="Serve the local controller JSON API for the menu bar app (no browser UI)",
+    )
     web_cmd.add_argument("--host", default=None)
     web_cmd.add_argument("--unsafe-bind", metavar="HOST", help="Bind a non-loopback host; requires an auth token")
     web_cmd.add_argument("--port", type=int, default=DEFAULT_WEB_PORT)

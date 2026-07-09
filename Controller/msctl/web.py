@@ -30,18 +30,13 @@ from msctl.security import (
     validate_controller_bind,
 )
 
-def load_dashboard_html() -> str:
-    html_path = BASE / "web" / "dashboard.html"
-    try:
-        return html_path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise RuntimeError(f"dashboard HTML missing: {html_path}") from exc
-
-
-HTML_PAGE = load_dashboard_html()
-
 
 class DashboardHandler(BaseHTTPRequestHandler):
+    """JSON control-plane handler for the menu bar app.
+
+    Intentionally serves no browser UI — only `/api/*` routes.
+    """
+
     def _auth_token(self) -> str | None:
         token = getattr(self.server, "auth_token", None)
         return token if isinstance(token, str) and token else None
@@ -96,14 +91,6 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _send_html(self, body: str, status: int = 200) -> None:
-        raw = body.encode()
-        self.send_response(status)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(raw)))
-        self.end_headers()
-        self.wfile.write(raw)
-
     def _read_json(self) -> ControllerRequest:
         raw_length = self.headers.get("Content-Length", "0") or "0"
         try:
@@ -146,10 +133,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         try:
             path = request_path(self.path)
-            if path.startswith("/api/") and not self._check_auth():
-                return
-            if path in {"/", "/index.html"}:
-                self._send_html(HTML_PAGE)
+            if not path.startswith("/api/"):
+                raise ControllerAPIError(404, "not_found", "not found")
+            if not self._check_auth():
                 return
             if path == "/api/status":
                 payload = status_payload()
@@ -241,11 +227,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
 
 def serve_web(host: str, port: int, *, unsafe_bind: bool = False, auth_token: str | None = None) -> None:
+    """Serve the local controller JSON API used by the menu bar app."""
     validate_controller_bind(host, unsafe_bind=unsafe_bind, auth_token=auth_token)
     threading.Thread(target=run_active_profile_watchdog, daemon=True).start()
     server = ThreadingHTTPServer((host, port), DashboardHandler)
     server.auth_token = auth_token
-    print(f"dashboard=http://{host}:{port}")
+    print(f"controller=http://{host}:{port}")
     server.serve_forever()
-
-
