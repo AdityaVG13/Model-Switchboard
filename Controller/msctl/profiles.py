@@ -458,6 +458,9 @@ def status_snapshot(selected: list[str] | None = None) -> list[ModelProfileStatu
 
 
 def status_payload(selected: list[str] | None = None) -> ControllerStatusPayload:
+    # Local import avoids a profiles <-> benchmarks import cycle.
+    from msctl.benchmarks import benchmark_status
+
     return make_controller_status_payload(
         statuses=status_snapshot(selected),
         benchmark=benchmark_status(),
@@ -765,5 +768,4 @@ def run_active_profile_watchdog(interval: float = 30.0) -> None:
         except Exception as exc:  # noqa: BLE001
             print(f"[WARN] active profile watchdog failed: {exc}", file=sys.stderr)
         time.sleep(interval)
-
 

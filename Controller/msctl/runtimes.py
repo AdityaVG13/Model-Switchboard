@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import shutil
 from typing import TypedDict
 
 from contracts import ProfileEnv
@@ -462,5 +463,4 @@ def executable_not_found_message(executable: str, *profile_keys: str) -> str:
         f"{executable} not found in controller PATH; "
         f"{profile_hint}reinstall the LaunchAgent so ~/.local/bin and Homebrew paths are available"
     )
-
 

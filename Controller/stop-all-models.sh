@@ -11,7 +11,7 @@ MODE="${1:-stop}"
 WAIT_SECONDS="${WAIT_SECONDS:-10}"
 FORCE_ORPHANS="${FORCE_ORPHANS:-0}"
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
-RUN_DIR="${ROOT_DIR}/run"
+RUN_DIR="${MODEL_SWITCHBOARD_RUN_DIR:-${ROOT_DIR}/run}"
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -63,6 +63,16 @@ list_model_pids() {
     printf '%s\n' "$pids" | awk 'NF'
 }
 
+delete_model_pidfiles() {
+    local pid_file
+    [ -d "$RUN_DIR" ] || return 0
+    for pid_file in "$RUN_DIR"/*.pid; do
+        [ -f "$pid_file" ] || continue
+        [ "$(basename "$pid_file")" = "benchmark.pid" ] && continue
+        rm -f -- "$pid_file"
+    done
+}
+
 pids_csv() {
     printf '%s\n' "$1" | paste -sd, -
 }
@@ -110,7 +120,7 @@ stop_models() {
 
     if [ -z "$pids" ]; then
         ok "No managed local model servers are running"
-        find "$RUN_DIR" -type f -name '*.pid' -delete 2>/dev/null || true
+        delete_model_pidfiles
         return 0
     fi
 
@@ -125,7 +135,7 @@ stop_models() {
         pids="$(list_model_pids)"
         if [ -z "$pids" ]; then
             ok "All managed local model servers stopped cleanly"
-            find "$RUN_DIR" -type f -name '*.pid' -delete 2>/dev/null || true
+            delete_model_pidfiles
             return 0
         fi
         sleep 1
@@ -139,7 +149,7 @@ stop_models() {
     pids="$(list_model_pids)"
     if [ -z "$pids" ]; then
         ok "All lingering managed local model servers were force stopped"
-        find "$RUN_DIR" -type f -name '*.pid' -delete 2>/dev/null || true
+        delete_model_pidfiles
         return 0
     fi
 

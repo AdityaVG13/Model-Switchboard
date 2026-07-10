@@ -511,6 +511,27 @@ class ModelCtlTests(unittest.TestCase):
         self.assertEqual(MODULE.request_path("/?token=abc#token=xyz"), "/")
         self.assertEqual(MODULE.request_path("/index.html"), "/index.html")
 
+    def test_stop_all_script_preserves_benchmark_pid_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            run_dir = Path(temp_dir)
+            benchmark_pid = run_dir / "benchmark.pid"
+            model_pid = run_dir / "stale-model.pid"
+            benchmark_pid.write_text("999998\n", encoding="utf-8")
+            model_pid.write_text("999999\n", encoding="utf-8")
+            env = {**os.environ, "MODEL_SWITCHBOARD_RUN_DIR": temp_dir}
+
+            result = subprocess.run(
+                ["bash", str(ROOT / "stop-all-models.sh"), "stop"],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(benchmark_pid.exists())
+            self.assertFalse(model_pid.exists())
+
     def test_dashboard_rejects_browser_ui_routes(self) -> None:
         server = MODULE.ThreadingHTTPServer(("127.0.0.1", 0), MODULE.DashboardHandler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)

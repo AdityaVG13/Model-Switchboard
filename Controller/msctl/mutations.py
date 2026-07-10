@@ -4,13 +4,15 @@ import argparse
 import contextlib
 import io
 import json
-import sys
 
-from msctl.paths import START_SCRIPT, STOP_ALL_SCRIPT
+from contracts import ProfileEnv
+from msctl.doctor import tool_version, utc_now
+from msctl.paths import ACTIVE_PROFILE_PATH, CLI_SCHEMA_VERSION, START_SCRIPT, STOP_ALL_SCRIPT
 from msctl.profiles import (
     base_url,
     ensure_unique_profile_endpoint,
     load_profiles,
+    read_pid,
     require_profile,
     restart_profile,
     start_profile,
@@ -22,6 +24,14 @@ from msctl.profiles import (
     switch_profile,
 )
 from msctl.security import ProfileConflictError
+
+
+def resolve_selected(args: argparse.Namespace) -> list[str] | None:
+    if not getattr(args, "profiles", None):
+        return None
+    if args.profiles == ["all"]:
+        return sorted(load_profiles())
+    return args.profiles
 
 def mutation_action(
     action: str,
@@ -315,5 +325,3 @@ def handle_mutating_command(args: argparse.Namespace) -> int:
 
     execute_mutating_args(args)
     return 0
-
-

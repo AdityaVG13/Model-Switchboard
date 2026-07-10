@@ -35,11 +35,13 @@ from msctl.paths import (
 )
 from msctl.profiles import (
     base_url,
-    endpoint_identity,
+    format_endpoint_conflict,
+    healthcheck_url,
     healthcheck_mode,
     integration_status,
     load_profiles,
     profile_endpoint_conflicts,
+    run,
     status_for_profile,
 )
 from msctl.runtimes import (
@@ -752,5 +754,3 @@ def print_doctor_health(payload: dict[str, object]) -> None:
         f"{'ok' if payload['launch_agent_installed'] and payload['launch_agent_running'] else 'warn'} | "
         f"installed={payload['launch_agent_installed']} running={payload['launch_agent_running']}"
     )
-
-

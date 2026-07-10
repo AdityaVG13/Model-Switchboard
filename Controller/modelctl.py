@@ -9,6 +9,9 @@ affects the same globals the HTTP handler and lifecycle helpers close over.
 """
 from __future__ import annotations
 
+# Imports in this facade intentionally seed globals used by rebound functions.
+# ruff: noqa: F401
+
 import json
 import os
 import pathlib
@@ -106,7 +109,7 @@ for _mod in (_security, _runtimes, _profiles, _mutations, _bench, _doctor, _agen
 
 # Re-apply mutation locks against rebound implementations.
 for _name in ("start_profile", "stop_profile", "restart_profile", "stop_all", "switch_profile", "start_benchmark"):
-    globals()[_name] = with_mutation_lock(globals()[_name])
+    globals()[_name] = _security.with_mutation_lock(globals()[_name])
 
 
 def suppress_active_profile_watchdog(seconds: float = 45.0) -> None:

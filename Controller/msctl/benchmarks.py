@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import json
 import os
 import pathlib
@@ -15,8 +16,8 @@ from contracts import (
     BenchmarkStatusPayload,
 )
 
-from msctl.paths import BASE, BENCH_RESULTS_DIR, BENCH_SCRIPT, RUN_DIR
-from msctl.profiles import read_pid
+from msctl.paths import BENCH_RESULTS_DIR, BENCH_SCRIPT, RUN_DIR
+from msctl.profiles import process_alive, read_pid
 from msctl.security import with_mutation_lock
 
 def prefill_cases_from_results(results: list[dict]) -> list[BenchmarkPrefillCasePayload]:
@@ -182,5 +183,3 @@ def start_benchmark(
     write_benchmark_log_pointer(log_path)
     benchmark_pid_path().write_text(f"{proc.pid}\n")
     return benchmark_status()
-
-

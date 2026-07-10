@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from msctl.doctor import doctor_capabilities, doctor_health_payload, doctor_report
+from msctl.doctor import doctor_capabilities, doctor_health_payload, tool_version
 from msctl.paths import (
     CLI_COMMAND_ALIASES,
     CLI_CONTRACT_VERSION,
     CLI_EXIT_CODES,
     CLI_GLOBAL_ALIASES,
     CLI_SCHEMA_VERSION,
-    PROFILE_DIR,
 )
 from msctl.profiles import load_profiles
 
@@ -290,5 +289,3 @@ def modelctl_robot_docs(topic: str = "guide") -> str:
             "- Diagnostic findings exit non-zero so agents can branch deterministically.",
         ]
     )
-
-

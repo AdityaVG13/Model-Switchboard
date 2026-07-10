@@ -1,7 +1,7 @@
 [
   {
     "id": "MSB-API-GET-001",
-    "section": "Dashboard read API",
+    "section": "Controller read API",
     "level": "MUST",
     "description": "GET /api/status returns the controller status payload contract",
     "arrange": "status_ok",
@@ -19,7 +19,7 @@
   },
   {
     "id": "MSB-API-GET-002",
-    "section": "Dashboard read API",
+    "section": "Controller read API",
     "level": "MUST",
     "description": "GET /api/integrations returns integration metadata and controller paths",
     "arrange": "integrations_ok",
@@ -35,16 +35,16 @@
   },
   {
     "id": "MSB-API-GET-003",
-    "section": "Dashboard read API",
+    "section": "Controller read API",
     "level": "SHOULD",
-    "description": "GET / serves the local dashboard HTML shell",
+    "description": "GET / does not expose a browser dashboard",
     "arrange": "none",
     "request": {"method": "GET", "path": "/"},
-    "expected": {"status": 200, "body_contains": "<!doctype html>"}
+    "expected": {"status": 404, "json_path_equals": {"error": "not_found"}}
   },
   {
     "id": "MSB-API-GET-004",
-    "section": "Dashboard read API",
+    "section": "Controller read API",
     "level": "MUST",
     "description": "Unknown API reads return a structured 404",
     "arrange": "none",

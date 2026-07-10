@@ -17,6 +17,7 @@ from msctl.doctor import (
     doctor_fix,
     doctor_health_payload,
     doctor_report,
+    doctor_run_id,
     doctor_robot_docs,
     doctor_undo,
     explain_doctor_finding,
@@ -32,15 +33,15 @@ from msctl.paths import (
     CLI_KNOWN_FLAGS,
     DEFAULT_WEB_HOST,
     DEFAULT_WEB_PORT,
-    PROFILE_DIR,
+    BENCH_SCRIPT,
 )
 from msctl.profiles import (
+    base_url,
     integration_status,
     load_profiles,
     print_status,
+    run,
     run_integration_action,
-    status_payload,
-    write_status_cache,
 )
 from msctl.security import resolve_auth_token
 from msctl.web import serve_web
@@ -353,5 +354,3 @@ def main() -> None:
     code = handle_mutating_command(args)
     if code:
         raise SystemExit(code)
-
-
