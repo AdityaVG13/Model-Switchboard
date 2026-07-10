@@ -372,7 +372,6 @@ def resolve_llama_server_bin(env: ProfileEnv | None = None) -> str | None:
         or shutil.which("llama.cpp-server")
     )
 
-
 def resolve_mlx_server_bin(env: ProfileEnv | None = None) -> str | None:
     env = env or {}
     return (
@@ -463,4 +462,3 @@ def executable_not_found_message(executable: str, *profile_keys: str) -> str:
         f"{executable} not found in controller PATH; "
         f"{profile_hint}reinstall the LaunchAgent so ~/.local/bin and Homebrew paths are available"
     )
-

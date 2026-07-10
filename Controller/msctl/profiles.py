@@ -768,4 +768,3 @@ def run_active_profile_watchdog(interval: float = 30.0) -> None:
         except Exception as exc:  # noqa: BLE001
             print(f"[WARN] active profile watchdog failed: {exc}", file=sys.stderr)
         time.sleep(interval)
-
