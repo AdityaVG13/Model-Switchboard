@@ -35,6 +35,7 @@ targets:
         MSW_EDITION: base
         MSW_URL_NAME: io.modelswitchboard.app
         MSW_URL_SCHEME: modelswitchboard
+        CODE_SIGN_ENTITLEMENTS: Resources/App/ModelSwitchboard.entitlements
     dependencies:
       - package: ModelSwitchboardPackage
         product: ModelSwitchboardCore
@@ -66,6 +67,7 @@ targets:
         MSW_EDITION: plus
         MSW_URL_NAME: io.modelswitchboard.plus
         MSW_URL_SCHEME: modelswitchboardplus
+        CODE_SIGN_ENTITLEMENTS: Resources/App/ModelSwitchboard.entitlements
     dependencies:
       - package: ModelSwitchboardPackage
         product: ModelSwitchboardCore
@@ -94,6 +96,7 @@ targets:
         APPLICATION_EXTENSION_API_ONLY: YES
         MSW_WIDGET_DISPLAY_NAME: Model Switchboard Widget
         MSW_EDITION: base
+        CODE_SIGN_ENTITLEMENTS: Resources/Widget/ModelSwitchboardWidget.entitlements
     dependencies:
       - package: ModelSwitchboardPackage
         product: ModelSwitchboardCore
@@ -112,6 +115,7 @@ targets:
         APPLICATION_EXTENSION_API_ONLY: YES
         MSW_WIDGET_DISPLAY_NAME: Model Switchboard Plus Widget
         MSW_EDITION: plus
+        CODE_SIGN_ENTITLEMENTS: Resources/Widget/ModelSwitchboardWidget.entitlements
     dependencies:
       - package: ModelSwitchboardPackage
         product: ModelSwitchboardCore

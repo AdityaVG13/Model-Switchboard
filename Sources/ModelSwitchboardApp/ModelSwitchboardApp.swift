@@ -7,17 +7,35 @@ import MenuBarExtraAccess
 struct ModelSwitchboardApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @AppStorage("controllerBaseURL") private var controllerBaseURL = "http://127.0.0.1:8877"
-    @AppStorage("controllerAuthToken") private var controllerAuthToken = ""
+    @State private var controllerAuthToken: String = ""
     @AppStorage(DashboardAppearanceKeys.menuBarShowsReadyCount) private var menuBarShowsReadyCount = true
-    @State private var store = SwitchboardStore(
-        controllerBaseURL: "http://127.0.0.1:8877",
-        controllerAuthToken: "",
-        features: AppFeatures.current
-    )
+    @State private var store: SwitchboardStore
     @StateObject private var launchAtLoginManager = LaunchAtLoginManager.shared
     @State private var isMenuPresented = false
     @State private var statusItem: NSStatusItem?
     private let features = AppFeatures.current
+
+    init() {
+        let token = Self.loadAndMigrateAuthToken()
+        let baseURL = UserDefaults.standard.string(forKey: "controllerBaseURL") ?? "http://127.0.0.1:8877"
+        _controllerAuthToken = State(initialValue: token)
+        _store = State(initialValue: SwitchboardStore(
+            controllerBaseURL: baseURL,
+            controllerAuthToken: token,
+            features: AppFeatures.current
+        ))
+    }
+
+    private static func loadAndMigrateAuthToken() -> String {
+        let defaults = UserDefaults.standard
+        let legacyKey = "controllerAuthToken"
+        if let oldToken = defaults.string(forKey: legacyKey), !oldToken.isEmpty {
+            KeychainTokenStorage.shared.save(oldToken)
+            defaults.removeObject(forKey: legacyKey)
+            return oldToken
+        }
+        return KeychainTokenStorage.shared.load() ?? ""
+    }
 
     var body: some Scene {
         MenuBarExtra {
@@ -49,6 +67,7 @@ struct ModelSwitchboardApp: App {
                     Task { await store.refresh() }
                 }
                 .onChange(of: controllerAuthToken) { _, newValue in
+                    KeychainTokenStorage.shared.save(newValue)
                     store.controllerAuthToken = newValue
                     Task { await store.refresh() }
                 }

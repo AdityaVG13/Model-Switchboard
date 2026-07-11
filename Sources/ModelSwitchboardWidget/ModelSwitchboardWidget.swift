@@ -7,11 +7,9 @@ import ModelSwitchboardCore
 private enum WidgetControllerConfig {
     static let defaultBaseURL = "http://127.0.0.1:8877"
     static let reloadInterval: TimeInterval = 60
-    static let authTokenDefaultsKey = "controllerAuthToken"
 
     static var authToken: String? {
-        let defaults = UserDefaults.standard
-        let raw = defaults.string(forKey: authTokenDefaultsKey)?
+        let raw = KeychainTokenStorage.shared.load()?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard let raw, !raw.isEmpty else { return nil }
         return raw
