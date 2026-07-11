@@ -9,6 +9,7 @@ let package = Package(
     products: [
         .library(name: "ModelSwitchboardCore", targets: ["ModelSwitchboardCore"]),
         .executable(name: "ModelSwitchboardApp", targets: ["ModelSwitchboardApp"]),
+        .executable(name: "ModelSwitchboardController", targets: ["ModelSwitchboardController"]),
     ],
     dependencies: [
         .package(path: "Vendor/MenuBarExtraAccess")
@@ -25,6 +26,15 @@ let package = Package(
             ]
         ),
         .target(
+            name: "ModelSwitchboardControllerCore",
+            dependencies: ["ModelSwitchboardCore"],
+            linkerSettings: [.linkedFramework("Network")]
+        ),
+        .executableTarget(
+            name: "ModelSwitchboardController",
+            dependencies: ["ModelSwitchboardControllerCore"]
+        ),
+        .target(
             name: "ModelSwitchboardTestSupport",
             dependencies: ["ModelSwitchboardCore"],
             path: "Tests/ModelSwitchboardTestSupport"
@@ -36,6 +46,10 @@ let package = Package(
         .testTarget(
             name: "ModelSwitchboardAppTests",
             dependencies: ["ModelSwitchboardApp", "ModelSwitchboardTestSupport"]
+        ),
+        .testTarget(
+            name: "ModelSwitchboardControllerTests",
+            dependencies: ["ModelSwitchboardControllerCore", "ModelSwitchboardCore"]
         ),
     ]
 )

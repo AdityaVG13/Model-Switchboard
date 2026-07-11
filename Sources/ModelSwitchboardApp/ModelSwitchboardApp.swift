@@ -16,6 +16,7 @@ struct ModelSwitchboardApp: App {
     private let features = AppFeatures.current
 
     init() {
+        ControllerServiceManager.shared.ensureRegistered()
         let token = Self.loadAndMigrateAuthToken()
         let baseURL = UserDefaults.standard.string(forKey: "controllerBaseURL") ?? "http://127.0.0.1:8877"
         _controllerAuthToken = State(initialValue: token)
