@@ -51,6 +51,7 @@ extension MenuBarContentView {
         case .settings:
             SettingsView(
                 controllerBaseURL: $controllerBaseURL,
+                controllerAuthToken: $controllerAuthToken,
                 profilesDirectory: store.profilesDirectory,
                 controllerRoot: store.resolvedControllerRoot,
                 doctorReport: store.doctorReport,

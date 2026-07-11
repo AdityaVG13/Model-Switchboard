@@ -37,10 +37,11 @@ final class SwitchboardStore {
     }
 
     typealias LoopbackEndpointProbe = ([ModelProfileStatus]) async -> Set<String>
-    typealias ControllerClientFactory = (String) throws -> ControllerClient
+    typealias ControllerClientFactory = (String, String?) throws -> ControllerClient
     typealias CachePayloadWriter = @MainActor (ControllerStatusPayload, String) -> Void
 
     var controllerBaseURL: String
+    var controllerAuthToken: String
     let features: AppFeatures
     var statuses: [ModelProfileStatus] = [] {
         didSet { sortedStatusesCache = nil }
@@ -77,13 +78,15 @@ final class SwitchboardStore {
 
     init(
         controllerBaseURL: String,
+        controllerAuthToken: String = "",
         features: AppFeatures = .current,
         autoStartRefresh: Bool = true,
         loopbackEndpointProbe: LoopbackEndpointProbe? = nil,
-        controllerClientFactory: @escaping ControllerClientFactory = { try ControllerClient(baseURLString: $0) },
+        controllerClientFactory: @escaping ControllerClientFactory = { try ControllerClient(baseURLString: $0, authToken: $1) },
         cachePayloadWriter: CachePayloadWriter? = nil
     ) {
         self.controllerBaseURL = controllerBaseURL
+        self.controllerAuthToken = controllerAuthToken
         self.features = features
         self.loopbackEndpointProbeFastUntil = Date().addingTimeInterval(Constants.loopbackEndpointProbeFastWindowSeconds)
         self.usesCustomLoopbackEndpointProbe = loopbackEndpointProbe != nil
@@ -149,7 +152,10 @@ final class SwitchboardStore {
     }
 
     var client: ControllerClient {
-        get throws { try controllerClientFactory(controllerBaseURL) }
+        get throws {
+            let token = controllerAuthToken.trimmingCharacters(in: .whitespacesAndNewlines)
+            return try controllerClientFactory(controllerBaseURL, token.isEmpty ? nil : token)
+        }
     }
 
     var diagnosticsNeedingAttention: [ProfileDiagnostic] {

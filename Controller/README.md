@@ -12,10 +12,10 @@ This directory contains the local control plane used by the app.
 
 ## Key Files
 
-- `modelctl.py` -- HTTP control plane and CLI entrypoint
+- `modelctl.py` -- stable CLI/HTTP entrypoint (thin facade over `msctl/`)
+- `msctl/` -- controller implementation package (profiles, doctor, API server, CLI, runtimes)
 - `ModelSwitchboardController.swift` -- lightweight launcher used by `launchd`
 - `install-model-switchboard-controller.sh` -- installs the background service
-- `start-model-dashboard.sh` -- launches the local dashboard in a browser
 - `start-model-mac.sh` -- runtime launcher for profile-backed model servers
 - `benchmark-local-models.py` -- local benchmark harness
 - `sync-droid-local-models.py` -- optional Droid model sync helper

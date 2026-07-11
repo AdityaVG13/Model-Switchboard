@@ -120,6 +120,25 @@ public enum ModelFixtures {
 
     public static let doctorReportJSON = #"""
     {
+      "schema_version": "1",
+      "doctor_contract_version": "1.0",
+      "tool_version": "1.2.0",
+      "generated_at": "2026-07-09T20:00:00Z",
+      "healthy": false,
+      "findings": [
+        {
+          "id": "fm-profile-example-mlx-missing-model",
+          "severity": "P1",
+          "subsystem": "profiles",
+          "message": "missing MODEL_DIR or MODEL_REPO",
+          "evidence": "example-mlx",
+          "remediation": "Set MODEL_DIR or MODEL_REPO in the profile",
+          "auto_fixable": false
+        }
+      ],
+      "next_steps": [
+        "Fix missing model sources reported by doctor"
+      ],
       "controller": {
         "url": "http://127.0.0.1:8877/api/status",
         "reachable": true,

@@ -7,6 +7,13 @@ import ModelSwitchboardCore
 private enum WidgetControllerConfig {
     static let defaultBaseURL = "http://127.0.0.1:8877"
     static let reloadInterval: TimeInterval = 60
+
+    static var authToken: String? {
+        let raw = KeychainTokenStorage.shared.load()?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let raw, !raw.isEmpty else { return nil }
+        return raw
+    }
 }
 
 enum SwitchboardWidgetDisplayMode: String, AppEnum {
@@ -74,7 +81,10 @@ struct SwitchboardTimelineProvider: AppIntentTimelineProvider {
 
     private func makeEntry(for configuration: SwitchboardWidgetConfigurationIntent) async -> SwitchboardWidgetEntry {
         do {
-            let client = try ControllerClient(baseURLString: WidgetControllerConfig.defaultBaseURL)
+            let client = try ControllerClient(
+                baseURLString: WidgetControllerConfig.defaultBaseURL,
+                authToken: WidgetControllerConfig.authToken
+            )
             let payload = try await client.fetchStatus()
             do {
                 try ControllerStatusCache.write(payload)

@@ -71,4 +71,18 @@ import ModelSwitchboardTestSupport
     #expect(report.profiles[0].launchMode == "adapter")
     #expect(report.profiles[0].errors == ["missing MODEL_DIR or MODEL_REPO"])
     #expect(report.profiles[0].warnings == ["base_url is empty; endpoint health checks may fail"])
+    #expect(report.healthy == false)
+    #expect(report.findings?.count == 1)
+    #expect(report.findings?.first?.id == "fm-profile-example-mlx-missing-model")
+    #expect(report.nextSteps?.first?.contains("Fix missing model sources") == true)
+}
+
+@Test func controllerClientBuildsUnencodedAPIPaths() throws {
+    let base = URL(string: "http://127.0.0.1:8877")!
+    let statusURL = ControllerClient.apiURL(baseURL: base, path: "/api/status")
+    #expect(statusURL.absoluteString == "http://127.0.0.1:8877/api/status")
+    #expect(!statusURL.absoluteString.contains("%2F"))
+
+    let switchURL = ControllerClient.apiURL(baseURL: base, path: "api/switch")
+    #expect(switchURL.path == "/api/switch")
 }

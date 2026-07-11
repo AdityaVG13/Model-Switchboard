@@ -32,6 +32,48 @@ public struct LaunchAgentStatus: Codable, Equatable, Sendable {
     }
 }
 
+public struct DoctorFinding: Codable, Equatable, Sendable, Identifiable {
+    public let id: String
+    public let severity: String
+    public let subsystem: String
+    public let message: String
+    public let evidence: String?
+    public let remediation: String?
+    public let autoFixable: Bool?
+    public let fixer: String?
+
+    public init(
+        id: String,
+        severity: String,
+        subsystem: String,
+        message: String,
+        evidence: String? = nil,
+        remediation: String? = nil,
+        autoFixable: Bool? = nil,
+        fixer: String? = nil
+    ) {
+        self.id = id
+        self.severity = severity
+        self.subsystem = subsystem
+        self.message = message
+        self.evidence = evidence
+        self.remediation = remediation
+        self.autoFixable = autoFixable
+        self.fixer = fixer
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case severity
+        case subsystem
+        case message
+        case evidence
+        case remediation
+        case autoFixable = "auto_fixable"
+        case fixer
+    }
+}
+
 public struct DoctorReport: Codable, Equatable, Sendable {
     public let controller: ControllerHeartbeat
     public let launchAgent: LaunchAgentStatus
@@ -39,6 +81,13 @@ public struct DoctorReport: Codable, Equatable, Sendable {
     public let profilesDirectory: String?
     public let controllerRoot: String?
     public let profiles: [ProfileDiagnostic]
+    public let schemaVersion: String?
+    public let doctorContractVersion: String?
+    public let toolVersion: String?
+    public let generatedAt: String?
+    public let healthy: Bool?
+    public let findings: [DoctorFinding]?
+    public let nextSteps: [String]?
 
     public init(
         controller: ControllerHeartbeat,
@@ -46,7 +95,14 @@ public struct DoctorReport: Codable, Equatable, Sendable {
         integrations: [ControllerIntegration],
         profilesDirectory: String?,
         controllerRoot: String?,
-        profiles: [ProfileDiagnostic]
+        profiles: [ProfileDiagnostic],
+        schemaVersion: String? = nil,
+        doctorContractVersion: String? = nil,
+        toolVersion: String? = nil,
+        generatedAt: String? = nil,
+        healthy: Bool? = nil,
+        findings: [DoctorFinding]? = nil,
+        nextSteps: [String]? = nil
     ) {
         self.controller = controller
         self.launchAgent = launchAgent
@@ -54,6 +110,13 @@ public struct DoctorReport: Codable, Equatable, Sendable {
         self.profilesDirectory = profilesDirectory
         self.controllerRoot = controllerRoot
         self.profiles = profiles
+        self.schemaVersion = schemaVersion
+        self.doctorContractVersion = doctorContractVersion
+        self.toolVersion = toolVersion
+        self.generatedAt = generatedAt
+        self.healthy = healthy
+        self.findings = findings
+        self.nextSteps = nextSteps
     }
 
     enum CodingKeys: String, CodingKey {
@@ -63,5 +126,12 @@ public struct DoctorReport: Codable, Equatable, Sendable {
         case profilesDirectory = "profiles_dir"
         case controllerRoot = "controller_root"
         case profiles
+        case schemaVersion = "schema_version"
+        case doctorContractVersion = "doctor_contract_version"
+        case toolVersion = "tool_version"
+        case generatedAt = "generated_at"
+        case healthy
+        case findings
+        case nextSteps = "next_steps"
     }
 }

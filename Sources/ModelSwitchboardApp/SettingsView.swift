@@ -3,6 +3,7 @@ import ModelSwitchboardCore
 
 struct SettingsView: View {
     @Binding var controllerBaseURL: String
+    @Binding var controllerAuthToken: String
     let profilesDirectory: String?
     let controllerRoot: String?
     let doctorReport: DoctorReport?
@@ -119,13 +120,18 @@ struct SettingsView: View {
                 TextField(defaultControllerBaseURL, text: $controllerBaseURL)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(size: 11.5, design: .monospaced))
+                Text("Bearer token (optional)")
+                    .font(.system(size: 12.5))
+                SecureField("Required for --unsafe-bind controllers", text: $controllerAuthToken)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 11.5, design: .monospaced))
                 HStack(spacing: 10) {
                     settingsLinkButton("Use Default") {
                         controllerBaseURL = defaultControllerBaseURL
                     }
                     settingsLinkButton("Reconnect", emphasized: true, action: reconnect)
                 }
-                Text("Use the loopback controller unless you intentionally moved the control plane to another host or port. Model paths and launch commands stay in controller profile files.")
+                Text("Use the loopback controller unless you intentionally moved the control plane to another host or port. When the controller requires auth, paste the bearer token here (never in the URL). Model paths and launch commands stay in controller profile files.")
                     .font(.system(size: 10.5))
                     .foregroundStyle(theme.sub)
                     .fixedSize(horizontal: false, vertical: true)
