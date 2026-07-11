@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import ast
 import json
 import re
 import subprocess
@@ -154,29 +153,6 @@ def parse_swift_module_graph() -> dict[str, set[str]]:
     return graph
 
 
-def parse_python_module_graph() -> dict[str, set[str]]:
-    controller_dir = ROOT / "Controller"
-    modules = {path.stem: path for path in controller_dir.glob("*.py")}
-    graph: dict[str, set[str]] = {name: set() for name in modules}
-
-    for module, path in modules.items():
-        tree = ast.parse(path.read_text(), filename=str(path))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                for alias in node.names:
-                    top = alias.name.split(".")[0]
-                    if top in modules and top != module:
-                        graph[module].add(top)
-            elif isinstance(node, ast.ImportFrom):
-                if not node.module:
-                    continue
-                top = node.module.split(".")[0]
-                if top in modules and top != module:
-                    graph[module].add(top)
-
-    return graph
-
-
 def print_graph(title: str, graph: dict[str, set[str]]) -> None:
     print(f"\n{title}")
     for node in sorted(graph):
@@ -201,7 +177,6 @@ def main() -> int:
         ("Swift module import graph", parse_swift_module_graph()),
         ("Swift SPM target dependency graph", parse_spm_target_graph()),
         ("Swift Xcode target dependency graph", parse_xcode_target_graph()),
-        ("Python controller module import graph", parse_python_module_graph()),
     ]
 
     ok = True

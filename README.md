@@ -276,7 +276,7 @@ PRs, issues, and profile recipes are welcome. A few ground rules that keep the p
 
 **`Sync Droid` is currently Factory-Droid-specific** because that's the agent I run. The integration slot is generic, but the adapter is not. **PRs that add sync adapters for other local-model terminals or agentic tools are very welcome**, including but not limited to **Cursor**, **Windsurf**, **OpenAI Codex CLI**, **Zed**, **Continue**, **Aider**, **LM Studio**, **Ollama chat frontends**, or any **OpenAI-compatible consumer**.
 
-If you build one, follow the shape of `Controller/sync-droid-local-models.py` and register it under `Controller/integrations/` so it shows up in the Plus menu automatically. Full contributor guide and the release pipeline live in [SETUP.md](SETUP.md).
+If you build one, implement the adapter in `ModelSwitchboardControllerCore` and register it with the native integration service so it appears in the Plus menu automatically. Full contributor guidance lives in [SETUP.md](SETUP.md).
 
 Before opening a PR:
 
