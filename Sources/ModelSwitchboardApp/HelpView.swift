@@ -15,7 +15,7 @@ struct HelpView: View {
                 section(
                     title: "Quick Start",
                     bullets: [
-                        "Install the local controller service first. \(features.appDisplayName) assumes a controller is serving status and actions at `http://127.0.0.1:8877` by default.",
+                        "Install the local controller service first. \(features.appDisplayName) assumes a controller is serving status and actions at `\(ControllerEndpointDefaults.baseURLString)` by default.",
                         "Put model launch profiles in the controller's `model-profiles` directory. Settings now shows the live path reported by the controller and can open that folder in Finder.",
                         "Use `Start` to spawn a model, `Activate` to switch your primary endpoint, and `Stop All` before closing the lid or leaving the machine on battery."
                     ]

@@ -1,13 +1,14 @@
 import Foundation
 import Testing
+import ModelSwitchboardCore
 
 @testable import ModelSwitchboardControllerCore
 
 @Test func nativeControllerConfigurationEnforcesBindSecurity() throws {
   let root = URL(fileURLWithPath: "/tmp/controller")
   let loopback = try ControllerConfiguration(root: root)
-  #expect(loopback.host == "127.0.0.1")
-  #expect(loopback.port == 8877)
+  #expect(loopback.host == ControllerEndpointDefaults.host)
+  #expect(loopback.port == ControllerEndpointDefaults.port)
   #expect(throws: ControllerError.self) {
     try ControllerConfiguration(root: root, host: "0.0.0.0")
   }

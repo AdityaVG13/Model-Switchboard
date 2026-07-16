@@ -4,18 +4,23 @@ import Testing
 
 @MainActor
 struct ControllerServiceManagerTests {
-    @Test func ensureRegisteredReportsMissingEmbeddedControllerWhenBundleIncomplete() throws {
-        let manager = ControllerServiceManager.shared
+    @Test func ensureRegisteredReportsMissingEmbeddedControllerForIncompleteBundle() async throws {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ControllerServiceManagerTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
 
-        // Packaged Xcode hosts may already embed the controller; only assert the
-        // incomplete-bundle diagnostic path.
-        guard manager.bundledServiceAvailable == false else {
-            return
-        }
+        let manager = ControllerServiceManager(
+            bundle: ControllerBundleLayout(
+                resourceURL: tempRoot.appendingPathComponent("Resources", isDirectory: true),
+                bundleURL: tempRoot
+            )
+        )
 
-        let diagnostic = try #require(manager.ensureRegistered())
+        #expect(manager.bundledServiceAvailable == false)
+        let diagnostic = try #require(await manager.ensureRegistered())
         #expect(diagnostic.localizedCaseInsensitiveContains("missing the embedded controller"))
         #expect(manager.lastDiagnostic == diagnostic)
-        #expect(manager.ensureRegistered() == diagnostic)
+        #expect(await manager.ensureRegistered() == diagnostic)
     }
 }
