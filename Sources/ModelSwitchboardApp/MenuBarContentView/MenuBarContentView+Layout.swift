@@ -83,9 +83,6 @@ extension MenuBarContentView {
                     minWidth: minMainPanelWidth,
                     maxWidth: maxMainPanelWidth
                 )
-                // Apply the full frame (including origin) during the drag. Persisting
-                // width into AppStorage mid-drag used to trigger setContentSize, which
-                // pins the leading edge and makes a left-handle drag look like a right resize.
                 hostWindow.setFrame(nextFrame, display: true)
                 synchronizeInspectorWindow()
             }
@@ -106,8 +103,7 @@ extension MenuBarContentView {
     }
 
     func configureHostWindow(_ window: NSWindow) {
-        // Edge handles own horizontal resize. Native .resizable grows from the
-        // opposite edge and fights leading-handle pinning under MenuBarExtra.
+        // Custom edge handles own horizontal resize; native .resizable fights leading-edge pinning.
         window.styleMask.remove(.resizable)
         window.showsResizeIndicator = false
         window.minSize = NSSize(width: minMainPanelWidth, height: panelHeight)
