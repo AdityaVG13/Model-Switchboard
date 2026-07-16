@@ -87,6 +87,8 @@ extension MenuBarContentView {
                 synchronizeInspectorWindow()
             }
             .onEnded { _ in
+                // Persist while activeResizeStartFrame is still set so onChange skips
+                // setContentSize (which would undo leading-edge origin updates).
                 if let hostWindow {
                     let nextWidth = Double(hostWindow.frame.width)
                     if abs(storedMainPanelWidth - nextWidth) > 0.5 {

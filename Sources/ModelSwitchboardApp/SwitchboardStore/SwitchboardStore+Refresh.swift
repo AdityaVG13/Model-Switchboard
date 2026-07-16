@@ -48,16 +48,17 @@ extension SwitchboardStore {
                 apply(doctorReport: report)
             }
             lastError = nil
+            bootstrapDiagnostic = nil
             lastUpdated = Date()
         } catch {
             if isBenignCancellation(error) { return }
             if statuses.isEmpty, let cached = ControllerStatusCache.load() {
                 apply(payload: cached.payload)
                 lastUpdated = cached.cachedAt
-                lastError = "Controller unavailable. Showing cached state."
+                lastError = bootstrapDiagnostic ?? "Controller unavailable. Showing cached state."
                 return
             }
-            lastError = error.localizedDescription
+            lastError = bootstrapDiagnostic ?? error.localizedDescription
         }
     }
 
@@ -70,9 +71,17 @@ extension SwitchboardStore {
             let report = try await client.fetchDoctorReport()
             apply(doctorReport: report)
             lastError = nil
+            bootstrapDiagnostic = nil
         } catch {
             if isBenignCancellation(error) { return }
-            lastError = error.localizedDescription
+            lastError = bootstrapDiagnostic ?? error.localizedDescription
+        }
+    }
+
+    func applyBootstrapDiagnostic(_ message: String?) {
+        bootstrapDiagnostic = message
+        if let message {
+            lastError = message
         }
     }
 }
