@@ -95,23 +95,17 @@ struct ModelSwitchboardApp: App {
                 statusItem?.button?.toolTip = newValue
             }
             .onChange(of: menuBarShowsReadyCount) { _, newValue in
-                applyStatusItemLayout(to: statusItem, showsReadyCount: newValue)
+                statusItem?.length = newValue ? NSStatusItem.variableLength : NSStatusItem.squareLength
             }
         }
         .menuBarExtraAccess(isPresented: $isMenuPresented) { item in
             statusItem = item
-            applyStatusItemLayout(to: item, showsReadyCount: menuBarShowsReadyCount)
+            item.length = menuBarShowsReadyCount ? NSStatusItem.variableLength : NSStatusItem.squareLength
             item.button?.toolTip = store.menuBarHelp
+            // Let SwiftUI own button contents; clearing title / forcing imageOnly
+            // clips the ready-count onto neighboring menu bar items.
             item.button?.setAccessibilityLabel(features.appDisplayName)
         }
         .menuBarExtraStyle(.window)
-    }
-
-    /// Size the AppKit status item for SwiftUI's label. Do not clear `title` or force
-    /// `.imageOnly` -- that clips the ready-count text so it paints over neighboring
-    /// menu bar items.
-    private func applyStatusItemLayout(to item: NSStatusItem?, showsReadyCount: Bool) {
-        guard let item else { return }
-        item.length = showsReadyCount ? NSStatusItem.variableLength : NSStatusItem.squareLength
     }
 }
