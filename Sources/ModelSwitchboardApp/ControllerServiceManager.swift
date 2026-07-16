@@ -3,26 +3,75 @@ import ModelSwitchboardCore
 import OSLog
 import ServiceManagement
 
+private let controllerLaunchAgentPlistName = "io.modelswitchboard.controller.plist"
+
+/// Bundle layout used by ``ControllerServiceManager`` so tests can inject an incomplete app.
+struct ControllerBundleLayout {
+    var resourceURL: URL?
+    var bundleURL: URL
+
+    init(resourceURL: URL?, bundleURL: URL) {
+        self.resourceURL = resourceURL
+        self.bundleURL = bundleURL
+    }
+
+    static var main: ControllerBundleLayout {
+        ControllerBundleLayout(
+            resourceURL: Bundle.main.resourceURL,
+            bundleURL: Bundle.main.bundleURL
+        )
+    }
+
+    func hasEmbeddedController(fileManager: FileManager = .default) -> Bool {
+        guard let resourceURL else { return false }
+        let binary = resourceURL.appendingPathComponent("ModelSwitchboardController")
+        let plist = bundleURL.appendingPathComponent(
+            "Contents/Library/LaunchAgents/\(controllerLaunchAgentPlistName)"
+        )
+        return fileManager.isExecutableFile(atPath: binary.path)
+            && fileManager.fileExists(atPath: plist.path)
+    }
+
+    func controllerBinaryURL(fileManager: FileManager = .default) -> URL? {
+        guard let resourceURL else { return nil }
+        let url = resourceURL.appendingPathComponent("ModelSwitchboardController")
+        return fileManager.isExecutableFile(atPath: url.path) ? url : nil
+    }
+
+    func controllerSupportURL(fileManager: FileManager = .default) -> URL? {
+        guard let resourceURL else { return nil }
+        let url = resourceURL.appendingPathComponent("ControllerSupport", isDirectory: true)
+        return fileManager.fileExists(atPath: url.path) ? url : nil
+    }
+}
+
 @MainActor
 final class ControllerServiceManager {
     static let shared = ControllerServiceManager()
-    static let plistName = "io.modelswitchboard.controller.plist"
+    static let plistName = controllerLaunchAgentPlistName
 
     private static let logger = Logger(
         subsystem: "io.modelswitchboard.app",
         category: "controller-service"
     )
 
-    private let fileManager = FileManager.default
+    private let bundle: ControllerBundleLayout
+    private let fileManager: FileManager
     private var attemptedRegistration = false
 
     /// Set when registration cannot start a controller the panel can talk to.
     private(set) var lastDiagnostic: String?
 
-    private init() {}
+    init(
+        bundle: ControllerBundleLayout = .main,
+        fileManager: FileManager = .default
+    ) {
+        self.bundle = bundle
+        self.fileManager = fileManager
+    }
 
     @discardableResult
-    func ensureRegistered() -> String? {
+    func ensureRegistered() async -> String? {
         guard !attemptedRegistration else { return lastDiagnostic }
         attemptedRegistration = true
         lastDiagnostic = nil
@@ -42,7 +91,7 @@ final class ControllerServiceManager {
             if service.status == .notRegistered {
                 try service.register()
             }
-            // Don't block App.init waiting for the port. If the LaunchAgent is not
+            // Don't block the first frame waiting for the port. If the LaunchAgent is not
             // enabled yet, start a detached serve and let SwitchboardStore refresh.
             if service.status != .enabled {
                 launchDetachedControllerIfNeeded()
@@ -61,15 +110,11 @@ final class ControllerServiceManager {
     }
 
     var bundledServiceAvailable: Bool {
-        guard let resources = Bundle.main.resourceURL else { return false }
-        return fileManager.isExecutableFile(atPath: resources.appendingPathComponent("ModelSwitchboardController").path)
-            && fileManager.fileExists(atPath: Bundle.main.bundleURL
-                .appendingPathComponent("Contents/Library/LaunchAgents/\(Self.plistName)").path)
+        bundle.hasEmbeddedController(fileManager: fileManager)
     }
 
     private func launchDetachedControllerIfNeeded() {
-        guard let binary = Bundle.main.resourceURL?.appendingPathComponent("ModelSwitchboardController"),
-              fileManager.isExecutableFile(atPath: binary.path) else { return }
+        guard let binary = bundle.controllerBinaryURL(fileManager: fileManager) else { return }
 
         let process = Process()
         process.executableURL = binary
@@ -89,8 +134,7 @@ final class ControllerServiceManager {
     }
 
     private func bootstrapSupportDirectory() throws {
-        guard let source = Bundle.main.resourceURL?.appendingPathComponent("ControllerSupport", isDirectory: true),
-              fileManager.fileExists(atPath: source.path) else { return }
+        guard let source = bundle.controllerSupportURL(fileManager: fileManager) else { return }
         let destination = fileManager.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/ModelSwitchboard/Controller", isDirectory: true)
         try fileManager.createDirectory(at: destination, withIntermediateDirectories: true)

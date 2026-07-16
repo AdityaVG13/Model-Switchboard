@@ -6,7 +6,8 @@ import MenuBarExtraAccess
 @main
 struct ModelSwitchboardApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @AppStorage("controllerBaseURL") private var controllerBaseURL = "http://127.0.0.1:8877"
+    @AppStorage(ControllerEndpointDefaults.baseURLUserDefaultsKey)
+    private var controllerBaseURL = ControllerEndpointDefaults.baseURLString
     @State private var controllerAuthToken: String = ""
     @AppStorage(DashboardAppearanceKeys.menuBarShowsReadyCount) private var menuBarShowsReadyCount = true
     @State private var store: SwitchboardStore
@@ -16,19 +17,18 @@ struct ModelSwitchboardApp: App {
     private let features = AppFeatures.current
 
     init() {
-        let registrationDiagnostic = ControllerServiceManager.shared.ensureRegistered()
         let token = Self.loadAndMigrateAuthToken()
-        let baseURL = UserDefaults.standard.string(forKey: "controllerBaseURL") ?? "http://127.0.0.1:8877"
+        let baseURL =
+            UserDefaults.standard.string(forKey: ControllerEndpointDefaults.baseURLUserDefaultsKey)
+            ?? ControllerEndpointDefaults.baseURLString
         _controllerAuthToken = State(initialValue: token)
-        let initialStore = SwitchboardStore(
-            controllerBaseURL: baseURL,
-            controllerAuthToken: token,
-            features: AppFeatures.current
+        _store = State(
+            initialValue: SwitchboardStore(
+                controllerBaseURL: baseURL,
+                controllerAuthToken: token,
+                features: AppFeatures.current
+            )
         )
-        if let registrationDiagnostic {
-            initialStore.lastError = registrationDiagnostic
-        }
-        _store = State(initialValue: initialStore)
     }
 
     private static func loadAndMigrateAuthToken() -> String {
@@ -90,6 +90,9 @@ struct ModelSwitchboardApp: App {
             }
             .task {
                 statusItem?.button?.toolTip = store.menuBarHelp
+                if let diagnostic = await ControllerServiceManager.shared.ensureRegistered() {
+                    store.lastError = diagnostic
+                }
             }
             .onChange(of: store.menuBarHelp) { _, newValue in
                 statusItem?.button?.toolTip = newValue

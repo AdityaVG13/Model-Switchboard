@@ -343,10 +343,8 @@ preflight_checks() {
 verify_install() {
   [ -d "$INSTALL_APP" ] || die "installed app missing: $INSTALL_APP"
   [ -f "$INSTALL_APP/Contents/Info.plist" ] || die "installed app Info.plist missing"
-  [ -x "$INSTALL_APP/Contents/Resources/ModelSwitchboardController" ] \
-    || die "embedded controller missing: $INSTALL_APP/Contents/Resources/ModelSwitchboardController"
-  [ -f "$INSTALL_APP/Contents/Library/LaunchAgents/io.modelswitchboard.controller.plist" ] \
-    || die "controller LaunchAgent missing from installed app"
+  "$ROOT_DIR/Scripts/verify-embedded-controller.sh" "$INSTALL_APP" >/dev/null \
+    || die "embedded controller verification failed for $INSTALL_APP"
   "$ROOT_DIR/Scripts/verify-privacy.sh" "$INSTALL_APP" >/dev/null
   if [ "$INSTALL_CLI" -eq 1 ]; then
     [ -x "$BIN_DIR/model-switchboardctl" ] || die "CLI missing: $BIN_DIR/model-switchboardctl"
