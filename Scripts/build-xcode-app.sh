@@ -41,4 +41,12 @@ xcodebuild \
   CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
   CODE_SIGNING_ALLOWED=NO \
   build
-printf 'app=%s\n' "$DERIVED_DATA_DIR/Build/Products/$CONFIGURATION/$PRODUCT_NAME.app"
+
+APP_BUNDLE="$DERIVED_DATA_DIR/Build/Products/$CONFIGURATION/$PRODUCT_NAME.app"
+# Always embed the controller into Xcode products unless a parent packager
+# (build-app.sh) will do it after this step. UI-only bundles cannot register
+# the LaunchAgent and surface "Could not connect to the server."
+if [ "${SKIP_CONTROLLER_EMBED:-0}" != "1" ]; then
+  "$ROOT_DIR/Scripts/embed-controller.sh" "$APP_BUNDLE" >/dev/null
+fi
+printf 'app=%s\n' "$APP_BUNDLE"
