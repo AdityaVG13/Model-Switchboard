@@ -1,8 +1,9 @@
 import Foundation
+import ModelSwitchboardCore
 
 public struct ControllerConfiguration: Sendable, Equatable {
-  public static let defaultHost = "127.0.0.1"
-  public static let defaultPort = 8877
+  public static let defaultHost = ControllerEndpointDefaults.host
+  public static let defaultPort = Int(ControllerEndpointDefaults.port)
   public static let minimumTokenBytes = 16
   public static let maximumBodyBytes = 64 * 1024
 
@@ -15,7 +16,7 @@ public struct ControllerConfiguration: Sendable, Equatable {
   public init(
     root: URL,
     host: String = Self.defaultHost,
-    port: UInt16 = UInt16(Self.defaultPort),
+    port: UInt16 = ControllerEndpointDefaults.port,
     authToken: String? = nil,
     unsafeBind: Bool = false
   ) throws {

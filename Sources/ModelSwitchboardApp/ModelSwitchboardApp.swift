@@ -6,7 +6,8 @@ import MenuBarExtraAccess
 @main
 struct ModelSwitchboardApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @AppStorage("controllerBaseURL") private var controllerBaseURL = "http://127.0.0.1:8877"
+    @AppStorage(ControllerEndpointDefaults.baseURLUserDefaultsKey)
+    private var controllerBaseURL = ControllerEndpointDefaults.baseURLString
     @State private var controllerAuthToken: String = ""
     @AppStorage(DashboardAppearanceKeys.menuBarShowsReadyCount) private var menuBarShowsReadyCount = true
     @State private var store: SwitchboardStore
@@ -16,15 +17,18 @@ struct ModelSwitchboardApp: App {
     private let features = AppFeatures.current
 
     init() {
-        ControllerServiceManager.shared.ensureRegistered()
         let token = Self.loadAndMigrateAuthToken()
-        let baseURL = UserDefaults.standard.string(forKey: "controllerBaseURL") ?? "http://127.0.0.1:8877"
+        let baseURL =
+            UserDefaults.standard.string(forKey: ControllerEndpointDefaults.baseURLUserDefaultsKey)
+            ?? ControllerEndpointDefaults.baseURLString
         _controllerAuthToken = State(initialValue: token)
-        _store = State(initialValue: SwitchboardStore(
-            controllerBaseURL: baseURL,
-            controllerAuthToken: token,
-            features: AppFeatures.current
-        ))
+        _store = State(
+            initialValue: SwitchboardStore(
+                controllerBaseURL: baseURL,
+                controllerAuthToken: token,
+                features: AppFeatures.current
+            )
+        )
     }
 
     private static func loadAndMigrateAuthToken() -> String {
@@ -86,6 +90,9 @@ struct ModelSwitchboardApp: App {
             }
             .task {
                 statusItem?.button?.toolTip = store.menuBarHelp
+                store.applyBootstrapDiagnostic(
+                    await ControllerServiceManager.shared.ensureRegistered()
+                )
             }
             .onChange(of: store.menuBarHelp) { _, newValue in
                 statusItem?.button?.toolTip = newValue
@@ -98,8 +105,8 @@ struct ModelSwitchboardApp: App {
             statusItem = item
             item.length = menuBarShowsReadyCount ? NSStatusItem.variableLength : NSStatusItem.squareLength
             item.button?.toolTip = store.menuBarHelp
-            item.button?.title = ""
-            item.button?.imagePosition = .imageOnly
+            // Let SwiftUI own button contents; clearing title / forcing imageOnly
+            // clips the ready-count onto neighboring menu bar items.
             item.button?.setAccessibilityLabel(features.appDisplayName)
         }
         .menuBarExtraStyle(.window)

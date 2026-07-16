@@ -4,6 +4,10 @@ set -euo pipefail
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=controller-endpoint-defaults.sh
+source "$SCRIPT_DIR/controller-endpoint-defaults.sh"
+
 APP_VARIANT="${APP_VARIANT:-base}"
 case "$APP_VARIANT" in
   base)
@@ -33,8 +37,8 @@ if [[ ! -d "$APP_PATH" ]]; then
   exit 1
 fi
 
-CONTROLLER_URL="${MSW_CONTROLLER_URL:-http://127.0.0.1:8877}"
-DEFAULT_CONTROLLER_URL="http://127.0.0.1:8877"
+CONTROLLER_URL="${MSW_CONTROLLER_URL:-$CONTROLLER_ENDPOINT_BASE_URL}"
+DEFAULT_CONTROLLER_URL="$CONTROLLER_ENDPOINT_BASE_URL"
 DROID_SETTINGS="$HOME/.factory/settings.json"
 MSW_VERIFY_UI="${MSW_VERIFY_UI:-1}"
 

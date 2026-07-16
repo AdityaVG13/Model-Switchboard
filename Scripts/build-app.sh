@@ -36,16 +36,10 @@ strip_macho_binaries() {
 }
 
 cd "$ROOT_DIR"
-APP_VARIANT="$APP_VARIANT" CONFIGURATION="$CONFIGURATION" "$ROOT_DIR/Scripts/build-xcode-app.sh" >/dev/null
-
-CONTROLLER_BIN_DIR="$(swift build -c release --show-bin-path)"
-swift build -c release --product ModelSwitchboardController >/dev/null
-mkdir -p "$SOURCE_APP/Contents/Resources/ControllerSupport/model-profiles" "$SOURCE_APP/Contents/Library/LaunchAgents"
-cp "$CONTROLLER_BIN_DIR/ModelSwitchboardController" "$SOURCE_APP/Contents/Resources/ModelSwitchboardController"
-cp "$ROOT_DIR/Controller/start-model-mac.sh" "$ROOT_DIR/Controller/stop-all-models.sh" "$SOURCE_APP/Contents/Resources/ControllerSupport/"
-cp -R "$ROOT_DIR/Controller/model-profiles/examples" "$SOURCE_APP/Contents/Resources/ControllerSupport/model-profiles/examples"
-cp "$ROOT_DIR/Resources/Controller/io.modelswitchboard.controller.plist" "$SOURCE_APP/Contents/Library/LaunchAgents/"
-chmod 755 "$SOURCE_APP/Contents/Resources/ModelSwitchboardController" "$SOURCE_APP/Contents/Resources/ControllerSupport/"*.sh
+# Skip nested embed; build-app embeds once into SOURCE_APP then copies to dist.
+SKIP_CONTROLLER_EMBED=1 APP_VARIANT="$APP_VARIANT" CONFIGURATION="$CONFIGURATION" \
+  "$ROOT_DIR/Scripts/build-xcode-app.sh" >/dev/null
+"$ROOT_DIR/Scripts/embed-controller.sh" "$SOURCE_APP" >/dev/null
 
 rm -rf "$TARGET_APP"
 mkdir -p "$DIST_DIR"

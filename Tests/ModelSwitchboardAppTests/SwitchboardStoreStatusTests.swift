@@ -17,6 +17,25 @@ private func makeStore(
 }
 
 @MainActor
+@Test func bootstrapDiagnosticSurvivesFailedRefresh() async {
+    let store = SwitchboardStore(
+        controllerBaseURL: ControllerEndpointDefaults.baseURLString,
+        features: .base,
+        autoStartRefresh: false,
+        controllerClientFactory: { _, _ in
+            struct Boom: Error {}
+            throw Boom()
+        }
+    )
+
+    store.applyBootstrapDiagnostic("missing the embedded controller")
+    await store.refresh()
+
+    #expect(store.bootstrapDiagnostic == "missing the embedded controller")
+    #expect(store.lastError == "missing the embedded controller")
+}
+
+@MainActor
 @Test func staleRunningStateIsHiddenFromLiveCounts() {
     let store = makeStore()
     let now = Date(timeIntervalSince1970: 200)

@@ -2,7 +2,16 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONTROLLER_URL="${MODEL_SWITCHBOARD_URL:-http://127.0.0.1:8877}"
+if [ -f "$SCRIPT_DIR/controller-endpoint-defaults.sh" ]; then
+  # shellcheck source=controller-endpoint-defaults.sh
+  source "$SCRIPT_DIR/controller-endpoint-defaults.sh"
+else
+  # Installed ctl may live alone in PATH; keep in sync with controller-endpoint-defaults.sh.
+  CONTROLLER_ENDPOINT_HOST="${CONTROLLER_ENDPOINT_HOST:-127.0.0.1}"
+  CONTROLLER_ENDPOINT_PORT="${CONTROLLER_ENDPOINT_PORT:-8877}"
+  CONTROLLER_ENDPOINT_BASE_URL="${CONTROLLER_ENDPOINT_BASE_URL:-http://${CONTROLLER_ENDPOINT_HOST}:${CONTROLLER_ENDPOINT_PORT}}"
+fi
+CONTROLLER_URL="${MODEL_SWITCHBOARD_URL:-$CONTROLLER_ENDPOINT_BASE_URL}"
 CONTROLLER_ROOT="${MODEL_SWITCHBOARD_CONTROLLER_ROOT:-$HOME/Library/Application Support/ModelSwitchboard/Controller}"
 CONTROLLER_BIN="${MODEL_SWITCHBOARD_CONTROLLER_BIN:-}"
 
