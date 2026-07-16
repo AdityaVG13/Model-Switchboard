@@ -53,6 +53,8 @@ final class SwitchboardStore {
     var profilesDirectory: String?
     var controllerRoot: String?
     var lastError: String?
+    /// Sticky bootstrap message that refresh failures must not clobber.
+    var bootstrapDiagnostic: String?
     var isRefreshing = false
     var isRunningControllerDoctor = false
     var lastUpdated: Date?

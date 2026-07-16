@@ -9,10 +9,16 @@ private let controllerLaunchAgentPlistName = "io.modelswitchboard.controller.pli
 struct ControllerBundleLayout {
     var resourceURL: URL?
     var bundleURL: URL
+    var fileManager: FileManager
 
-    init(resourceURL: URL?, bundleURL: URL) {
+    init(
+        resourceURL: URL?,
+        bundleURL: URL,
+        fileManager: FileManager = .default
+    ) {
         self.resourceURL = resourceURL
         self.bundleURL = bundleURL
+        self.fileManager = fileManager
     }
 
     static var main: ControllerBundleLayout {
@@ -22,7 +28,7 @@ struct ControllerBundleLayout {
         )
     }
 
-    func hasEmbeddedController(fileManager: FileManager = .default) -> Bool {
+    var hasEmbeddedController: Bool {
         guard let resourceURL else { return false }
         let binary = resourceURL.appendingPathComponent("ModelSwitchboardController")
         let plist = bundleURL.appendingPathComponent(
@@ -32,13 +38,13 @@ struct ControllerBundleLayout {
             && fileManager.fileExists(atPath: plist.path)
     }
 
-    func controllerBinaryURL(fileManager: FileManager = .default) -> URL? {
+    var controllerBinaryURL: URL? {
         guard let resourceURL else { return nil }
         let url = resourceURL.appendingPathComponent("ModelSwitchboardController")
         return fileManager.isExecutableFile(atPath: url.path) ? url : nil
     }
 
-    func controllerSupportURL(fileManager: FileManager = .default) -> URL? {
+    var controllerSupportURL: URL? {
         guard let resourceURL else { return nil }
         let url = resourceURL.appendingPathComponent("ControllerSupport", isDirectory: true)
         return fileManager.fileExists(atPath: url.path) ? url : nil
@@ -62,14 +68,13 @@ final class ControllerServiceManager {
     /// Set when registration cannot start a controller the panel can talk to.
     private(set) var lastDiagnostic: String?
 
-    init(
-        bundle: ControllerBundleLayout = .main,
-        fileManager: FileManager = .default
-    ) {
+    init(bundle: ControllerBundleLayout = .main) {
         self.bundle = bundle
-        self.fileManager = fileManager
+        self.fileManager = bundle.fileManager
     }
 
+    /// Registers the LaunchAgent and recovers a reachable loopback controller when needed.
+    /// Suspends briefly while probing the port so diagnostics are accurate without blocking `App.init`.
     @discardableResult
     func ensureRegistered() async -> String? {
         guard !attemptedRegistration else { return lastDiagnostic }
@@ -88,33 +93,60 @@ final class ControllerServiceManager {
             try bootstrapSupportDirectory()
             removeLegacyLaunchAgent()
             let service = SMAppService.agent(plistName: Self.plistName)
-            if service.status == .notRegistered {
+            switch service.status {
+            case .notRegistered:
                 try service.register()
+            case .requiresApproval, .enabled, .notFound:
+                break
+            @unknown default:
+                break
             }
-            // Don't block the first frame waiting for the port. If the LaunchAgent is not
-            // enabled yet, start a detached serve and let SwitchboardStore refresh.
-            if service.status != .enabled {
+
+            if service.status == .enabled {
+                await waitForController(timeoutSeconds: 1.5)
+            } else if !isControllerReachable() {
                 launchDetachedControllerIfNeeded()
+                await waitForController(timeoutSeconds: 2.0)
             }
-            if service.status == .notFound {
-                lastDiagnostic =
-                    "Controller LaunchAgent was not found in this app bundle. Reinstall Model Switchboard so the embedded controller can register."
+
+            if !isControllerReachable() {
+                lastDiagnostic = unreachableDiagnostic(for: service.status)
             }
         } catch {
             let message = "Controller registration failed: \(error.localizedDescription)"
             Self.logger.error("\(message, privacy: .public)")
-            launchDetachedControllerIfNeeded()
             lastDiagnostic = message
+            if !isControllerReachable() {
+                launchDetachedControllerIfNeeded()
+                await waitForController(timeoutSeconds: 2.0)
+                if isControllerReachable() {
+                    lastDiagnostic = nil
+                }
+            }
         }
         return lastDiagnostic
     }
 
     var bundledServiceAvailable: Bool {
-        bundle.hasEmbeddedController(fileManager: fileManager)
+        bundle.hasEmbeddedController
+    }
+
+    private func unreachableDiagnostic(for status: SMAppService.Status) -> String {
+        switch status {
+        case .requiresApproval:
+            return "Enable Model Switchboard in System Settings → General → Login Items & Extensions so the local controller can start."
+        case .notFound:
+            return "Controller LaunchAgent was not found in this app bundle. Reinstall Model Switchboard so the embedded controller can register."
+        case .enabled, .notRegistered:
+            return "Could not start the local controller on port \(ControllerEndpointDefaults.port). Try Quit and reopen, or reinstall."
+        @unknown default:
+            return "Could not start the local controller on port \(ControllerEndpointDefaults.port). Try Quit and reopen, or reinstall."
+        }
     }
 
     private func launchDetachedControllerIfNeeded() {
-        guard let binary = bundle.controllerBinaryURL(fileManager: fileManager) else { return }
+        guard !isControllerReachable() else { return }
+        guard let binary = bundle.controllerBinaryURL else { return }
 
         let process = Process()
         process.executableURL = binary
@@ -125,6 +157,8 @@ final class ControllerServiceManager {
         process.qualityOfService = .utility
         do {
             try process.run()
+            // Intentionally not retained: orphaned only if already reachable (guarded above).
+            // LaunchAgent KeepAlive or a later relaunch owns long-lived serve.
             Self.logger.info("Launched detached controller (pid \(process.processIdentifier))")
         } catch {
             Self.logger.error(
@@ -133,8 +167,51 @@ final class ControllerServiceManager {
         }
     }
 
+    private func waitForController(timeoutSeconds: TimeInterval) async {
+        let deadline = Date().addingTimeInterval(timeoutSeconds)
+        while Date() < deadline {
+            if isControllerReachable() { return }
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+    }
+
+    private func isControllerReachable() -> Bool {
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = ControllerEndpointDefaults.port.bigEndian
+        address.sin_addr = in_addr(s_addr: inet_addr(ControllerEndpointDefaults.host))
+
+        let socketFD = socket(AF_INET, SOCK_STREAM, 0)
+        guard socketFD >= 0 else { return false }
+        defer { close(socketFD) }
+
+        var timeout = timeval(tv_sec: 0, tv_usec: 200_000)
+        _ = setsockopt(
+            socketFD,
+            SOL_SOCKET,
+            SO_SNDTIMEO,
+            &timeout,
+            socklen_t(MemoryLayout<timeval>.size)
+        )
+        _ = setsockopt(
+            socketFD,
+            SOL_SOCKET,
+            SO_RCVTIMEO,
+            &timeout,
+            socklen_t(MemoryLayout<timeval>.size)
+        )
+
+        let connectResult = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+                Darwin.connect(socketFD, sockaddrPointer, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        return connectResult == 0
+    }
+
     private func bootstrapSupportDirectory() throws {
-        guard let source = bundle.controllerSupportURL(fileManager: fileManager) else { return }
+        guard let source = bundle.controllerSupportURL else { return }
         let destination = fileManager.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/ModelSwitchboard/Controller", isDirectory: true)
         try fileManager.createDirectory(at: destination, withIntermediateDirectories: true)
@@ -180,25 +257,12 @@ final class ControllerServiceManager {
             .filter { ["env", "json"].contains($0.pathExtension.lowercased()) }
     }
 
+    /// Only the last known controller root from status cache -- no machine-specific home layouts.
     private func legacyProfileDirectories() -> [URL] {
-        var directories: [URL] = []
-        if let cachedRoot = ControllerStatusCache.load()?.controllerRoot {
-            directories.append(
-                URL(fileURLWithPath: cachedRoot).appendingPathComponent("model-profiles", isDirectory: true)
-            )
-        }
-        directories.append(
-            fileManager.homeDirectoryForCurrentUser
-                .appendingPathComponent("AI/model-profiles", isDirectory: true)
-        )
-        directories.append(
-            fileManager.homeDirectoryForCurrentUser
-                .appendingPathComponent(
-                    "mac-local-runner/FromNAS/autoresearch/model-profiles",
-                    isDirectory: true
-                )
-        )
-        return directories
+        guard let cachedRoot = ControllerStatusCache.load()?.controllerRoot else { return [] }
+        return [
+            URL(fileURLWithPath: cachedRoot).appendingPathComponent("model-profiles", isDirectory: true)
+        ]
     }
 
     private func removeLegacyLaunchAgent() {
@@ -209,6 +273,7 @@ final class ControllerServiceManager {
         process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
         process.arguments = ["bootout", "gui/\(getuid())", legacy.path]
         try? process.run()
+        process.waitUntilExit()
         try? fileManager.removeItem(at: legacy)
     }
 }

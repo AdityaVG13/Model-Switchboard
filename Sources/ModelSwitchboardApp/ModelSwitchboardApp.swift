@@ -90,9 +90,9 @@ struct ModelSwitchboardApp: App {
             }
             .task {
                 statusItem?.button?.toolTip = store.menuBarHelp
-                if let diagnostic = await ControllerServiceManager.shared.ensureRegistered() {
-                    store.lastError = diagnostic
-                }
+                store.applyBootstrapDiagnostic(
+                    await ControllerServiceManager.shared.ensureRegistered()
+                )
             }
             .onChange(of: store.menuBarHelp) { _, newValue in
                 statusItem?.button?.toolTip = newValue

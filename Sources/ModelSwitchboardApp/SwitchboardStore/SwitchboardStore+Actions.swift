@@ -110,7 +110,7 @@ extension SwitchboardStore {
             await refresh()
         } catch {
             if isBenignCancellation(error) { return }
-            lastError = error.localizedDescription
+            lastError = bootstrapDiagnostic ?? error.localizedDescription
         }
     }
 }
