@@ -155,6 +155,9 @@ struct MenuBarContentView: View {
                 storedMainPanelWidth = clamped
                 return
             }
+            // Skip while a custom edge drag is active -- setContentSize keeps the
+            // leading edge fixed and undoes leading-handle origin updates.
+            if activeResizeStartFrame != nil { return }
             if let hostWindow {
                 let nextWidth = CGFloat(clamped)
                 if abs(hostWindow.frame.width - nextWidth) > 0.5, !hostWindow.inLiveResize {
