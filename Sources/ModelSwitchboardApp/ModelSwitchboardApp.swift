@@ -16,15 +16,19 @@ struct ModelSwitchboardApp: App {
     private let features = AppFeatures.current
 
     init() {
-        ControllerServiceManager.shared.ensureRegistered()
+        let registrationDiagnostic = ControllerServiceManager.shared.ensureRegistered()
         let token = Self.loadAndMigrateAuthToken()
         let baseURL = UserDefaults.standard.string(forKey: "controllerBaseURL") ?? "http://127.0.0.1:8877"
         _controllerAuthToken = State(initialValue: token)
-        _store = State(initialValue: SwitchboardStore(
+        let initialStore = SwitchboardStore(
             controllerBaseURL: baseURL,
             controllerAuthToken: token,
             features: AppFeatures.current
-        ))
+        )
+        if let registrationDiagnostic {
+            initialStore.lastError = registrationDiagnostic
+        }
+        _store = State(initialValue: initialStore)
     }
 
     private static func loadAndMigrateAuthToken() -> String {
@@ -91,17 +95,23 @@ struct ModelSwitchboardApp: App {
                 statusItem?.button?.toolTip = newValue
             }
             .onChange(of: menuBarShowsReadyCount) { _, newValue in
-                statusItem?.length = newValue ? NSStatusItem.variableLength : NSStatusItem.squareLength
+                applyStatusItemLayout(to: statusItem, showsReadyCount: newValue)
             }
         }
         .menuBarExtraAccess(isPresented: $isMenuPresented) { item in
             statusItem = item
-            item.length = menuBarShowsReadyCount ? NSStatusItem.variableLength : NSStatusItem.squareLength
+            applyStatusItemLayout(to: item, showsReadyCount: menuBarShowsReadyCount)
             item.button?.toolTip = store.menuBarHelp
-            item.button?.title = ""
-            item.button?.imagePosition = .imageOnly
             item.button?.setAccessibilityLabel(features.appDisplayName)
         }
         .menuBarExtraStyle(.window)
+    }
+
+    /// Size the AppKit status item for SwiftUI's label. Do not clear `title` or force
+    /// `.imageOnly` -- that clips the ready-count text so it paints over neighboring
+    /// menu bar items.
+    private func applyStatusItemLayout(to item: NSStatusItem?, showsReadyCount: Bool) {
+        guard let item else { return }
+        item.length = showsReadyCount ? NSStatusItem.variableLength : NSStatusItem.squareLength
     }
 }
