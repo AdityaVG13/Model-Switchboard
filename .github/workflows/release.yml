@@ -156,7 +156,25 @@ jobs:
             fi
           done
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "${FILES[@]}" --clobber
+            # A release for this tag already exists. If it already carries DMG
+            # assets, it was published manually (verified + stapled locally) and
+            # must not be overwritten by CI-built artifacts. Skip the upload so
+            # the verified manual release is preserved; only upload assets that
+            # are genuinely missing.
+            EXISTING_ASSETS="$(gh release view "$TAG" --json assets --jq '[.assets[].name] | join(" ")')"
+            UPLOAD_ARGS=()
+            for file in "${FILES[@]}"; do
+              base="$(basename "$file")"
+              case " $EXISTING_ASSETS " in
+                *" $base "*) echo "skip existing asset: $base" ;;
+                *) UPLOAD_ARGS+=("$file") ;;
+              esac
+            done
+            if [ "${#UPLOAD_ARGS[@]}" -gt 0 ]; then
+              gh release upload "$TAG" "${UPLOAD_ARGS[@]}"
+            else
+              echo "release $TAG already has all assets; preserving verified manual release (no --clobber)"
+            fi
           else
             CREATE_ARGS=("$TAG" "${FILES[@]}" --title "$TAG" --generate-notes)
             if [ "$REF_TYPE" != "tag" ]; then
