@@ -30,6 +30,23 @@ cd "$ROOT_DIR"
 
 APP_VARIANT="$APP_VARIANT" "$ROOT_DIR/Scripts/build-app.sh" >/dev/null
 
+# Sign the embedded controller binary individually before the outer app. The
+# SwiftPM-built controller is an unsigned Mach-O copied into Contents/Resources/
+# by embed-controller.sh; `codesign --deep` on the app only seals it as a
+# resource, which Apple rejects ("not signed with a valid Developer ID certificate",
+# "no secure timestamp", "hardened runtime not enabled"). Sign inside-out with
+# the identity, hardened runtime, and secure timestamp so the binary passes
+# notarization and the outer --deep sign preserves it.
+CONTROLLER_BIN="$APP_PATH/Contents/Resources/ModelSwitchboardController"
+if [ -f "$CONTROLLER_BIN" ]; then
+  codesign \
+    --force \
+    --options runtime \
+    --timestamp \
+    --sign "$IDENTITY" \
+    "$CONTROLLER_BIN"
+fi
+
 codesign \
   --force \
   --deep \
