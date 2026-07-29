@@ -241,7 +241,7 @@ If something looks off, these labels tell you what the app is seeing right now:
 
 ## What's new
 
-See **[CHANGELOG.md](CHANGELOG.md)** for release-by-release detail and **[Releases](https://github.com/AdityaVG13/Model-Switchboard/releases)** for signed DMG downloads. Current version: **1.1.5**.
+See **[CHANGELOG.md](CHANGELOG.md)** for release-by-release detail and **[Releases](https://github.com/AdityaVG13/Model-Switchboard/releases)** for signed DMG downloads. Current version: **1.3.0**.
 
 ---
 

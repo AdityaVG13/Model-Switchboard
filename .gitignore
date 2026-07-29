@@ -47,6 +47,9 @@ refactor/artifacts/
 .simplify-and-refactor-progress.md
 .lean-ctx/
 
+# Local dev-only release tooling (internal; not tracked, not shipped)
+.dev/
+
 # Local adversarial-review (prosecution) run artifacts
 .prosecution/
 
