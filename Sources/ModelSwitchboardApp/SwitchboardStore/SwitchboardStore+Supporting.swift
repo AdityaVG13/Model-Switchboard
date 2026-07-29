@@ -36,23 +36,44 @@ extension SwitchboardStore {
 
     func openProfilesDirectory() {
         guard let profilesDirectory else { return }
-        NSWorkspace.shared.open(URL(fileURLWithPath: profilesDirectory))
+        revealInFinder(URL(fileURLWithPath: profilesDirectory))
     }
 
     func openControllerRoot() {
         guard let target = resolvedControllerRoot else { return }
-        NSWorkspace.shared.open(URL(fileURLWithPath: target))
+        revealInFinder(URL(fileURLWithPath: target))
     }
 
     func openExampleProfilesDirectory() {
         guard let target = resolvedExampleProfilesDirectory else { return }
-        NSWorkspace.shared.open(URL(fileURLWithPath: target))
+        revealInFinder(URL(fileURLWithPath: target))
+    }
+
+    /// Reveals a folder in Finder and brings Finder to the front. `NSWorkspace.open(_:)`
+    /// launches Finder but leaves it behind the app; `activateFileViewerSelecting` reveals
+    /// the item in a focused window, fixing the "folder opens behind the app" behaviour.
+    private func revealInFinder(_ url: URL) {
+        let directory = (url.pathExtension.isEmpty || hasDirectoryPath(url))
+            ? url
+            : url.deletingLastPathComponent()
+        NSWorkspace.shared.activateFileViewerSelecting([directory])
+    }
+
+    private func hasDirectoryPath(_ url: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+            && isDirectory.boolValue
     }
 
     var resolvedControllerRoot: String? {
-        if let controllerRoot, !controllerRoot.isEmpty { return controllerRoot }
-        guard let profilesDirectory, !profilesDirectory.isEmpty else { return nil }
-        return URL(fileURLWithPath: profilesDirectory).deletingLastPathComponent().path
+        // Only ever reveal the canonical, app-owned controller root. Trusting an arbitrary
+        // value reported by the running controller (which may be a stray/dev install with the
+        // same launch-agent label) is how a second, unexpected folder can surface.
+        let canonicalRoot = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/ModelSwitchboard/Controller")
+            .path
+        guard FileManager.default.fileExists(atPath: canonicalRoot) else { return nil }
+        return canonicalRoot
     }
 
     var resolvedExampleProfilesDirectory: String? {

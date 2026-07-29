@@ -8,7 +8,7 @@ MODEL_PROFILE="${MODEL_PROFILE:-}"
 PROFILE_PATH="${MODEL_PROFILE_PATH:-}"
 AGL_VENV="$WORK_DIR/.venv-agentlightning"
 AGL_PYTHON="$AGL_VENV/bin/python"
-AGL_UV_CACHE="${UV_CACHE_DIR:-/tmp/autoresearch-uv-cache}"
+AGL_UV_CACHE="${UV_CACHE_DIR:-/tmp/model-switchboard-uv-cache}"
 AGL_PYTHON_VERSION="${AGL_PYTHON_VERSION:-3.12}"
 
 log() { printf '[INFO] %s\n' "$*"; }
