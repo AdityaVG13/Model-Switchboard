@@ -30,7 +30,7 @@ struct SettingsView: View {
     @AppStorage(DashboardAppearanceKeys.menuBarShowsReadyCount)
     private var menuBarShowsReadyCount = true
 
-    private let defaultControllerBaseURL = "http://127.0.0.1:8877"
+    private let defaultControllerBaseURL = ControllerEndpointDefaults.baseURLString
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {

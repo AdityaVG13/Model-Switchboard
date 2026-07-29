@@ -34,6 +34,9 @@ __pycache__/
 .venv/
 venv/
 
+# Local verification-purpose-gate artifacts
+.verification-purpose/
+
 # Local agent/run artifacts
 .code-upgrade/
 .doctor/runs/
@@ -43,6 +46,9 @@ refactor/artifacts/
 .skill-loop-progress.md
 .simplify-and-refactor-progress.md
 .lean-ctx/
+
+# Local adversarial-review (prosecution) run artifacts
+.prosecution/
 
 # Logs / temp files
 *.log

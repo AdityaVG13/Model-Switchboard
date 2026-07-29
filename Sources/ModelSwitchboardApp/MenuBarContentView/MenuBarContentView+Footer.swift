@@ -38,6 +38,8 @@ extension MenuBarContentView {
                 if let footerState = footerState(relativeTo: context.date) {
                     Text(footerState.label)
                         .font(.system(size: 9, weight: .bold))
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(footerState.color.opacity(0.16), in: Capsule())

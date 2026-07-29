@@ -20,11 +20,10 @@ case "$APP_VARIANT" in
 esac
 APP_PATH="${1:-$DEFAULT_APP_PATH}"
 DMG_PATH="${2:-$DEFAULT_DMG_PATH}"
+
+"$ROOT_DIR/Scripts/verify-embedded-controller.sh" "$APP_PATH"
 CONTROLLER_BIN="$APP_PATH/Contents/Resources/ModelSwitchboardController"
 CONTROLLER_PLIST="$APP_PATH/Contents/Library/LaunchAgents/io.modelswitchboard.controller.plist"
-
-[ -x "$CONTROLLER_BIN" ] || { echo "native controller missing from app bundle" >&2; exit 1; }
-[ -f "$CONTROLLER_PLIST" ] || { echo "controller LaunchAgent plist missing from app bundle" >&2; exit 1; }
 plutil -lint "$CONTROLLER_PLIST" >/dev/null
 CONTROLLER_CAPABILITIES="$("$CONTROLLER_BIN" capabilities)"
 grep -q '"native" : true' <<<"$CONTROLLER_CAPABILITIES"

@@ -23,12 +23,13 @@ extension SwitchboardStore {
             try await verify?(client)
             cacheCurrentState()
             lastError = nil
+            bootstrapDiagnostic = nil
             lastUpdated = Date()
             await syncAuxiliaryStateAfterMutation()
             return true
         } catch {
             if isBenignCancellation(error) { return false }
-            lastError = Self.userFacingErrorDescription(
+            lastError = bootstrapDiagnostic ?? Self.userFacingErrorDescription(
                 for: error,
                 actionName: actionName,
                 status: profile.flatMap(statusForProfile),

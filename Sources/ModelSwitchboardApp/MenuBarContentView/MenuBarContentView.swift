@@ -155,6 +155,9 @@ struct MenuBarContentView: View {
                 storedMainPanelWidth = clamped
                 return
             }
+            // While dragging (and during the end-of-drag AppStorage write), skip
+            // setContentSize -- it pins the leading edge and undoes origin updates.
+            if activeResizeStartFrame != nil { return }
             if let hostWindow {
                 let nextWidth = CGFloat(clamped)
                 if abs(hostWindow.frame.width - nextWidth) > 0.5, !hostWindow.inLiveResize {

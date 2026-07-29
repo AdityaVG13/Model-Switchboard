@@ -84,13 +84,17 @@ extension MenuBarContentView {
                     maxWidth: maxMainPanelWidth
                 )
                 hostWindow.setFrame(nextFrame, display: true)
-                let nextWidth = Double(nextFrame.width)
-                if abs(storedMainPanelWidth - nextWidth) > 0.5 {
-                    storedMainPanelWidth = nextWidth
-                }
                 synchronizeInspectorWindow()
             }
             .onEnded { _ in
+                // Persist while activeResizeStartFrame is still set so onChange skips
+                // setContentSize (which would undo leading-edge origin updates).
+                if let hostWindow {
+                    let nextWidth = Double(hostWindow.frame.width)
+                    if abs(storedMainPanelWidth - nextWidth) > 0.5 {
+                        storedMainPanelWidth = nextWidth
+                    }
+                }
                 activeResizeStartFrame = nil
                 synchronizeInspectorWindow()
             }
@@ -101,10 +105,10 @@ extension MenuBarContentView {
     }
 
     func configureHostWindow(_ window: NSWindow) {
-        window.styleMask.insert(.resizable)
-        window.showsResizeIndicator = true
+        // Custom edge handles own horizontal resize; native .resizable fights leading-edge pinning.
+        window.styleMask.remove(.resizable)
+        window.showsResizeIndicator = false
         window.minSize = NSSize(width: minMainPanelWidth, height: panelHeight)
         window.maxSize = NSSize(width: maxMainPanelWidth, height: panelHeight)
-        window.resizeIncrements = NSSize(width: 1, height: 1)
     }
 }

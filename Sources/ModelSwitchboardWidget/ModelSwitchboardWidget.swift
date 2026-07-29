@@ -5,7 +5,7 @@ import WidgetKit
 import ModelSwitchboardCore
 
 private enum WidgetControllerConfig {
-    static let defaultBaseURL = "http://127.0.0.1:8877"
+    static let defaultBaseURL = ControllerEndpointDefaults.baseURLString
     static let reloadInterval: TimeInterval = 60
 
     static var authToken: String? {

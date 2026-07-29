@@ -25,6 +25,10 @@ class InstallerScriptTests(unittest.TestCase):
             scripts.mkdir(parents=True)
             shutil.copy2(ROOT / "Scripts" / "install.sh", scripts / "install.sh")
             shutil.copy2(ROOT / "Scripts" / "model-switchboardctl", scripts / "model-switchboardctl")
+            shutil.copy2(
+                ROOT / "Scripts" / "verify-embedded-controller.sh",
+                scripts / "verify-embedded-controller.sh",
+            )
             (repo / "VERSION").write_text("9.9.9\n")
 
             write_executable(
@@ -39,7 +43,11 @@ class InstallerScriptTests(unittest.TestCase):
                   *) exit 2 ;;
                 esac
                 app="$root/dist/$app_name"
-                mkdir -p "$app/Contents"
+                mkdir -p "$app/Contents/Resources"
+                mkdir -p "$app/Contents/Library/LaunchAgents"
+                printf '#!/bin/sh\\n' > "$app/Contents/Resources/ModelSwitchboardController"
+                chmod +x "$app/Contents/Resources/ModelSwitchboardController"
+                touch "$app/Contents/Library/LaunchAgents/io.modelswitchboard.controller.plist"
                 cat > "$app/Contents/Info.plist" <<'PLIST'
                 <?xml version="1.0" encoding="UTF-8"?>
                 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
