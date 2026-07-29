@@ -21,6 +21,7 @@ All notable changes to this project are documented in this file.
 - Browser-local dashboard UI (`Controller/web/dashboard.html`) and the `start-model-dashboard.sh` launcher that opened it.
 
 ### Fixed
+- Aligned the menu-bar RAM readout with Activity Monitor by counting used memory as active + wired + compressed pages, so inactive file cache is no longer reported as used and the percentage no longer drifts from other stats apps.
 - Kept the footer status badge inline (no wrapping) with a line limit and fixed-size layout, so it stays on one line in both fresh and stale controller states.
 - Activated Finder as the frontmost app (`activateFileViewerSelecting`) when revealing the Profiles Folder from Settings, so the folder no longer opens behind the menu bar panel.
 - Pinned controller-root resolution to the canonical `~/Library/Application Support/ModelSwitchboard/Controller` path, so "Open Profiles Folder" always reveals the single intended folder rather than a stale or relocated root.

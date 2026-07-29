@@ -106,9 +106,14 @@ final class SystemMetricsMonitor: ObservableObject {
             return nil
         }
 
-        let availablePages = UInt64(stats.free_count) + UInt64(stats.speculative_count)
-        let availableBytes = availablePages * UInt64(pageSize)
-        let usedBytes = totalBytes > availableBytes ? totalBytes - availableBytes : 0
+        // Match Activity Monitor's "Memory Used": active + wired + compressed pages.
+        // Inactive and speculative pages are reclaimable file cache, so they count as
+        // available, not used. Note speculative pages are already included in free_count
+        // (see vm_statistics.h), so they must not be added again.
+        let usedPages = UInt64(stats.active_count)
+            + UInt64(stats.wire_count)
+            + UInt64(stats.compressor_page_count)
+        let usedBytes = usedPages * UInt64(pageSize)
         return min(max((Double(usedBytes) / Double(totalBytes)) * 100, 0), 100)
     }
 
