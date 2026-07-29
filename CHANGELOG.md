@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## Unreleased
+## [1.3.0] - 2026-07-29
 
 ### Added
 - Recognized `llama-swap` as an external OpenAI-compatible proxy runtime, with an example profile and docs for request-driven model swapping alongside menu-bar Activate.
@@ -21,6 +21,10 @@ All notable changes to this project are documented in this file.
 - Browser-local dashboard UI (`Controller/web/dashboard.html`) and the `start-model-dashboard.sh` launcher that opened it.
 
 ### Fixed
+- Kept the footer status badge inline (no wrapping) with a line limit and fixed-size layout, so it stays on one line in both fresh and stale controller states.
+- Activated Finder as the frontmost app (`activateFileViewerSelecting`) when revealing the Profiles Folder from Settings, so the folder no longer opens behind the menu bar panel.
+- Pinned controller-root resolution to the canonical `~/Library/Application Support/ModelSwitchboard/Controller` path, so "Open Profiles Folder" always reveals the single intended folder rather than a stale or relocated root.
+- Stored the detached controller `Process` strongly for its lifetime so the embedded controller service is not prematurely deallocated and torn down while the app is running.
 - Serialized start/stop/switch/benchmark mutations with a process-wide lock so concurrent HTTP workers cannot interleave lifecycle actions.
 - Cleared the active-profile marker and suppressed the crash-recovery watchdog at the start of Stop so intentional stops are not undone mid-flight.
 - Parsed HTTP request paths without query/fragment so `/api/*?…` routes match correctly against exact path equality.
