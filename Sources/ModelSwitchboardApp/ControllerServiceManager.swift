@@ -65,6 +65,10 @@ final class ControllerServiceManager {
     private let fileManager: FileManager
     private var attemptedRegistration = false
 
+    /// Held strongly so the detached fallback `serve` process is not deallocated mid-run
+    /// while the LaunchAgent (KeepAlive) or a later relaunch takes long-lived ownership.
+    private var detachedControllerProcess: Process?
+
     /// Set when registration cannot start a controller the panel can talk to.
     private(set) var lastDiagnostic: String?
 
@@ -157,8 +161,10 @@ final class ControllerServiceManager {
         process.qualityOfService = .utility
         do {
             try process.run()
-            // Intentionally not retained: orphaned only if already reachable (guarded above).
-            // LaunchAgent KeepAlive or a later relaunch owns long-lived serve.
+            // Retain for the process lifetime. The LaunchAgent (KeepAlive) or a later relaunch
+            // owns the long-lived serve; this keeps the fallback alive until then instead of
+            // letting ARC reclaim it (which would tear the process down mid-run).
+            detachedControllerProcess = process
             Self.logger.info("Launched detached controller (pid \(process.processIdentifier))")
         } catch {
             Self.logger.error(
