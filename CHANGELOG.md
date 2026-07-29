@@ -7,14 +7,17 @@ All notable changes to this project are documented in this file.
 ### Added
 - Recognized `llama-swap` as an external OpenAI-compatible proxy runtime, with an example profile and docs for request-driven model swapping alongside menu-bar Activate.
 - Optional controller bearer-token field in Settings (and widget AppStorage) so token-protected / `--unsafe-bind` controllers work from the menu bar.
-- Split the controller implementation into the `Controller/msctl/` package (`paths`, `security`, `runtimes`, `profiles`, `mutations`, `benchmarks`, `doctor`, `agent_contracts`, `web`, `cli`) while keeping `modelctl.py` as the stable CLI/import facade.
 
 ### Changed
+- Replaced the Python production controller with a native Swift service sharing contracts with `ModelSwitchboardCore`.
+- Embedded the controller and LaunchAgent in app distributions and register it through `SMAppService`.
+- Ported controller unit, conformance, fuzz-boundary, and real-service coverage to Swift Testing.
 - Controller HTTP server is menu-bar / API-only: removed the browser dashboard HTML, `/` and `/index.html` routes, and `start-model-dashboard.sh`. `serve-web` still exposes `/api/*` for the app.
-- Extended doctor report contracts (Python + Swift) to include `findings`, `next_steps`, and schema/version metadata the API already emitted.
+- Extended doctor report contracts to include `findings`, `next_steps`, and schema/version metadata.
 - `stop-all-models.sh` now stops only PID-file-tracked processes by default; set `FORCE_ORPHANS=1` for the previous broad pgrep sweep.
 
 ### Removed
+- Removed the Python controller, Python benchmark harness, Python Droid sync adapter, and the `/usr/bin/python3` runtime dependency.
 - Browser-local dashboard UI (`Controller/web/dashboard.html`) and the `start-model-dashboard.sh` launcher that opened it.
 
 ### Fixed

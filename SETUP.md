@@ -273,7 +273,7 @@ The app expects a controller base URL, defaulting to `http://127.0.0.1:8877`.
 | `POST` | `/api/integrations/run` | Trigger an optional integration (Plus) |
 | `POST` | `/api/benchmark/start` | Run benchmark(s) (Plus) |
 
-Any backend that returns the same profile-status JSON shape and supports these lifecycle actions is compatible. See `Controller/contracts.py` for the exact response shapes.
+Any backend that returns the same profile-status JSON shape and supports these lifecycle actions is compatible. See `Sources/ModelSwitchboardCore/Models/` and `Sources/ModelSwitchboardControllerCore/ControllerRouter.swift` for the exact contracts.
 
 ## Benchmark artifacts
 

@@ -186,8 +186,8 @@ parse_args() {
 
 normalize_paths() {
   ROOT_DIR="$(cd "$ROOT_DIR" && pwd)"
+  PACKAGE_ROOT="$(cd "$ROOT_DIR/.." && pwd)"
   PLIST_DST="$PLIST_DIR/${LABEL}.plist"
-  LAUNCHER_SRC="$ROOT_DIR/ModelSwitchboardController.swift"
   LAUNCHER_BIN="$ROOT_DIR/bin/ModelSwitchboardController"
   TOKEN_PATH="${AUTH_TOKEN_FILE:-$ROOT_DIR/run/controller-token}"
   USER_UID="$(id -u)"
@@ -276,8 +276,9 @@ acquire_lock() {
 
 preflight_checks() {
   info "Running controller installer preflight"
-  [ -f "$LAUNCHER_SRC" ] || die "launcher source not found: $LAUNCHER_SRC"
-  command -v swiftc >/dev/null 2>&1 || die "swiftc is required"
+  [ -f "$PACKAGE_ROOT/Package.swift" ] || die "Swift package not found: $PACKAGE_ROOT/Package.swift"
+  [ -d "$PACKAGE_ROOT/Sources/ModelSwitchboardController" ] || die "native controller source not found"
+  command -v swift >/dev/null 2>&1 || die "Swift toolchain is required"
   command -v launchctl >/dev/null 2>&1 || die "launchctl is required"
   case "$PORT" in
     ''|*[!0-9]*) die "--port must be numeric: $PORT" ;;
@@ -301,12 +302,11 @@ preflight_checks() {
 }
 
 build_launcher() {
+  local controller_bin_dir
   mkdir -p "$ROOT_DIR/bin"
-  if [ "$FORCE_INSTALL" -eq 1 ] || [ ! -x "$LAUNCHER_BIN" ] || [ "$LAUNCHER_SRC" -nt "$LAUNCHER_BIN" ]; then
-    run_with_spinner "Building controller launcher" swiftc -O -o "$LAUNCHER_BIN" "$LAUNCHER_SRC"
-  else
-    ok "Controller launcher is up to date"
-  fi
+  controller_bin_dir="$(swift build --package-path "$PACKAGE_ROOT" -c release --show-bin-path)"
+  run_with_spinner "Building native Swift controller" swift build --package-path "$PACKAGE_ROOT" -c release --product ModelSwitchboardController
+  install -m 0755 "$controller_bin_dir/ModelSwitchboardController" "$LAUNCHER_BIN"
 }
 
 write_plist() {
@@ -327,6 +327,7 @@ write_plist() {
   <key>ProgramArguments</key>
   <array>
     <string>${LAUNCHER_BIN}</string>
+    <string>serve</string>
     <string>--root</string>
     <string>${ROOT_DIR}</string>
     <string>${bind_flag}</string>
@@ -374,6 +375,7 @@ restart_launch_agent() {
 
 verify_install() {
   [ -x "$LAUNCHER_BIN" ] || die "launcher binary missing or not executable: $LAUNCHER_BIN"
+  "$LAUNCHER_BIN" capabilities --root "$ROOT_DIR" >/dev/null || die "native controller smoke test failed"
   [ -f "$PLIST_DST" ] || die "LaunchAgent plist missing: $PLIST_DST"
   if command -v plutil >/dev/null 2>&1; then
     plutil -lint "$PLIST_DST" >/dev/null

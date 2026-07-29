@@ -1,12 +1,12 @@
 # Controller API Conformance Coverage
 
-Specification source: `Controller/modelctl.py`, `Controller/contracts.py`, and `Sources/ModelSwitchboardCore/ControllerClient.swift`.
+Specification source: `Sources/ModelSwitchboardControllerCore/ControllerRouter.swift` and `Sources/ModelSwitchboardCore/ControllerClient.swift`.
 
 | Section | MUST Clauses | SHOULD Clauses | Tested | Passing | Divergent | Score |
 |---|---:|---:|---:|---:|---:|---:|
 | Authentication | 2 | 0 | 2 | 2 | 0 | 100% |
 | Benchmark API | 1 | 0 | 1 | 1 | 0 | 100% |
-| Dashboard read API | 3 | 1 | 4 | 4 | 0 | 100% |
+| Controller read API | 3 | 1 | 4 | 4 | 0 | 100% |
 | Mutating action API | 4 | 1 | 5 | 5 | 0 | 100% |
 | Request validation | 3 | 0 | 3 | 3 | 0 | 100% |
 

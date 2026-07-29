@@ -1,574 +1,174 @@
 #!/usr/bin/env bash
 set -euo pipefail
-shopt -s lastpipe 2>/dev/null || true
 
-SCRIPT_DIR="$(unset CDPATH; cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONTROLLER_URL="${MODEL_SWITCHBOARD_URL:-http://127.0.0.1:8877}"
-PYTHON_BIN="${PYTHON_BIN:-python3}"
-APP_VARIANT="${MODEL_SWITCHBOARD_VARIANT:-base}"
-MODELCTL="${MODEL_SWITCHBOARD_MODELCTL:-}"
-if [ -n "$MODELCTL" ] && [ ! -x "$MODELCTL" ]; then
-  MODELCTL=""
-fi
-if [ -z "$MODELCTL" ]; then
-  if [ -x "$SCRIPT_DIR/../Controller/modelctl.py" ]; then
-    MODELCTL="$SCRIPT_DIR/../Controller/modelctl.py"
-  elif [ -x "$SCRIPT_DIR/Controller/modelctl.py" ]; then
-    MODELCTL="$SCRIPT_DIR/Controller/modelctl.py"
-  fi
-fi
+CONTROLLER_ROOT="${MODEL_SWITCHBOARD_CONTROLLER_ROOT:-$HOME/Library/Application Support/ModelSwitchboard/Controller}"
+CONTROLLER_BIN="${MODEL_SWITCHBOARD_CONTROLLER_BIN:-}"
 
-case "$APP_VARIANT" in
-  base)
-    DEFAULT_APP_NAME="Model Switchboard"
-    DEFAULT_APP_PATH="$HOME/Applications/Model Switchboard.app"
-    ;;
-  plus)
-    DEFAULT_APP_NAME="Model Switchboard Plus"
-    DEFAULT_APP_PATH="$HOME/Applications/Model Switchboard Plus.app"
-    ;;
-  *)
-    printf 'error: unsupported MODEL_SWITCHBOARD_VARIANT %s\n' "$APP_VARIANT" >&2
-    exit 1
-    ;;
-esac
-
-APP_PATH="${MODEL_SWITCHBOARD_APP_PATH:-$DEFAULT_APP_PATH}"
+if [ -z "$CONTROLLER_BIN" ]; then
+  for candidate in \
+    "$SCRIPT_DIR/../Controller/bin/ModelSwitchboardController" \
+    "$HOME/Applications/Model Switchboard.app/Contents/Resources/ModelSwitchboardController" \
+    "$HOME/Applications/Model Switchboard Plus.app/Contents/Resources/ModelSwitchboardController"
+  do
+    if [ -x "$candidate" ]; then CONTROLLER_BIN="$candidate"; break; fi
+  done
+fi
+if [ -z "$CONTROLLER_BIN" ] && command -v ModelSwitchboardController >/dev/null 2>&1; then
+  CONTROLLER_BIN="$(command -v ModelSwitchboardController)"
+fi
 
 usage() {
-  cat <<USAGE
+  cat <<'USAGE'
 Usage: model-switchboardctl <command> [args]
 
 Commands:
-  triage                Print one-call agent triage JSON from modelctl.py
-  capabilities          Print the machine-readable CLI contract
-  robot-docs [guide]    Print paste-ready agent guidance
-  doctor [args]         Run modelctl.py doctor diagnostics
-  diagnose [args]       Alias for doctor
-  health [args]         Alias for doctor health
-  status                Print raw controller status JSON
-  summary               Print one-line status summary
-  profiles-dir          Print the controller's model-profiles directory
-  controller-root       Print the controller root directory
-  open-app              Launch the menu bar app
-  open-dashboard        Open the local dashboard in a browser
-  open-profiles         Open the live model-profiles directory in Finder
+  status | summary      Print controller status JSON
+  profiles-dir         Print the active profiles directory
+  controller-root      Print the active controller root
+  capabilities         Print the native CLI contract
+  robot-docs [guide]   Print agent-oriented usage guidance
+  triage                Print native health and recommendations
+  doctor [args]         Run native controller diagnostics
   start <profile>       Start a profile
   stop <profile>        Stop a profile
   restart <profile>     Restart a profile
-  switch <profile>      Alias for activate
-  activate <profile>    Activate a profile and stop other running profiles
-  bench-all             Start the quick benchmark suite across all profiles
-  bench <profile>       Start the quick benchmark suite for one profile
-  stop-all              Stop all running profiles
-  completions <shell>   Print shell completions for bash, zsh, or fish
+  switch <profile>      Activate a profile exclusively
+  bench <profile>       Start the quick benchmark suite
+  bench-all             Benchmark every profile
+  stop-all              Stop all managed profiles
+  open-app              Launch Model Switchboard
+  open-profiles         Open the profiles directory
+  completions <shell>   Print shell completions
 USAGE
 }
 
-print_completions() {
-  local shell="${1:-}"
-  case "$shell" in
-    bash)
-      cat <<'BASH'
-_model_switchboardctl_completion() {
-  local cur commands
-  COMPREPLY=()
-  cur="${COMP_WORDS[COMP_CWORD]}"
-  commands="triage capabilities robot-docs doctor diagnose health status summary profiles-dir controller-root open-app open-dashboard open-profiles start stop restart switch activate bench-all bench stop-all completions help"
-  if [ "$COMP_CWORD" -eq 1 ]; then
-    COMPREPLY=( $(compgen -W "$commands" -- "$cur") )
+api() { curl -fsS "$@"; }
+
+native() {
+  if [ -z "$CONTROLLER_BIN" ]; then
+    printf 'error: native ModelSwitchboardController executable not found\n' >&2
+    exit 3
   fi
+  "$CONTROLLER_BIN" "$@" --root "$CONTROLLER_ROOT"
+}
+
+json_action() {
+  local endpoint="$1" payload="$2"
+  api -X POST -H 'Content-Type: application/json' --data-binary "$payload" "$CONTROLLER_URL$endpoint"
+  printf '\n'
+}
+
+json_string() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  printf '%s' "$value"
+}
+
+extract_path() {
+  local key="$1"
+  api "$CONTROLLER_URL/api/status" | plutil -extract "$key" raw -o - -- -
+}
+
+completions() {
+  local commands='status summary profiles-dir controller-root capabilities triage doctor start stop restart switch bench bench-all stop-all open-app open-profiles'
+  case "${1:-}" in
+    bash)
+      cat <<EOF
+_model_switchboardctl_completion() {
+  COMPREPLY=( \$(compgen -W "$commands" -- "\${COMP_WORDS[COMP_CWORD]}") )
 }
 complete -F _model_switchboardctl_completion model-switchboardctl
-BASH
+EOF
       ;;
-    zsh)
-      cat <<'ZSH'
-#compdef model-switchboardctl
-_model_switchboardctl() {
-  local -a commands
-  commands=(
-    'triage:Print one-call agent triage JSON'
-    'capabilities:Print the machine-readable CLI contract'
-    'robot-docs:Print paste-ready agent guidance'
-    'doctor:Run modelctl.py doctor diagnostics'
-    'diagnose:Alias for doctor'
-    'health:Alias for doctor health'
-    'status:Print raw controller status JSON'
-    'summary:Print one-line status summary'
-    'profiles-dir:Print the controller profile directory'
-    'controller-root:Print the controller root directory'
-    'open-app:Launch the menu bar app'
-    'open-dashboard:Open the local dashboard'
-    'open-profiles:Open the profiles directory'
-    'start:Start a profile'
-    'stop:Stop a profile'
-    'restart:Restart a profile'
-    'switch:Alias for activate'
-    'activate:Activate a profile'
-    'bench-all:Start benchmarks for all profiles'
-    'bench:Start benchmark for one profile'
-    'stop-all:Stop all profiles'
-    'completions:Print shell completions'
-  )
-  _describe 'command' commands
-}
-compdef _model_switchboardctl model-switchboardctl
-ZSH
-      ;;
-    fish)
-      cat <<'FISH'
-complete -c model-switchboardctl -f
-complete -c model-switchboardctl -n '__fish_use_subcommand' -a triage -d 'Print one-call agent triage JSON'
-complete -c model-switchboardctl -n '__fish_use_subcommand' -a capabilities -d 'Print the machine-readable CLI contract'
-complete -c model-switchboardctl -n '__fish_use_subcommand' -a robot-docs -d 'Print paste-ready agent guidance'
-complete -c model-switchboardctl -n '__fish_use_subcommand' -a doctor -d 'Run modelctl.py doctor diagnostics'
-complete -c model-switchboardctl -n '__fish_use_subcommand' -a diagnose -d 'Alias for doctor'
-complete -c model-switchboardctl -n '__fish_use_subcommand' -a health -d 'Alias for doctor health'
-complete -c model-switchboardctl -n '__fish_use_subcommand' -a status -d 'Print raw controller status JSON'
-complete -c model-switchboardctl -n '__fish_use_subcommand' -a summary -d 'Print one-line status summary'
-complete -c model-switchboardctl -n '__fish_use_subcommand' -a profiles-dir -d 'Print the controller profile directory'
-complete -c model-switchboardctl -n '__fish_use_subcommand' -a controller-root -d 'Print the controller root directory'
-complete -c model-switchboardctl -n '__fish_use_subcommand' -a open-app -d 'Launch the menu bar app'
-complete -c model-switchboardctl -n '__fish_use_subcommand' -a open-dashboard -d 'Open the local dashboard'
-complete -c model-switchboardctl -n '__fish_use_subcommand' -a open-profiles -d 'Open the profiles directory'
-complete -c model-switchboardctl -n '__fish_use_subcommand' -a start -d 'Start a profile'
-complete -c model-switchboardctl -n '__fish_use_subcommand' -a stop -d 'Stop a profile'
-complete -c model-switchboardctl -n '__fish_use_subcommand' -a restart -d 'Restart a profile'
-complete -c model-switchboardctl -n '__fish_use_subcommand' -a switch -d 'Alias for activate'
-complete -c model-switchboardctl -n '__fish_use_subcommand' -a activate -d 'Activate a profile'
-complete -c model-switchboardctl -n '__fish_use_subcommand' -a bench-all -d 'Start benchmarks for all profiles'
-complete -c model-switchboardctl -n '__fish_use_subcommand' -a bench -d 'Start benchmark for one profile'
-complete -c model-switchboardctl -n '__fish_use_subcommand' -a stop-all -d 'Stop all profiles'
-complete -c model-switchboardctl -n '__fish_use_subcommand' -a completions -d 'Print shell completions'
-FISH
-      ;;
-    *)
-      printf 'error: completions requires bash, zsh, or fish\n' >&2
-      exit 1
-      ;;
+    zsh) printf '#compdef model-switchboardctl\n_arguments "1:command:(%s)"\n' "$commands" ;;
+    fish) for command in $commands; do printf 'complete -c model-switchboardctl -f -a %s\n' "$command"; done ;;
+    *) printf 'error: completions requires bash, zsh, or fish\n' >&2; exit 1 ;;
   esac
 }
 
-api() {
-  curl -fsS "$@"
+print_capabilities() {
+  cat <<'JSON'
+{
+  "schema_version": "1",
+  "tool": "model-switchboardctl",
+  "contract_version": "1.0",
+  "default_probe": "model-switchboardctl triage",
+  "native_controller": true,
+  "commands": ["status", "summary", "profiles-dir", "controller-root", "capabilities", "triage", "doctor", "start", "stop", "restart", "switch", "bench", "bench-all", "stop-all"]
+}
+JSON
 }
 
-run_modelctl() {
-  if [ -z "$MODELCTL" ]; then
-    printf 'error: %s requires Controller/modelctl.py\n' "$command" >&2
-    printf 'hint: run MODEL_SWITCHBOARD_MODELCTL=/path/to/Controller/modelctl.py model-switchboardctl %s\n' "$command" >&2
-    exit 3
+print_robot_docs() {
+  if [ "${1:-guide}" != "guide" ]; then
+    printf 'error: unknown robot-docs topic: %s\n' "$1" >&2
+    printf 'did you mean: model-switchboardctl robot-docs guide\n' >&2
+    exit 64
   fi
-  "$PYTHON_BIN" "$MODELCTL" "$@"
-}
-
-print_wrapper_capabilities() {
-  local modelctl_available=false
-  if [ -n "$MODELCTL" ]; then
-    modelctl_available=true
-  fi
-  "$PYTHON_BIN" - "$modelctl_available" "$MODELCTL" <<'PY'
-import json
-import sys
-
-modelctl_available = sys.argv[1] == "true"
-modelctl_path = sys.argv[2] or None
-payload = {
-    "schema_version": "1",
-    "tool": "model-switchboardctl",
-    "contract_version": "1.0",
-    "default_probe": "model-switchboardctl triage",
-    "controller_url_env": "MODEL_SWITCHBOARD_URL",
-    "modelctl_available": modelctl_available,
-    "modelctl_path": modelctl_path,
-    "commands": [
-        {"name": "capabilities", "mutates": False, "json": True, "examples": ["model-switchboardctl capabilities"]},
-        {"name": "robot-docs", "mutates": False, "json": False, "examples": ["model-switchboardctl robot-docs guide"]},
-        {"name": "triage", "mutates": False, "json": True, "examples": ["model-switchboardctl triage"]},
-        {"name": "doctor", "mutates": "only when delegated doctor is run with --fix", "json": True, "requires_modelctl": True},
-        {"name": "status", "mutates": False, "json": True},
-        {"name": "summary", "mutates": False, "json": False},
-        {"name": "profiles-dir", "mutates": False, "json": False},
-        {"name": "controller-root", "mutates": False, "json": False},
-        {"name": "start", "mutates": True, "json": True, "dry_run": True, "safe_alternative": "model-switchboardctl status"},
-        {"name": "stop", "mutates": True, "json": True, "dry_run": True, "safe_alternative": "model-switchboardctl status"},
-        {"name": "restart", "mutates": True, "json": True, "dry_run": True, "safe_alternative": "model-switchboardctl status"},
-        {"name": "switch", "mutates": True, "json": True, "dry_run": True, "safe_alternative": "model-switchboardctl status"},
-        {"name": "activate", "mutates": True, "json": True, "dry_run": True, "safe_alternative": "model-switchboardctl status"},
-        {"name": "bench-all", "mutates": True, "safe_alternative": "model-switchboardctl triage"},
-        {"name": "bench", "mutates": True, "safe_alternative": "model-switchboardctl triage"},
-        {"name": "stop-all", "mutates": True, "json": True, "dry_run": True, "safe_alternative": "model-switchboardctl status"},
-        {"name": "completions", "mutates": False, "json": False},
-    ],
-    "aliases": {
-        "--capabilities": ["capabilities"],
-        "--robot-docs": ["robot-docs", "guide"],
-        "--robot-triage": ["triage"],
-        "diagnose": ["doctor"],
-        "health": ["doctor", "health"],
-        "docs": ["robot-docs", "guide"],
-    },
-    "exit_codes": {
-        "0": "success",
-        "3": "controller or local modelctl unavailable",
-        "64": "usage error",
-    },
-    "stdout_stderr_contract": {
-        "stdout": "requested data only",
-        "stderr": "curl diagnostics, usage errors, and actionable hints",
-    },
-}
-print(json.dumps(payload, indent=2, sort_keys=True))
-PY
-}
-
-print_wrapper_robot_docs() {
   cat <<'DOCS'
-Model Switchboard wrapper robot docs
+Model Switchboard native controller
 
-First commands to try:
-- `model-switchboardctl capabilities` prints this wrapper's machine-readable command contract.
-- `model-switchboardctl triage` returns controller health context in one JSON object.
-- `model-switchboardctl status` returns raw controller status JSON.
-- `model-switchboardctl summary` returns a compact human summary.
-- `model-switchboardctl doctor --json` delegates to `Controller/modelctl.py doctor --json` when `MODEL_SWITCHBOARD_MODELCTL` or a source checkout path is available.
-
-Safety:
-- `status`, `summary`, `profiles-dir`, `controller-root`, `capabilities`, `robot-docs`, and `triage` are read-only.
-- `start`, `stop`, `restart`, `activate`, `bench`, `bench-all`, and `stop-all` mutate local runtime state.
-- `start`, `stop`, `restart`, `switch`, `activate`, and `stop-all` accept `--dry-run`/`--plan`; add `--json` for a structured envelope.
-- If doctor delegation is unavailable, set `MODEL_SWITCHBOARD_MODELCTL=/path/to/Controller/modelctl.py`.
+- `model-switchboardctl status` is the default read-only probe.
+- `model-switchboardctl capabilities` describes available commands.
+- Lifecycle commands support `--dry-run` or `--plan` before mutation.
 DOCS
 }
 
-print_wrapper_triage() {
-  local status_json
-  if ! status_json="$(api "$CONTROLLER_URL/api/status" 2>&1)"; then
-    printf 'error: controller status request failed for %s\n' "$CONTROLLER_URL" >&2
-    printf '%s\n' "$status_json" >&2
-    printf 'hint: inspect wrapper commands with: model-switchboardctl capabilities\n' >&2
-    printf 'hint: if running from source, try: model-switchboardctl doctor --json\n' >&2
-    exit 3
-  fi
-  "$PYTHON_BIN" - "$status_json" "$CONTROLLER_URL" "$MODELCTL" <<'PY'
-import json
-import sys
-
-payload = json.loads(sys.argv[1])
-controller_url = sys.argv[2]
-modelctl_path = sys.argv[3] or None
-statuses = payload.get("statuses", [])
-running = [item.get("profile") for item in statuses if item.get("running")]
-ready = [item.get("profile") for item in statuses if item.get("ready")]
-triage = {
-    "schema_version": "1",
-    "tool": "model-switchboardctl",
-    "controller_url": controller_url,
-    "modelctl_available": bool(modelctl_path),
-    "modelctl_path": modelctl_path,
-    "profiles": {
-        "count": len(statuses),
-        "running": sorted(name for name in running if name),
-        "ready": sorted(name for name in ready if name),
-    },
-    "commands": [
-        "model-switchboardctl capabilities",
-        "model-switchboardctl robot-docs guide",
-        "model-switchboardctl status",
-        "model-switchboardctl summary",
-        "model-switchboardctl doctor --json",
-    ],
-}
-print(json.dumps(triage, indent=2, sort_keys=True))
-PY
+print_dry_run() {
+  local action="$1" endpoint="$2" payload="$3"
+  printf '{\n  "schema_version": "1",\n  "tool": "model-switchboardctl",\n  "command": "%s",\n  "dry_run": true,\n  "status": "planned",\n  "ok": true,\n  "plan": [{"endpoint": "%s", "payload": %s}],\n  "results": []\n}\n' "$action" "$endpoint" "$payload"
 }
 
-suggest_command() {
-  case "${1:-}" in
-    stats) printf 'status' ;;
-    docter|diagnostics) printf 'doctor' ;;
-    capability|capabilites|capabilities-json) printf 'capabilities' ;;
-    robot-help|docs) printf 'robot-docs' ;;
-    robot-triage) printf 'triage' ;;
-    activate-profile) printf 'activate' ;;
-    *) return 1 ;;
-  esac
-}
-
-json_field() {
-  local field="$1"
-  local input
-  input="$(cat)"
-  "$PYTHON_BIN" - "$field" "$input" <<'PY'
-import json
-import sys
-field = sys.argv[1]
-payload = json.loads(sys.argv[2])
-value = payload
-for key in field.split("."):
-    if isinstance(value, dict):
-        value = value.get(key)
-    else:
-        value = None
-        break
-if value is None:
-    sys.exit(1)
-if isinstance(value, (dict, list)):
-    print(json.dumps(value))
-else:
-    print(value)
-PY
-}
-
-json_quote() {
-  "$PYTHON_BIN" - "$1" <<'PY'
-import json
-import sys
-print(json.dumps(sys.argv[1]))
-PY
-}
-
-post_json() {
-  local path="$1"
-  local payload="$2"
-  api -X POST "$CONTROLLER_URL$path" -H 'Content-Type: application/json' -d "$payload"
-}
-
-require_profile() {
-  if [ "$#" -lt 1 ] || [ -z "${1:-}" ]; then
-    printf 'error: missing profile\n' >&2
-    usage >&2
-    exit 1
-  fi
-}
-
-print_wrapper_mutation_envelope() {
-  local action="$1"
-  local endpoint="$2"
-  local payload="$3"
-  local dry_run="$4"
-  local response="${5:-}"
-  "$PYTHON_BIN" - "$action" "$endpoint" "$payload" "$dry_run" "$response" <<'PY'
-import json
-import sys
-
-action, endpoint, payload_raw, dry_run_raw, response_raw = sys.argv[1:6]
-request_payload = json.loads(payload_raw)
-dry_run = dry_run_raw == "true"
-envelope = {
-    "schema_version": "1",
-    "tool": "model-switchboardctl",
-    "command": action,
-    "dry_run": dry_run,
-    "status": "planned" if dry_run else "applied",
-    "ok": True,
-    "plan": [
-        {
-            "action": "post-controller-action",
-            "endpoint": endpoint,
-            "payload": request_payload,
-            "mutates": True,
-        }
-    ],
-}
-if response_raw:
-    try:
-        envelope["controller_response"] = json.loads(response_raw)
-    except json.JSONDecodeError:
-        envelope["controller_response"] = response_raw
-print(json.dumps(envelope, indent=2, sort_keys=True))
-PY
-}
-
-run_wrapper_mutation() {
-  local action="$1"
-  local endpoint="$2"
-  local modelctl_command="$3"
-  local needs_profile="$4"
-  shift 4
-  local as_json=false
-  local dry_run=false
-  local profile=""
-  local arg
-  while [ "$#" -gt 0 ]; do
-    arg="$1"
-    shift
-    case "$arg" in
-      --json)
-        as_json=true
-        ;;
-      --dry-run|--plan)
-        dry_run=true
-        ;;
-      *)
-        if [ -z "$profile" ]; then
-          profile="$arg"
-        else
-          printf 'error: unexpected argument %s\n' "$arg" >&2
-          printf 'hint: inspect usage with: model-switchboardctl capabilities\n' >&2
-          exit 64
-        fi
-        ;;
-    esac
+is_dry_run() {
+  local argument
+  for argument in "$@"; do
+    [ "$argument" = "--dry-run" ] || [ "$argument" = "--plan" ] || continue
+    return 0
   done
-  if [ "$needs_profile" = true ] && [ -z "$profile" ]; then
-    printf 'error: missing profile\n' >&2
-    printf 'hint: use: model-switchboardctl %s <profile> --dry-run\n' "$action" >&2
-    exit 64
-  fi
-  local payload="{}"
-  if [ -n "$profile" ]; then
-    payload="{\"profile\":$(json_quote "$profile")}"
-  fi
-  if [ "$dry_run" = true ]; then
-    if [ -n "$MODELCTL" ]; then
-      if [ "$needs_profile" = true ]; then
-        if [ "$as_json" = true ]; then
-          run_modelctl "$modelctl_command" "$profile" --dry-run --json
-        else
-          run_modelctl "$modelctl_command" "$profile" --dry-run
-        fi
-      elif [ "$as_json" = true ]; then
-        run_modelctl "$modelctl_command" --dry-run --json
-      else
-        run_modelctl "$modelctl_command" --dry-run
-      fi
-      return
-    fi
-    if [ "$as_json" = true ]; then
-      print_wrapper_mutation_envelope "$action" "$endpoint" "$payload" true
-    else
-      printf 'plan %s dry_run=true\n' "$action"
-      printf -- '- post %s payload=%s\n' "$endpoint" "$payload"
-    fi
-    return
-  fi
-  local response
-  response="$(post_json "$endpoint" "$payload")"
-  if [ "$as_json" = true ]; then
-    print_wrapper_mutation_envelope "$action" "$endpoint" "$payload" false "$response"
-  else
-    printf '%s\n' "$response"
-  fi
+  return 1
 }
 
-command="${1:-}"
+command="${1:-help}"
+shift || true
 case "$command" in
-  triage|--robot-triage)
-    shift || true
-    print_wrapper_triage
+  help|-h|--help) usage ;;
+  status|summary) api "$CONTROLLER_URL/api/status"; printf '\n' ;;
+  profiles-dir) extract_path profiles_dir ;;
+  controller-root) extract_path controller_root ;;
+  capabilities) print_capabilities ;;
+  robot-docs) print_robot_docs "${1:-guide}" ;;
+  triage|doctor|diagnose|health) native "$command" "$@" ;;
+  start|stop|restart)
+    [ "$#" -ge 1 ] || { printf 'error: %s requires a profile\n' "$command" >&2; exit 64; }
+    profile="$(json_string "$1")"
+    payload="{\"profile\":\"$profile\"}"
+    if is_dry_run "$@"; then print_dry_run "$command" "/api/$command" "$payload"; else json_action "/api/$command" "$payload"; fi
     ;;
-  capabilities|--capabilities)
-    shift || true
-    print_wrapper_capabilities
-    ;;
-  robot-docs|robot-help|docs|--robot-docs|--robot-help)
-    shift || true
-    if [ "$#" -gt 0 ] && [ "$1" != "guide" ]; then
-      printf 'error: unknown robot-docs topic %s\n' "$1" >&2
-      printf 'hint: did you mean: model-switchboardctl robot-docs guide\n' >&2
-      exit 64
-    fi
-    print_wrapper_robot_docs
-    ;;
-  doctor)
-    shift
-    run_modelctl doctor "$@"
-    ;;
-  diagnose)
-    shift
-    run_modelctl doctor "$@"
-    ;;
-  health)
-    shift
-    run_modelctl doctor health "$@"
-    ;;
-  status)
-    api "$CONTROLLER_URL/api/status"
-    ;;
-  summary)
-    summary_json="$(api "$CONTROLLER_URL/api/status")"
-    "$PYTHON_BIN" - "$summary_json" <<'PY'
-import json
-import sys
-payload = json.loads(sys.argv[1])
-statuses = payload.get("statuses", [])
-running = [item["display_name"] for item in statuses if item.get("running")]
-ready = sum(1 for item in statuses if item.get("ready"))
-bench = payload.get("benchmark") or {}
-bench_state = "benchmarking" if bench.get("running") else ((bench.get("latest") or {}).get("suite") or "idle")
-print(f"{ready}/{len(statuses)} ready | {len(running)} running | {bench_state}")
-if running:
-    print("Running: " + ", ".join(running))
-PY
-    ;;
-  profiles-dir)
-    api "$CONTROLLER_URL/api/status" | json_field profiles_dir
-    ;;
-  controller-root)
-    api "$CONTROLLER_URL/api/status" | json_field controller_root
-    ;;
-  open-app)
-    if [ -d "$APP_PATH" ]; then
-      open -a "$APP_PATH"
-    else
-      open -a "$DEFAULT_APP_NAME"
-    fi
-    ;;
-  open-dashboard)
-    open "$CONTROLLER_URL"
-    ;;
-  open-profiles)
-    profile_dir="$(api "$CONTROLLER_URL/api/status" | json_field profiles_dir)"
-    open "$profile_dir"
-    ;;
-  start)
-    shift
-    run_wrapper_mutation start /api/start start true "$@"
-    ;;
-  stop)
-    shift
-    run_wrapper_mutation stop /api/stop stop true "$@"
-    ;;
-  restart)
-    shift
-    run_wrapper_mutation restart /api/restart restart true "$@"
-    ;;
-  switch)
-    shift
-    run_wrapper_mutation switch /api/switch switch true "$@"
-    ;;
-  activate)
-    shift
-    run_wrapper_mutation activate /api/switch switch true "$@"
-    ;;
-  bench-all)
-    post_json /api/benchmark/start '{"suite":"quick"}'
-    ;;
-  bench)
-    shift
-    require_profile "$@"
-    post_json /api/benchmark/start "{\"suite\":\"quick\",\"profiles\":[\"$1\"]}"
+  switch|activate)
+    [ "$#" -ge 1 ] || { printf 'error: %s requires a profile\n' "$command" >&2; exit 64; }
+    profile="$(json_string "$1")"
+    payload="{\"profile\":\"$profile\"}"
+    if is_dry_run "$@"; then print_dry_run "$command" '/api/switch' "$payload"; else json_action '/api/switch' "$payload"; fi
     ;;
   stop-all)
-    shift || true
-    run_wrapper_mutation stop-all /api/stop-all stop-all false "$@"
+    if is_dry_run "$@"; then print_dry_run 'stop-all' '/api/stop-all' '{}'; else json_action '/api/stop-all' '{}'; fi
     ;;
-  completions)
-    shift
-    print_completions "${1:-}"
+  bench)
+    [ "$#" -ge 1 ] || { printf 'error: bench requires a profile\n' >&2; exit 64; }
+    profile="$(json_string "$1")"
+    json_action '/api/benchmark/start' "{\"profiles\":[\"$profile\"],\"suite\":\"quick\"}"
     ;;
-  ""|-h|--help|help)
-    usage
-    ;;
+  bench-all) json_action '/api/benchmark/start' '{"suite":"quick"}' ;;
+  open-app) open -a 'Model Switchboard' ;;
+  open-profiles) open "$(extract_path profiles_dir)" ;;
+  completions) completions "${1:-}" ;;
   *)
-    printf 'error: unknown command %s\n' "$command" >&2
-    if suggestion="$(suggest_command "$command")"; then
-      printf 'hint: did you mean: model-switchboardctl %s\n' "$suggestion" >&2
-    fi
-    printf 'hint: inspect commands with: model-switchboardctl capabilities\n' >&2
-    usage >&2
+    printf 'error: unknown command: %s\n' "$command" >&2
+    if [ "$command" = "stats" ]; then printf 'did you mean: model-switchboardctl status\n' >&2; fi
+    printf 'inspect available commands with: model-switchboardctl capabilities\n' >&2
     exit 64
     ;;
 esac

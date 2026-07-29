@@ -20,6 +20,18 @@ case "$APP_VARIANT" in
 esac
 APP_PATH="${1:-$DEFAULT_APP_PATH}"
 DMG_PATH="${2:-$DEFAULT_DMG_PATH}"
+CONTROLLER_BIN="$APP_PATH/Contents/Resources/ModelSwitchboardController"
+CONTROLLER_PLIST="$APP_PATH/Contents/Library/LaunchAgents/io.modelswitchboard.controller.plist"
+
+[ -x "$CONTROLLER_BIN" ] || { echo "native controller missing from app bundle" >&2; exit 1; }
+[ -f "$CONTROLLER_PLIST" ] || { echo "controller LaunchAgent plist missing from app bundle" >&2; exit 1; }
+plutil -lint "$CONTROLLER_PLIST" >/dev/null
+CONTROLLER_CAPABILITIES="$("$CONTROLLER_BIN" capabilities)"
+grep -q '"native" : true' <<<"$CONTROLLER_CAPABILITIES"
+if find "$APP_PATH" -type f -name '*.py' -print -quit | grep -q .; then
+  echo "Python runtime file found in production app bundle" >&2
+  exit 1
+fi
 
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 "$ROOT_DIR/Scripts/verify-privacy.sh" "$APP_PATH"

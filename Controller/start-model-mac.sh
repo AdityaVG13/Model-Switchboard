@@ -75,14 +75,21 @@ fi
 
 load_profile_exports() {
     local path="$1"
+    local controller_bin
     local exports
-    if ! exports="$(python3 "$WORK_DIR/profile_env.py" "$path")"; then
+    controller_bin="${MODEL_SWITCHBOARD_CONTROLLER_BIN:-$WORK_DIR/bin/ModelSwitchboardController}"
+    if [ ! -x "$controller_bin" ]; then
+        die "Native controller not found: $controller_bin"
+    fi
+    if ! exports="$("$controller_bin" profile-exports --root "$WORK_DIR" --profile-file "$path")"; then
         die "Failed to load profile: $path"
     fi
     eval "$exports"
 }
 
-load_profile_exports "$PROFILE_PATH"
+if [ "${MODEL_SWITCHBOARD_PROFILE_LOADED:-0}" != "1" ]; then
+    load_profile_exports "$PROFILE_PATH"
+fi
 
 calc_threads() {
     local cpu_count

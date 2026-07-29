@@ -1,6 +1,6 @@
 # Controller API Conformance Report
 
-Specification source: `Controller/modelctl.py`, `Controller/contracts.py`, `Sources/ModelSwitchboardCore/ControllerClient.swift`
+Specification source: `Sources/ModelSwitchboardControllerCore/ControllerRouter.swift`, `Sources/ModelSwitchboardCore/ControllerClient.swift`
 
 | Section | MUST | SHOULD | Tested | Passing | Divergent | Score |
 |---|---:|---:|---:|---:|---:|---:|
