@@ -108,10 +108,12 @@ Use `RUNTIME_TAGS` for model-level traits such as `coding`, `q8`, `long-context`
 
 **Your DGX box, lab workstation, or home server — in the same menu bar panel.** Launching a model server used to mean SSH-ing in, finding the tmux pane, and pasting a `vllm serve` incantation. Now: drop a profile file on the remote host, click `Activate` on your Mac.
 
-- **One-file agent, zero dependencies.** A single stdlib-only Python file ([RemoteAgent/](RemoteAgent/)) speaks the exact controller contract on any host with Python 3.10+. Installed by one script, kept alive by a systemd user service.
+- **Nothing to install on the remote by hand.** Enter `user` + `host` in *Settings → Remote Gateways*, click **Install Agent on Host**, and the app pushes its bundled single-file agent (stdlib-only Python, [RemoteAgent/](RemoteAgent/)) over your own SSH connection and sets up its service. Or use the printed pairing code / `curl | bash` one-liner from an existing SSH session.
 - **SSH tunnels, your keys.** The agent binds loopback only; the app opens the tunnel with your existing SSH config and agent (`BatchMode` — it never touches passwords). Running models' ports are forwarded automatically, so `Copy Endpoint URL` gives you a URL that works on your Mac.
+- **Tailscale-native.** Tick *Tailscale mode* on install (or run the agent with `--tailscale`) and the gateway connects directly over your tailnet — WireGuard-encrypted, no tunnel process, MagicDNS names in your endpoint URLs.
 - **Or direct LAN**, guarded the same way as the local controller: non-loopback binds demand a ≥16-byte bearer token, stored in your keychain.
-- **Everything aggregates.** The menu bar ready-count spans every gateway; `Stop Everything` sweeps them all.
+- **Any runtime.** Launch templates for vLLM, llama.cpp, SGLang, and TGI, plus `START_COMMAND` for anything else — same profile files as local models. Live rows show exactly which model is serving on which port, with the URL as reachable *from your Mac*.
+- **Everything aggregates.** Each gateway gets its own named section in the panel; the menu bar ready-count spans every gateway; `Stop Everything` sweeps them all.
 
 Setup lives in [RemoteAgent/README.md](RemoteAgent/README.md) and the [SETUP.md remote gateways chapter](SETUP.md#remote-gateways).
 

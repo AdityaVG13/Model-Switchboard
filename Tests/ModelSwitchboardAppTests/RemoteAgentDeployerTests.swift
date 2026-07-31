@@ -85,9 +85,29 @@ private func makeSources() throws -> (agent: URL, installer: URL, base: URL) {
 
     let installArguments = try fixture.recordedArguments(1)
     #expect(installArguments.contains("bash -s -- --port 9001"))
+    #expect(!installArguments.contains("--tailscale"))
     #expect(try fixture.recordedStdin(1) == Data("INSTALLER-SH-CONTENT".utf8))
 
     #expect(result.pairingLink == "modelswitchboard-gateway://gpuadmin@spark.local?name=spark&agent_port=8877")
+}
+
+@Test func tailscaleDeployPassesInstallerFlag() async throws {
+    let fixture = try FakeSSHFixture()
+    defer { fixture.cleanup() }
+    let sources = try makeSources()
+    defer { try? FileManager.default.removeItem(at: sources.base) }
+
+    let deployer = RemoteAgentDeployer(
+        executableURL: fixture.executable,
+        agentSourceURL: sources.agent,
+        installerURL: sources.installer
+    )
+    let config = GatewayConfig(name: "Spark", kind: .ssh, sshUser: "gpuadmin", sshHost: "spark.local")
+
+    _ = try await deployer.deploy(to: config, useTailscale: true)
+
+    let installArguments = try fixture.recordedArguments(1)
+    #expect(installArguments.contains("bash -s -- --port 8877 --tailscale"))
 }
 
 @Test func deployFailureClassifiesStderr() async throws {

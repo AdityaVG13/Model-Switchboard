@@ -151,6 +151,16 @@ struct RemoteProfileRowView: View {
                     .font(.system(size: 10.5))
                     .foregroundStyle(theme.sub)
                     .lineLimit(1)
+                if let endpointLine {
+                    // Which model is live on which endpoint, as reachable from
+                    // this Mac (forwarded/tailnet URL, not the remote's view).
+                    Text(endpointLine)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(theme.sub)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -166,6 +176,16 @@ struct RemoteProfileRowView: View {
 
     private var isDisplayedRunning: Bool {
         MenuBarContentView.isDisplayedRunning(profile, in: store)
+    }
+
+    /// `<served model id> · <URL usable from this Mac>` for live rows.
+    private var endpointLine: String? {
+        guard isDisplayedRunning, profile.ready else { return nil }
+        let servedModel = profile.serverIDs.first ?? profile.serverModelID
+        guard let url = runtime.reachableEndpointURL(for: profile) else {
+            return "\(servedModel) · \(profile.host):\(profile.port) (remote-only)"
+        }
+        return "\(servedModel) · \(url)"
     }
 
     private func dotColor(pending: String?) -> Color {

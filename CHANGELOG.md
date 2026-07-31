@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Added
+- **Remote gateways**: launch, monitor, and stop model servers on other machines (DGX boxes, Linux workstations, servers) from the same menu bar panel, in both Base and Plus. Each gateway renders as its own named section; the menu bar count and Stop Everything span all gateways.
+- Single-file, stdlib-only Python remote agent (`RemoteAgent/`) speaking the exact controller HTTP contract, with launch templates for vLLM, llama.cpp, SGLang, and TGI plus `START_COMMAND` for any other runtime; validated by a cross-implementation conformance suite driven by the app's own `ControllerClient`.
+- One-click agent deployment over SSH from Settings (nothing downloaded on the remote host), `modelswitchboard-gateway://` pairing codes (`model-switchboard-agent link`), and a `curl | bash` installer fallback.
+- App-managed SSH tunnels using the user's own keys (`BatchMode`), with jittered reconnect backoff, classified failure messages, and automatic same-port forwarding of running models' endpoints.
+- Tailscale mode: `--tailscale` binds the agent to the host's tailnet address only, and pairing codes carry `mode=direct` so the Mac connects tunnel-lessly via MagicDNS.
+- Per-gateway bearer tokens in the keychain; non-loopback agent binds outside a tailnet require `--unsafe-bind` plus a ≥16-byte token, mirroring the local controller.
+
+### Fixed
+- Keychain token saves now update existing items; previously edits to a saved controller token were silently discarded (`SecItemAdd` duplicate). Token edits are also debounced instead of saved per keystroke.
+
 ## [1.3.0] - 2026-07-29
 
 ### Added

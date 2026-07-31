@@ -24,6 +24,7 @@ struct GatewaySettingsSection: View {
     @State private var linkCode = ""
     @State private var validationMessage: String?
     @State private var deployState: DeployState = .idle
+    @State private var deployWithTailscale = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -177,6 +178,8 @@ struct GatewaySettingsSection: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            deployStatusText
+
             VStack(alignment: .leading, spacing: 4) {
                 Text("Bearer token (optional)")
                     .font(.system(size: 12.5))
@@ -258,27 +261,42 @@ struct GatewaySettingsSection: View {
                     NSPasteboard.general.setString(Self.installOneLiner, forType: .string)
                 }
             }
-            switch deployState {
-            case .idle:
-                Text("Nothing to install on the remote by hand: this pushes the single-file agent over SSH and sets up its service. Or copy the one-liner to run there yourself.")
+            Toggle(isOn: $deployWithTailscale) {
+                Text("Bind the host's Tailscale address (tunnel-less direct mode)")
+                    .font(.system(size: 10.5))
+            }
+            .toggleStyle(.checkbox)
+            .disabled(deployState == .running)
+            if deployState == .idle {
+                Text("Nothing to install on the remote by hand: this pushes the single-file agent over SSH and sets up its service. With Tailscale mode, this gateway is converted to a direct tailnet connection after install. Or copy the one-liner to run there yourself.")
                     .font(.system(size: 10))
                     .foregroundStyle(theme.sub)
                     .fixedSize(horizontal: false, vertical: true)
-            case .running:
-                Text("Pushing the agent and running the installer over SSH…")
-                    .font(.system(size: 10))
-                    .foregroundStyle(DashboardTheme.pendingOrange)
-            case .success(let message):
-                Text(message)
-                    .font(.system(size: 10))
-                    .foregroundStyle(DashboardTheme.runningGreen)
-                    .fixedSize(horizontal: false, vertical: true)
-            case .failure(let message):
-                Text(message)
-                    .font(.system(size: 10))
-                    .foregroundStyle(DashboardTheme.stopRed)
-                    .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
+
+    /// Rendered outside the SSH-only controls so a Tailscale install that
+    /// converts the gateway to direct-URL kind keeps its status visible.
+    @ViewBuilder
+    private var deployStatusText: some View {
+        switch deployState {
+        case .idle:
+            EmptyView()
+        case .running:
+            Text("Pushing the agent and running the installer over SSH…")
+                .font(.system(size: 10))
+                .foregroundStyle(DashboardTheme.pendingOrange)
+        case .success(let message):
+            Text(message)
+                .font(.system(size: 10))
+                .foregroundStyle(DashboardTheme.runningGreen)
+                .fixedSize(horizontal: false, vertical: true)
+        case .failure(let message):
+            Text(message)
+                .font(.system(size: 10))
+                .foregroundStyle(DashboardTheme.stopRed)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -287,7 +305,23 @@ struct GatewaySettingsSection: View {
         Task {
             let deployer = RemoteAgentDeployer()
             do {
-                let result = try await deployer.deploy(to: config)
+                let result = try await deployer.deploy(to: config, useTailscale: deployWithTailscale)
+                if deployWithTailscale,
+                   let link = result.pairingLink,
+                   var direct = GatewayLinkCode.parse(link),
+                   direct.kind == .direct {
+                    // Adopt the tailnet address the host reported; keep the
+                    // user's id and any name they already typed.
+                    direct.id = config.id
+                    if !config.name.trimmingCharacters(in: .whitespaces).isEmpty {
+                        direct.name = config.name
+                    }
+                    draft = direct
+                    deployState = .success(
+                        "Agent installed in Tailscale mode — gateway switched to direct URL \(direct.baseURL). Save to connect."
+                    )
+                    return
+                }
                 let suffix = result.pairingLink == nil
                     ? "" : " The host printed its pairing code, so the connection details check out."
                 deployState = .success("Agent installed on \(config.sshHost).\(suffix) Save the gateway to connect.")
@@ -311,6 +345,7 @@ struct GatewaySettingsSection: View {
         linkCode = ""
         validationMessage = nil
         deployState = .idle
+        deployWithTailscale = false
     }
 
     // MARK: - Small helpers (visually matching SettingsView)

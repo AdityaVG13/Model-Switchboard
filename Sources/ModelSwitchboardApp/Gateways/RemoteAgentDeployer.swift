@@ -44,8 +44,10 @@ actor RemoteAgentDeployer {
             && FileManager.default.isReadableFile(atPath: installerURL.path)
     }
 
-    /// Pushes the agent and runs the installer on the gateway host.
-    func deploy(to config: GatewayConfig) async throws -> Result {
+    /// Pushes the agent and runs the installer on the gateway host. With
+    /// `useTailscale` the agent is set up bound to the host's tailnet address
+    /// and the returned pairing link describes a direct (tunnel-less) gateway.
+    func deploy(to config: GatewayConfig, useTailscale: Bool = false) async throws -> Result {
         guard resourcesAvailable else { throw DeployError.missingResources }
         let agentData = try Data(contentsOf: agentSourceURL)
         let installerData = try Data(contentsOf: installerURL)
@@ -61,10 +63,11 @@ actor RemoteAgentDeployer {
 
         // 2. Run the installer from stdin: no files land anywhere except the
         //    agent's own install root.
+        let installerFlags = "--port \(config.remotePort)" + (useTailscale ? " --tailscale" : "")
         let output = try await runSSH(
             config: config,
             step: "run installer",
-            remoteCommand: "bash -s -- --port \(config.remotePort)",
+            remoteCommand: "bash -s -- \(installerFlags)",
             stdin: installerData
         )
 
