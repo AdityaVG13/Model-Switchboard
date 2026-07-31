@@ -60,6 +60,16 @@ public struct GatewayConfig: Codable, Identifiable, Equatable, Sendable {
         sshUser.isEmpty ? sshHost : "\(sshUser)@\(sshHost)"
     }
 
+    /// OpenSSH treats argv tokens starting with `-` as options. Reject those
+    /// for host/user so pasted pairing codes and settings cannot inject flags.
+    public var hasUnsafeSSHDestination: Bool {
+        Self.looksLikeSSHOption(sshHost) || (!sshUser.isEmpty && Self.looksLikeSSHOption(sshUser))
+    }
+
+    public static func looksLikeSSHOption(_ value: String) -> Bool {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("-")
+    }
+
     /// Human-readable connection summary for list rows.
     public var endpointSummary: String {
         switch kind {
@@ -104,8 +114,12 @@ public enum GatewayLinkCode {
         guard
             let components = URLComponents(string: trimmed),
             components.scheme?.lowercased() == scheme,
-            let host = components.host, !host.isEmpty
+            let host = components.host, !host.isEmpty,
+            !GatewayConfig.looksLikeSSHOption(host)
         else { return nil }
+        if let user = components.user, GatewayConfig.looksLikeSSHOption(user) {
+            return nil
+        }
         let query = components.queryItems ?? []
         func value(_ name: String) -> String? {
             query.first { $0.name == name }?.value

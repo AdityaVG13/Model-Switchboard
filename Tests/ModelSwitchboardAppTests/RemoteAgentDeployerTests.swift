@@ -78,7 +78,7 @@ private func makeSources() throws -> (agent: URL, installer: URL, base: URL) {
     let pushArguments = try fixture.recordedArguments(0)
     #expect(pushArguments.contains("BatchMode=yes"))
     #expect(pushArguments.contains("-p\n2222"))
-    #expect(pushArguments.contains("gpuadmin@spark.local"))
+    #expect(pushArguments.contains("--\ngpuadmin@spark.local\n"))
     #expect(pushArguments.contains("cat > ~/.local/share/model-switchboard-agent/model_switchboard_agent.py"))
     #expect(pushArguments.contains("/.ssh/spark_key"))
     #expect(try fixture.recordedStdin(0) == Data("AGENT-PY-CONTENT".utf8))

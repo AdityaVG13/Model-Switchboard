@@ -38,6 +38,12 @@ final class GatewayRuntime: Identifiable {
             if !status.usesLoopbackEndpoint {
                 return status.baseURL
             }
+            // Agent status always advertises loopback `base_url` unless BASE_URL
+            // is set. Rewriting that to the controller's LAN/tailnet host only
+            // works when the model process itself is bound beyond loopback
+            // (HOST=0.0.0.0 / a real interface). A default 127.0.0.1 bind stays
+            // remote-only — Copy Endpoint would otherwise hand out a dead URL.
+            guard !LoopbackHost.isLoopback(status.host) else { return nil }
             guard
                 let controllerHost = URL(string: config.baseURL)?.host,
                 !LoopbackHost.isLoopback(controllerHost),
@@ -116,6 +122,10 @@ final class GatewayHub {
         var kept: [String: GatewayRuntime] = [:]
         for runtime in remoteRuntimes {
             if let config = configs.first(where: { $0.id == runtime.id }), config == runtime.config {
+                // Config Equatable ignores the Keychain token. Sync credentials
+                // onto the kept store so token-only edits take effect without a
+                // rebuild (and without waiting for app restart).
+                syncAuthToken(onto: runtime)
                 kept[runtime.id] = runtime
             } else {
                 teardown(runtime)
@@ -126,6 +136,13 @@ final class GatewayHub {
             guard config.enabled else { return nil }
             return makeRuntime(config: config)
         }
+    }
+
+    private func syncAuthToken(onto runtime: GatewayRuntime) {
+        let token = tokenStorageFactory(runtime.id).load() ?? ""
+        guard runtime.store.controllerAuthToken != token else { return }
+        runtime.store.controllerAuthToken = token
+        Task { await runtime.store.refresh() }
     }
 
     private func makeRuntime(config: GatewayConfig) -> GatewayRuntime {
@@ -156,6 +173,8 @@ final class GatewayHub {
         runtime.forwardSyncTask?.cancel()
         runtime.forwardSyncTask = nil
         if let tunnel = runtime.tunnel {
+            // Instance-unique control sockets mean a replacement tunnel for the
+            // same gateway id can start immediately without racing this stop.
             Task { await tunnel.stop() }
         }
     }

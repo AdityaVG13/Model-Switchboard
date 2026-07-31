@@ -59,6 +59,10 @@ actor SSHTunnelManager {
     nonisolated let configuration: Configuration
     /// Stable across restarts so the store's base URL never changes mid-session.
     nonisolated let localPort: UInt16
+    /// Per-instance control socket leaf name. Must not be keyed only by gateway
+    /// id: teardown is fire-and-forget, and a replacement manager for the same
+    /// gateway would otherwise race ControlMaster on the old path.
+    nonisolated private let controlSocketFileName: String
 
     private let executableURL: URL
     private let onStateChange: @Sendable (State) async -> Void
@@ -82,6 +86,9 @@ actor SSHTunnelManager {
         self.executableURL = executableURL
         self.onStateChange = onStateChange
         self.localPort = Self.allocateLoopbackPort()
+        let shortID = String(gatewayID.replacingOccurrences(of: "-", with: "").prefix(12))
+        let nonce = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(8))
+        self.controlSocketFileName = "\(shortID)-\(nonce).sock"
     }
 
     nonisolated var localBaseURL: String { "http://127.0.0.1:\(localPort)" }
@@ -101,6 +108,8 @@ actor SSHTunnelManager {
         supervisorTask = nil
         terminateProcess()
         activeForwards = []
+        let socketPath = controlSocketPath()
+        try? FileManager.default.removeItem(atPath: socketPath)
         await transition(to: .idle)
     }
 
@@ -239,7 +248,9 @@ actor SSHTunnelManager {
     private func runControlCommand(_ arguments: [String]) -> Bool {
         let process = Process()
         process.executableURL = executableURL
-        process.arguments = ["-S", controlSocketPath()] + arguments + [configuration.destination]
+        // `--` so a destination that looks like an ssh option cannot be
+        // interpreted as one (pairing codes / pasted hosts are untrusted).
+        process.arguments = ["-S", controlSocketPath()] + arguments + ["--", configuration.destination]
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         process.standardInput = FileHandle.nullDevice
@@ -279,7 +290,9 @@ actor SSHTunnelManager {
         if let identityAgent = configuration.identityAgent, !identityAgent.isEmpty {
             arguments += ["-o", "IdentityAgent=\(identityAgent)"]
         }
-        arguments.append(configuration.destination)
+        // End-of-options: destinations from settings / pairing codes must not
+        // be parsed as ssh flags (e.g. `-oProxyCommand=...`).
+        arguments += ["--", configuration.destination]
         return arguments
     }
 
@@ -291,8 +304,7 @@ actor SSHTunnelManager {
             attributes: [.posixPermissions: 0o700]
         )
         // Unix socket paths are length-limited; keep the name short.
-        let shortID = String(gatewayID.replacingOccurrences(of: "-", with: "").prefix(12))
-        return directory.appendingPathComponent("\(shortID).sock").path
+        return directory.appendingPathComponent(controlSocketFileName).path
     }
 
     // MARK: - Static helpers

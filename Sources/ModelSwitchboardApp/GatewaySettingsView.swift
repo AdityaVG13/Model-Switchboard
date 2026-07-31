@@ -227,6 +227,10 @@ struct GatewaySettingsSection: View {
                 validationMessage = "SSH host is required."
                 return
             }
+            if config.hasUnsafeSSHDestination {
+                validationMessage = "SSH user/host cannot start with '-' (would be parsed as an ssh option)."
+                return
+            }
         case .direct:
             guard let url = URL(string: config.baseURL),
                   let scheme = url.scheme?.lowercased(),

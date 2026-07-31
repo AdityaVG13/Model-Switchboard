@@ -97,7 +97,9 @@ actor RemoteAgentDeployer {
         if let identityAgent = config.identityAgent, !identityAgent.isEmpty {
             arguments += ["-o", "IdentityAgent=\(identityAgent)"]
         }
-        arguments += [config.sshDestination, remoteCommand]
+        // `--` terminates options so a crafted destination cannot inject
+        // `-oProxyCommand=...` (or similar) ahead of the remote command.
+        arguments += ["--", config.sshDestination, remoteCommand]
 
         let process = Process()
         process.executableURL = executableURL

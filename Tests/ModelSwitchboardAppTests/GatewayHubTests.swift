@@ -121,6 +121,25 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
 }
 
 @MainActor
+@Test func tokenOnlyEditUpdatesLiveStoreWithoutRebuild() throws {
+    try withTestDefaults { defaults, service in
+        let hub = makeHub(defaults: defaults, keychainService: service)
+        let config = GatewayConfig(name: "Lab", kind: .direct, baseURL: "http://10.0.0.9:8877")
+        hub.upsertGateway(config, token: "old-token-0123456789ab")
+        defer { hub.removeGateway(id: config.id) }
+
+        let runtime = try #require(hub.remoteRuntimes.first)
+        #expect(runtime.store.controllerAuthToken == "old-token-0123456789ab")
+
+        hub.upsertGateway(config, token: "new-token-0123456789ab")
+
+        #expect(hub.remoteRuntimes.first === runtime)
+        #expect(runtime.store.controllerAuthToken == "new-token-0123456789ab")
+        #expect(hub.authToken(forGateway: config.id) == "new-token-0123456789ab")
+    }
+}
+
+@MainActor
 @Test func aggregatesSumAcrossGateways() throws {
     try withTestDefaults { defaults, service in
         let hub = makeHub(defaults: defaults, keychainService: service)
@@ -193,17 +212,27 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
         autoStartRefresh: false
     )
     let sshRuntime = GatewayRuntime(config: sshConfig, store: sshStore, tunnel: nil)
-    let status = ModelFixtures.profileStatus(
+    let loopbackStatus = ModelFixtures.profileStatus(
         profile: "qwen", port: "8081", baseURL: "http://127.0.0.1:8081/v1"
     )
 
-    #expect(sshRuntime.reachableEndpointURL(for: status) == nil)
+    #expect(sshRuntime.reachableEndpointURL(for: loopbackStatus) == nil)
     sshRuntime.forwardedPorts = [8081]
-    #expect(sshRuntime.reachableEndpointURL(for: status) == "http://127.0.0.1:8081/v1")
+    #expect(sshRuntime.reachableEndpointURL(for: loopbackStatus) == "http://127.0.0.1:8081/v1")
 
     let directConfig = GatewayConfig(name: "Lab", kind: .direct, baseURL: "http://10.0.0.9:8877")
     let directRuntime = GatewayRuntime(config: directConfig, store: sshStore, tunnel: nil)
-    #expect(directRuntime.reachableEndpointURL(for: status) == "http://10.0.0.9:8081/v1")
+    // Default loopback bind is not reachable via the controller host.
+    #expect(directRuntime.reachableEndpointURL(for: loopbackStatus) == nil)
+
+    // Non-loopback bind (HOST=0.0.0.0) with loopback-advertised base_url: rewrite.
+    let allInterfacesStatus = ModelFixtures.profileStatus(
+        profile: "qwen",
+        host: "0.0.0.0",
+        port: "8081",
+        baseURL: "http://127.0.0.1:8081/v1"
+    )
+    #expect(directRuntime.reachableEndpointURL(for: allInterfacesStatus) == "http://10.0.0.9:8081/v1")
 
     let lanStatus = ModelFixtures.profileStatus(
         profile: "lan", host: "10.0.0.9", port: "8082", baseURL: "http://10.0.0.9:8082/v1"

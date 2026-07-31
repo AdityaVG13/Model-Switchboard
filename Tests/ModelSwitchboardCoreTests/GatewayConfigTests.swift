@@ -106,6 +106,24 @@ import Testing
     #expect(GatewayLinkCode.parse("") == nil)
 }
 
+@Test func linkCodeRejectsOptionShapedSSHDestinations() {
+    #expect(GatewayLinkCode.parse(
+        "modelswitchboard-gateway://-oProxyCommand=evil@spark.local?name=spark"
+    ) == nil)
+    #expect(GatewayLinkCode.parse(
+        "modelswitchboard-gateway://gpuadmin@-oProxyCommand=evil?name=spark"
+    ) == nil)
+    #expect(GatewayConfig(
+        name: "x", kind: .ssh, sshUser: "-oProxyCommand=x", sshHost: "spark"
+    ).hasUnsafeSSHDestination)
+    #expect(GatewayConfig(
+        name: "x", kind: .ssh, sshHost: "-oProxyCommand=x"
+    ).hasUnsafeSSHDestination)
+    #expect(!GatewayConfig(
+        name: "x", kind: .ssh, sshUser: "gpuadmin", sshHost: "spark.local"
+    ).hasUnsafeSSHDestination)
+}
+
 @Test func endpointSummaryDescribesConnection() {
     let direct = GatewayConfig(name: "Lab", kind: .direct, baseURL: "http://10.0.0.9:8877")
     #expect(direct.endpointSummary == "http://10.0.0.9:8877")

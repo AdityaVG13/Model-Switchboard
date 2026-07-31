@@ -44,7 +44,7 @@ extension MenuBarContentView {
                         .padding(.vertical, 2)
                         .background(footerState.color.opacity(0.16), in: Capsule())
                         .foregroundStyle(footerState.color)
-                        .help(store.menuBarHelp)
+                        .help(hub.menuBarHelp)
                 }
             }
 

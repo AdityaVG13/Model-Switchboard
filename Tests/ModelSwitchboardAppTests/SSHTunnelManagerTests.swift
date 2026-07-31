@@ -88,7 +88,7 @@ private func waitFor(
     let joined = arguments.joined(separator: " ")
 
     #expect(arguments.first == "-N")
-    #expect(arguments.last == "gpuadmin@spark.local")
+    #expect(Array(arguments.suffix(2)) == ["--", "gpuadmin@spark.local"])
     #expect(joined.contains("BatchMode=yes"))
     #expect(joined.contains("ExitOnForwardFailure=yes"))
     #expect(joined.contains("ControlMaster=auto"))
@@ -98,6 +98,24 @@ private func waitFor(
     #expect(joined.contains("127.0.0.1:\(manager.localPort):127.0.0.1:9101"))
     #expect(joined.contains("/.ssh/spark_ed25519"))
     #expect(!joined.contains("~"))
+}
+
+@Test func controlSocketPathsAreUniquePerManagerInstance() {
+    let first = SSHTunnelManager(
+        gatewayID: "same-gateway-id",
+        configuration: .init(destination: "user@host")
+    )
+    let second = SSHTunnelManager(
+        gatewayID: "same-gateway-id",
+        configuration: .init(destination: "user@host")
+    )
+    let firstArgs = first.tunnelArguments()
+    let secondArgs = second.tunnelArguments()
+    let firstSocket = firstArgs[firstArgs.firstIndex(of: "-S")! + 1]
+    let secondSocket = secondArgs[secondArgs.firstIndex(of: "-S")! + 1]
+    #expect(firstSocket != secondSocket)
+    #expect(firstSocket.hasSuffix(".sock"))
+    #expect(secondSocket.hasSuffix(".sock"))
 }
 
 @Test func failedAuthSurfacesClassifiedError() async throws {
