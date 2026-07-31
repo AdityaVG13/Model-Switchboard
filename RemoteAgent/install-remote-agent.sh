@@ -66,7 +66,13 @@ import sys
 raise SystemExit(0 if sys.version_info >= (3, 10) else 1)
 EOF
 
-mkdir -p "$INSTALL_ROOT/model-profiles" "$INSTALL_ROOT/run" "$BIN_DIR"
+mkdir -p "$INSTALL_ROOT/run" "$BIN_DIR"
+
+# Visible default for launch .env/.json files. Agent state stays under
+# INSTALL_ROOT; profiles are separate so people (and AI setups) can keep
+# model.env next to their models without digging through ~/.local/share.
+PROFILES_DIR="${MODEL_SWITCHBOARD_PROFILES_DIR:-$HOME/model-profiles}"
+mkdir -p "$PROFILES_DIR"
 
 # Agent source, in order: next to this script (repo checkout), already pushed
 # to the install root (the Mac app deploys it over SSH), or fetched from the
@@ -85,6 +91,26 @@ else
     chmod 0755 "$INSTALL_ROOT/model_switchboard_agent.py"
 fi
 
+# Persist the profiles folder so `serve` (systemd) keeps using it without flags.
+python3 - "$INSTALL_ROOT" "$PROFILES_DIR" <<'PY'
+import json, sys
+from pathlib import Path
+root, profiles = Path(sys.argv[1]), Path(sys.argv[2])
+root.mkdir(parents=True, exist_ok=True)
+path = root / "config.json"
+payload = {}
+if path.is_file():
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        payload = {}
+if not isinstance(payload, dict):
+    payload = {}
+payload["profiles_dir"] = str(profiles)
+path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+path.chmod(0o600)
+PY
+
 cat > "$BIN_PATH" <<EOF
 #!/usr/bin/env bash
 exec python3 "$INSTALL_ROOT/model_switchboard_agent.py" --root "$INSTALL_ROOT" "\$@"
@@ -93,8 +119,8 @@ chmod 0755 "$BIN_PATH"
 
 # One sample per launch style. Rename any of them to <name>.env to activate;
 # one file per model server. Full format reference: SETUP.md in the repo.
-if [ ! -f "$INSTALL_ROOT/model-profiles/example-vllm.env.example" ]; then
-    cat > "$INSTALL_ROOT/model-profiles/example-vllm.env.example" <<'EOF'
+if [ ! -f "$PROFILES_DIR/example-vllm.env.example" ]; then
+    cat > "$PROFILES_DIR/example-vllm.env.example" <<'EOF'
 DISPLAY_NAME="Llama 3.1 8B (vLLM)"
 RUNTIME=vllm
 REQUEST_MODEL=meta-llama/Llama-3.1-8B-Instruct
@@ -102,8 +128,8 @@ PORT=8001
 # EXTRA_ARGS="--max-model-len 8192 --gpu-memory-utilization 0.90"
 EOF
 fi
-if [ ! -f "$INSTALL_ROOT/model-profiles/example-llamacpp.env.example" ]; then
-    cat > "$INSTALL_ROOT/model-profiles/example-llamacpp.env.example" <<'EOF'
+if [ ! -f "$PROFILES_DIR/example-llamacpp.env.example" ]; then
+    cat > "$PROFILES_DIR/example-llamacpp.env.example" <<'EOF'
 DISPLAY_NAME="Qwen 2.5 7B (llama.cpp)"
 RUNTIME=llama.cpp
 REQUEST_MODEL=qwen2.5-7b-instruct
@@ -112,8 +138,8 @@ PORT=8002
 # EXTRA_ARGS="-c 8192 -ngl 99"
 EOF
 fi
-if [ ! -f "$INSTALL_ROOT/model-profiles/example-custom.env.example" ]; then
-    cat > "$INSTALL_ROOT/model-profiles/example-custom.env.example" <<'EOF'
+if [ ! -f "$PROFILES_DIR/example-custom.env.example" ]; then
+    cat > "$PROFILES_DIR/example-custom.env.example" <<'EOF'
 # Any runtime works: give the agent a launch command and a health endpoint.
 DISPLAY_NAME="My Server (custom)"
 RUNTIME=command
@@ -126,6 +152,7 @@ EOF
 fi
 
 log "Installed agent to $INSTALL_ROOT"
+log "Profiles folder: $PROFILES_DIR"
 log "Launcher: $BIN_PATH"
 
 "$BIN_PATH" --version >/dev/null || die "agent smoke test failed"
@@ -168,10 +195,11 @@ if [ "$TAILSCALE" = "0" ] && command -v curl >/dev/null 2>&1; then
     fi
 fi
 
-log "Next: add profiles to $INSTALL_ROOT/model-profiles, then pair your Mac:"
+log "Next: put one .env/.json per model in $PROFILES_DIR (or re-run link to"
+log "point at a folder that already has them), then pair your Mac:"
 echo
 if [ "$TAILSCALE" = "1" ]; then
-    "$BIN_PATH" --port "$PORT" link --tailscale
+    "$BIN_PATH" --port "$PORT" --yes link --tailscale
 else
-    "$BIN_PATH" --port "$PORT" link
+    "$BIN_PATH" --port "$PORT" --yes link
 fi

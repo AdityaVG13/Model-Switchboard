@@ -291,9 +291,15 @@ The moving parts:
    `~/.local/share/model-switchboard-agent/`. (Manual alternatives: a
    `curl | bash` one-liner of `RemoteAgent/install-remote-agent.sh`, or a repo
    checkout.) Profiles use the exact same `.env` / `.json` format described
-   above, in the agent's own `model-profiles/` folder. Launch templates cover
+   above. Default folder is the visible **`~/model-profiles/`** (agent state
+   stays under `~/.local/share/…`). `model-switchboard-agent link` scans your
+   home for existing launch `.env` files (e.g. AI-authored `model.env`), asks
+   you to confirm or paste another path, and persists it — or pass
+   `--profiles-dir` / `MODEL_SWITCHBOARD_PROFILES_DIR`. Launch templates cover
    `vllm`, `llama.cpp` (`llama-server`), `sglang`, and `tgi`; anything else
-   works through `START_COMMAND`.
+   works through `START_COMMAND`. The Mac controller accepts the same
+   `--profiles-dir` flag (saved in its `config.json`) if you want profiles
+   under Documents or another folder.
 2. **On the Mac**: Settings → **Remote Gateways** → *Add Remote Gateway*.
    The installer (and `model-switchboard-agent link`) prints a
    `modelswitchboard-gateway://…` pairing code; paste it into the form to

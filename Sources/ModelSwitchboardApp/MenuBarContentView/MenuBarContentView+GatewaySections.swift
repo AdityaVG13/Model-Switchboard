@@ -56,11 +56,10 @@ struct RemoteGatewaySectionView: View {
             }
             if visibleProfiles.isEmpty {
                 if connectionIssue == nil {
-                    Text(store.sortedStatuses.isEmpty
-                        ? "No model profiles reported yet."
-                        : "No models match this filter.")
+                    Text(emptyProfilesMessage)
                         .font(.system(size: 11))
                         .foregroundStyle(theme.sub)
+                        .fixedSize(horizontal: false, vertical: true)
                         .padding(EdgeInsets(top: 2, leading: 4, bottom: 8, trailing: 4))
                 }
             } else {
@@ -75,6 +74,16 @@ struct RemoteGatewaySectionView: View {
             }
         }
         .padding(EdgeInsets(top: 0, leading: 10, bottom: 6, trailing: 10))
+    }
+
+    private var emptyProfilesMessage: String {
+        if !store.sortedStatuses.isEmpty {
+            return "No models match this filter."
+        }
+        if let profilesDirectory = store.profilesDirectory, !profilesDirectory.isEmpty {
+            return "No model profiles in \(profilesDirectory). Drop .env/.json launch files there, or re-run `model-switchboard-agent link` on the host to pick another folder."
+        }
+        return "No model profiles reported yet. On the host, run `model-switchboard-agent link` to choose a profiles folder."
     }
 
     private var sectionHeader: some View {

@@ -122,7 +122,7 @@ struct GatewaySettingsSection: View {
                         prompt: "modelswitchboard-gateway://…",
                         monospaced: true
                     )
-                    Text("Run `model-switchboard-agent link` on the remote host and paste the result to prefill this form.")
+                    Text("Run `model-switchboard-agent link` on the remote host — it scans for existing model .env files, lets you confirm or paste a folder path, then prints a pairing code.")
                         .font(.system(size: 10))
                         .foregroundStyle(theme.sub)
                         .fixedSize(horizontal: false, vertical: true)
@@ -179,6 +179,22 @@ struct GatewaySettingsSection: View {
             }
 
             deployStatusText
+
+            if !draftIsNew, let runtime = hub.remoteRuntimes.first(where: { $0.id == config.id }),
+               let profilesDirectory = runtime.store.profilesDirectory,
+               !profilesDirectory.isEmpty
+            {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Profiles folder (on host)")
+                        .font(.system(size: 12.5))
+                    Text(profilesDirectory)
+                        .font(.system(size: 10.5, design: .monospaced))
+                        .foregroundStyle(theme.sub)
+                        .textSelection(.enabled)
+                        .lineLimit(2)
+                        .truncationMode(.middle)
+                }
+            }
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("Bearer token (optional)")

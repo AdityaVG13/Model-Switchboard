@@ -113,6 +113,7 @@ Use `RUNTIME_TAGS` for model-level traits such as `coding`, `q8`, `long-context`
 - **Tailscale-native.** Tick *Tailscale mode* on install (or run the agent with `--tailscale`) and the gateway connects directly over your tailnet — WireGuard-encrypted, no tunnel process, MagicDNS names in your endpoint URLs.
 - **Or direct LAN**, guarded the same way as the local controller: non-loopback binds demand a ≥16-byte bearer token, stored in your keychain.
 - **Any runtime.** Launch templates for vLLM, llama.cpp, SGLang, and TGI, plus `START_COMMAND` for anything else — same profile files as local models. Live rows show exactly which model is serving on which port, with the URL as reachable *from your Mac*.
+- **Profiles folder, not a flag wizard.** Default `~/model-profiles/` on the remote (Mac controller can use `--profiles-dir` too). `link` scans for existing `.env` launch files and lets you confirm or paste the folder AI/you already use.
 - **Everything aggregates.** Each gateway gets its own named section in the panel; the menu bar ready-count spans every gateway; `Stop Everything` sweeps them all.
 
 Setup lives in [RemoteAgent/README.md](RemoteAgent/README.md) and the [SETUP.md remote gateways chapter](SETUP.md#remote-gateways).

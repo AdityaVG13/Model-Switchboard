@@ -193,7 +193,7 @@ struct SettingsView: View {
                         }
                     }
                 } else {
-                    settingsFootnote("No profile folder reported yet. Start the controller and reconnect to load its configured model-profiles path.", color: DashboardTheme.pendingOrange)
+                    settingsFootnote("No profile folder reported yet. Start the controller and reconnect to load its configured model-profiles path. Point it elsewhere with ModelSwitchboardController --profiles-dir ~/Documents/model-profiles (persisted in the controller config).", color: DashboardTheme.pendingOrange)
                 }
 
                 groupDivider

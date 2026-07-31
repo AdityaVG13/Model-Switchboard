@@ -9,6 +9,7 @@ import ModelSwitchboardCore
   let loopback = try ControllerConfiguration(root: root)
   #expect(loopback.host == ControllerEndpointDefaults.host)
   #expect(loopback.port == ControllerEndpointDefaults.port)
+  #expect(loopback.profilesDirectory.path.hasSuffix("/model-profiles"))
   #expect(throws: ControllerError.self) {
     try ControllerConfiguration(root: root, host: "0.0.0.0")
   }
@@ -19,6 +20,14 @@ import ModelSwitchboardCore
     root: root, host: "0.0.0.0", authToken: String(repeating: "x", count: 32), unsafeBind: true
   )
   #expect(secured.authToken?.count == 32)
+}
+
+@Test func controllerConfigurationHonorsProfilesDirectoryOverride() throws {
+  let root = URL(fileURLWithPath: "/tmp/controller-root")
+  let custom = URL(fileURLWithPath: "/tmp/documents-model-profiles", isDirectory: true)
+  let configuration = try ControllerConfiguration(root: root, profilesDirectory: custom)
+  #expect(configuration.profilesDirectory.path == custom.standardizedFileURL.path)
+  #expect(configuration.profilesDirectoryOverride?.path == custom.standardizedFileURL.path)
 }
 
 @Test func profileRepositoryParsesDeclarativeProfilesAndDetectsConflicts() throws {

@@ -48,6 +48,45 @@ WATCHDOG_SUPPRESSION_SECONDS = 45.0
 STOP_WAIT_SECONDS = 8.0
 TERMINATE_TIMEOUT_SECONDS = 12.0
 HEALTH_TIMEOUT_SECONDS = 1.5
+PROFILES_DIR_ENV = "MODEL_SWITCHBOARD_PROFILES_DIR"
+# Keys that make a .env/.json look like a Switchboard (or AI-authored) launch profile.
+PROFILE_SIGNAL_KEYS = frozenset({
+    "REQUEST_MODEL",
+    "PORT",
+    "BASE_URL",
+    "START_COMMAND",
+    "MODEL_FILE",
+    "MODEL_PATH",
+    "MODEL_REPO",
+    "SERVER_MODEL_ID",
+    "RUNTIME",
+    "DISPLAY_NAME",
+})
+PROFILE_SCAN_SKIP_DIRS = frozenset({
+    ".git",
+    ".hg",
+    ".svn",
+    ".cache",
+    ".local",
+    ".Trash",
+    ".cursor",
+    ".vscode",
+    ".npm",
+    ".cargo",
+    ".rustup",
+    "node_modules",
+    "Library",
+    "Applications",
+    "__pycache__",
+    "venv",
+    ".venv",
+    "dist",
+    "build",
+    ".build",
+    "target",
+})
+PROFILE_SCAN_MAX_DEPTH = 5
+PROFILE_SCAN_MAX_CANDIDATES = 8
 
 PROFILE_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -687,6 +726,275 @@ def listener_pid(port: str) -> int | None:
 # --------------------------------------------------------------------------
 
 
+# --------------------------------------------------------------------------
+# Profiles directory resolution + home scan
+# --------------------------------------------------------------------------
+
+
+def _default_root() -> Path:
+    return Path.home() / ".local/share/model-switchboard-agent"
+
+
+def preferred_profiles_directory() -> Path:
+    """Visible default: ~/model-profiles (not buried under the agent install root)."""
+    return Path.home() / "model-profiles"
+
+
+def agent_config_path(root: Path) -> Path:
+    return root.expanduser() / "config.json"
+
+
+def load_agent_config(root: Path) -> dict[str, Any]:
+    path = agent_config_path(root)
+    if not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def save_agent_config(root: Path, updates: dict[str, Any]) -> Path:
+    root = root.expanduser()
+    root.mkdir(parents=True, exist_ok=True)
+    path = agent_config_path(root)
+    payload = load_agent_config(root)
+    payload.update(updates)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+    return path
+
+
+def save_profiles_directory(root: Path, profiles_dir: Path) -> Path:
+    resolved = profiles_dir.expanduser().resolve()
+    save_agent_config(root, {"profiles_dir": str(resolved)})
+    return resolved
+
+
+def _directory_has_profile_files(directory: Path) -> bool:
+    if not directory.is_dir():
+        return False
+    try:
+        for path in directory.iterdir():
+            if path.suffix.lower() in (".env", ".json") and not path.name.startswith("."):
+                if path.name.endswith(".example"):
+                    continue
+                return True
+    except OSError:
+        return False
+    return False
+
+
+def resolve_profiles_directory(
+    root: Path,
+    explicit: Path | str | None = None,
+) -> Path:
+    """Pick the profiles folder without inventing profile contents.
+
+    Order: CLI/explicit → env → config.json → existing <root>/model-profiles
+    (legacy installs with real profiles) → ~/model-profiles.
+    """
+    if explicit is not None:
+        return Path(explicit).expanduser().resolve()
+    env = (os.environ.get(PROFILES_DIR_ENV) or "").strip()
+    if env:
+        return Path(env).expanduser().resolve()
+    configured = load_agent_config(root).get("profiles_dir")
+    if isinstance(configured, str) and configured.strip():
+        return Path(configured).expanduser().resolve()
+    legacy = root.expanduser() / "model-profiles"
+    if _directory_has_profile_files(legacy):
+        return legacy.resolve()
+    return preferred_profiles_directory().resolve()
+
+
+def _peek_profile_keys(path: Path) -> set[str]:
+    """Best-effort key set for scan scoring — never executes file contents."""
+    try:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return set()
+    if path.suffix.lower() == ".json":
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return set()
+        if not isinstance(parsed, dict):
+            return set()
+        return {str(key) for key in parsed.keys()}
+    keys: set[str] = set()
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):].strip()
+        equals = line.find("=")
+        if equals <= 0:
+            continue
+        key = line[:equals].strip()
+        if PROFILE_KEY_RE.match(key):
+            keys.add(key)
+    return keys
+
+
+def looks_like_profile_file(path: Path) -> bool:
+    if path.suffix.lower() not in (".env", ".json") or path.name.startswith("."):
+        return False
+    # Skip installer samples that are not live profiles yet.
+    if ".example" in path.name:
+        return False
+    keys = _peek_profile_keys(path)
+    if not keys:
+        return False
+    signals = keys & PROFILE_SIGNAL_KEYS
+    if "REQUEST_MODEL" in signals:
+        return True
+    if "START_COMMAND" in signals:
+        return True
+    if "PORT" in signals or "BASE_URL" in signals:
+        return bool(signals & {"RUNTIME", "MODEL_FILE", "MODEL_PATH", "MODEL_REPO", "DISPLAY_NAME"})
+    return False
+
+
+def scan_profile_directories(
+    home: Path | None = None,
+    *,
+    max_depth: int = PROFILE_SCAN_MAX_DEPTH,
+    limit: int = PROFILE_SCAN_MAX_CANDIDATES,
+) -> list[dict[str, Any]]:
+    """Find directories that already hold Switchboard-shaped launch .env/.json files.
+
+    Does not invent flags — only groups files an AI or user already wrote
+    (often `model.env`, `qwen.env`, …) by parent folder.
+    """
+    home = (home or Path.home()).expanduser()
+    tallies: dict[Path, list[str]] = {}
+
+    def walk(directory: Path, depth: int) -> None:
+        if depth > max_depth:
+            return
+        try:
+            entries = list(directory.iterdir())
+        except OSError:
+            return
+        for entry in entries:
+            name = entry.name
+            if name in PROFILE_SCAN_SKIP_DIRS:
+                continue
+            # Skip hidden directories; still consider visible files.
+            try:
+                is_dir = entry.is_dir()
+            except OSError:
+                continue
+            if is_dir:
+                if name.startswith("."):
+                    continue
+                walk(entry, depth + 1)
+                continue
+            if not looks_like_profile_file(entry):
+                continue
+            parent = entry.parent.resolve()
+            tallies.setdefault(parent, []).append(entry.name)
+
+    walk(home, 0)
+    # Always consider the preferred default and common legacy path.
+    for extra in (preferred_profiles_directory(), _default_root() / "model-profiles"):
+        try:
+            resolved = extra.expanduser().resolve()
+        except OSError:
+            continue
+        if resolved in tallies:
+            continue
+        if not resolved.is_dir():
+            continue
+        try:
+            children = list(resolved.iterdir())
+        except OSError:
+            continue
+        for path in children:
+            if looks_like_profile_file(path):
+                tallies.setdefault(resolved, []).append(path.name)
+
+    ranked = sorted(
+        tallies.items(),
+        key=lambda item: (-len(item[1]), str(item[0])),
+    )
+    results: list[dict[str, Any]] = []
+    for directory, files in ranked[:limit]:
+        unique_files = sorted(set(files))
+        results.append({
+            "path": str(directory),
+            "profile_count": len(unique_files),
+            "files": unique_files[:12],
+        })
+    return results
+
+
+def prompt_profiles_directory(
+    root: Path,
+    *,
+    current: Path,
+    input_func: Callable[[str], str] | None = None,
+    home: Path | None = None,
+) -> Path:
+    """Interactive: confirm a scanned folder or paste another path."""
+    reader = input_func or input
+    candidates = scan_profile_directories(home)
+    print("Model profiles are plain .env/.json launch files (ports, START_COMMAND, …).")
+    print("Switchboard only needs the folder that already holds them — it will not")
+    print("author flags for every runtime fork.")
+    print()
+    print(f"Current profiles folder: {current}")
+    if candidates:
+        print("Found folders that look like they already have model launch profiles:")
+        for index, candidate in enumerate(candidates, start=1):
+            preview = ", ".join(candidate["files"][:4])
+            extra = "" if len(candidate["files"]) <= 4 else ", …"
+            print(
+                f"  [{index}] {candidate['path']} "
+                f"({candidate['profile_count']} file(s): {preview}{extra})"
+            )
+        print("  [Enter] keep current")
+        print("  [0]     use ~/model-profiles (create if needed)")
+        print("  or paste another folder path")
+    else:
+        print("No launch-looking .env/.json folders found under your home directory.")
+        print("  [Enter] keep current / use ~/model-profiles")
+        print("  or paste the folder path where your model .env files live")
+    print()
+    try:
+        answer = reader("Profiles folder? ").strip()
+    except EOFError:
+        answer = ""
+    if not answer:
+        if current.exists() or _directory_has_profile_files(current):
+            chosen = current
+        elif candidates:
+            chosen = Path(candidates[0]["path"])
+        else:
+            chosen = preferred_profiles_directory()
+    elif answer == "0":
+        chosen = preferred_profiles_directory()
+    elif answer.isdigit() and candidates:
+        index = int(answer)
+        if 1 <= index <= len(candidates):
+            chosen = Path(candidates[index - 1]["path"])
+        else:
+            raise UsageError(f"No candidate numbered {index}")
+    else:
+        chosen = Path(answer)
+    chosen = chosen.expanduser().resolve()
+    chosen.mkdir(parents=True, exist_ok=True)
+    save_profiles_directory(root, chosen)
+    print(f"Using profiles folder: {chosen}")
+    return chosen
+
+
 @dataclass
 class AgentConfiguration:
     root: Path
@@ -695,6 +1003,7 @@ class AgentConfiguration:
     auth_token: str | None = None
     unsafe_bind: bool = False
     tailscale_bind: bool = False
+    profiles_dir: Path | None = None
 
     def __post_init__(self) -> None:
         token = (self.auth_token or "").strip()
@@ -720,10 +1029,12 @@ class AgentConfiguration:
                 )
         self.auth_token = token or None
         self.root = self.root.expanduser()
+        self.profiles_dir = resolve_profiles_directory(self.root, self.profiles_dir)
 
     @property
     def profiles_directory(self) -> Path:
-        return self.root / "model-profiles"
+        assert self.profiles_dir is not None
+        return self.profiles_dir
 
     @property
     def run_directory(self) -> Path:
@@ -1311,10 +1622,6 @@ def build_link_code(agent_port: int, direct_host: str | None = None) -> dict[str
 # --------------------------------------------------------------------------
 
 
-def _default_root() -> Path:
-    return Path.home() / ".local/share/model-switchboard-agent"
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="model-switchboard-agent",
@@ -1322,6 +1629,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="version", version=f"model-switchboard-agent {AGENT_VERSION}")
     parser.add_argument("--root", type=Path, default=None, help="agent root directory (default: ~/.local/share/model-switchboard-agent)")
+    parser.add_argument(
+        "--profiles-dir",
+        type=Path,
+        default=None,
+        help="folder of model .env/.json profiles (default: ~/model-profiles, or config.json / legacy <root>/model-profiles)",
+    )
     parser.add_argument("--host", default="127.0.0.1", help="bind host (loopback only unless --unsafe-bind)")
     parser.add_argument("--unsafe-bind", metavar="HOST", default=None, help="bind a non-loopback host; requires --auth-token")
     parser.add_argument("--tailscale", action="store_true", help="bind this host's Tailscale address (tailnet-only; token recommended)")
@@ -1331,10 +1644,27 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--json", action="store_true", help="print machine-readable output for CLI commands")
     parser.add_argument("--verbose", action="store_true", help="log HTTP requests to stderr")
     parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="non-interactive link: keep the resolved profiles folder (skip the scan prompt)",
+    )
+    parser.add_argument(
         "command",
         nargs="?",
         default="serve",
-        choices=["serve", "status", "list", "start", "stop", "restart", "switch", "activate", "stop-all", "link"],
+        choices=[
+            "serve",
+            "status",
+            "list",
+            "start",
+            "stop",
+            "restart",
+            "switch",
+            "activate",
+            "stop-all",
+            "link",
+            "scan-profiles",
+        ],
     )
     parser.add_argument("profiles", nargs="*", help="profile names for start/stop/restart/switch")
     return parser
@@ -1358,6 +1688,10 @@ def build_configuration(args: argparse.Namespace) -> AgentConfiguration:
             )
         host = ipv4
         tailscale = True
+    explicit_profiles = getattr(args, "profiles_dir", None)
+    if explicit_profiles is not None:
+        # Persist so serve (systemd) keeps using the same folder without flags.
+        save_profiles_directory(args.root or _default_root(), explicit_profiles)
     return AgentConfiguration(
         root=args.root or _default_root(),
         host=host,
@@ -1365,11 +1699,57 @@ def build_configuration(args: argparse.Namespace) -> AgentConfiguration:
         auth_token=token,
         unsafe_bind=unsafe,
         tailscale_bind=tailscale,
+        profiles_dir=explicit_profiles,
     )
 
 
 def _print_json(payload: dict[str, Any]) -> None:
     print(json.dumps(payload, indent=2, sort_keys=True))
+
+
+def _run_link(args: argparse.Namespace, configuration: AgentConfiguration) -> int:
+    interactive = (
+        not args.json
+        and not args.yes
+        and args.profiles_dir is None
+        and sys.stdin.isatty()
+        and sys.stdout.isatty()
+    )
+    if interactive:
+        print()
+        configuration.profiles_dir = prompt_profiles_directory(
+            configuration.root,
+            current=configuration.profiles_directory,
+        )
+    elif args.profiles_dir is not None:
+        configuration.profiles_dir = resolve_profiles_directory(
+            configuration.root, args.profiles_dir
+        )
+    configuration.profiles_directory.mkdir(parents=True, exist_ok=True)
+
+    direct_host: str | None = None
+    if getattr(args, "tailscale", False):
+        ipv4, dns_name = tailscale_status()
+        if ipv4 is None and dns_name is None:
+            raise InvalidConfigurationError(
+                "--tailscale: no Tailscale address found — is tailscaled running?"
+            )
+        direct_host = dns_name or ipv4
+    info = build_link_code(configuration.port, direct_host=direct_host)
+    info["profiles_dir"] = str(configuration.profiles_directory)
+    if args.json:
+        _print_json(info)
+    else:
+        print()
+        print("Pairing code for Model Switchboard on your Mac:")
+        print()
+        print(f"  {info['link']}")
+        print()
+        print(f"Profiles folder: {configuration.profiles_directory}")
+        print("Drop one .env/.json per model there (PORT / START_COMMAND / …), then")
+        print("Settings → Remote Gateways → Add Remote Gateway → paste the link.")
+        print("Every gateway field stays editable on the Mac.")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1393,6 +1773,7 @@ def main(argv: list[str] | None = None) -> int:
                     "add --auth-token-file if other people share this tailnet\n"
                 )
             print(f"controller=http://{configuration.host}:{configuration.port}", flush=True)
+            print(f"profiles_dir={configuration.profiles_directory}", flush=True)
             try:
                 server.serve_forever()
             except KeyboardInterrupt:
@@ -1413,8 +1794,27 @@ def main(argv: list[str] | None = None) -> int:
                         "base_url": profile.base_url,
                     }
                     for profile in sorted(profiles.values(), key=lambda p: p.name)
-                ]
+                ],
+                "profiles_dir": str(configuration.profiles_directory),
             })
+            return 0
+        if args.command == "scan-profiles":
+            candidates = scan_profile_directories()
+            payload = {
+                "profiles_dir": str(configuration.profiles_directory),
+                "candidates": candidates,
+            }
+            if args.json:
+                _print_json(payload)
+            else:
+                print(f"Current profiles folder: {configuration.profiles_directory}")
+                if not candidates:
+                    print("No launch-looking .env/.json folders found under $HOME.")
+                for index, candidate in enumerate(candidates, start=1):
+                    print(
+                        f"[{index}] {candidate['path']} "
+                        f"({candidate['profile_count']}: {', '.join(candidate['files'][:6])})"
+                    )
             return 0
         if args.command in ("start", "stop", "restart"):
             if not args.profiles:
@@ -1437,26 +1837,7 @@ def main(argv: list[str] | None = None) -> int:
             _print_json(service.action_response())
             return 0
         if args.command == "link":
-            direct_host: str | None = None
-            if getattr(args, "tailscale", False):
-                ipv4, dns_name = tailscale_status()
-                if ipv4 is None and dns_name is None:
-                    raise InvalidConfigurationError(
-                        "--tailscale: no Tailscale address found — is tailscaled running?"
-                    )
-                direct_host = dns_name or ipv4
-            info = build_link_code(configuration.port, direct_host=direct_host)
-            if args.json:
-                _print_json(info)
-            else:
-                print("Pairing code for Model Switchboard on your Mac:")
-                print()
-                print(f"  {info['link']}")
-                print()
-                print("Settings → Remote Gateways → Add Remote Gateway → paste it into")
-                print("the link-code field. Every field stays editable — fix the host or")
-                print("user there if this machine is reached differently from your Mac.")
-            return 0
+            return _run_link(args, configuration)
     except AgentError as error:
         sys.stderr.write(f"model-switchboard-agent: {error.message}\n")
         return 2 if isinstance(error, (UsageError, InvalidConfigurationError)) else 1

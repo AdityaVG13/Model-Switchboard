@@ -11,9 +11,11 @@ All notable changes to this project are documented in this file.
 - App-managed SSH tunnels using the user's own keys (`BatchMode`), with jittered reconnect backoff, classified failure messages, and automatic same-port forwarding of running models' endpoints.
 - Tailscale mode: `--tailscale` binds the agent to the host's tailnet address only, and pairing codes carry `mode=direct` so the Mac connects tunnel-lessly via MagicDNS.
 - Per-gateway bearer tokens in the keychain; non-loopback agent binds outside a tailnet require `--unsafe-bind` plus a ≥16-byte token, mirroring the local controller.
+- Profiles-folder discovery: default `~/model-profiles/` on remotes; `model-switchboard-agent link` scans `$HOME` for existing launch `.env`/`.json` files (e.g. `model.env`), confirms or accepts a pasted path, and persists it (`--profiles-dir` / `MODEL_SWITCHBOARD_PROFILES_DIR`). Mac controller gains matching `--profiles-dir` + `config.json` support.
 
 ### Fixed
 - Keychain token saves now update existing items; previously edits to a saved controller token were silently discarded (`SecItemAdd` duplicate). Token edits are also debounced instead of saved per keystroke.
+- Remote gateway thermos follow-ups: token-only gateway edits sync the live store; direct/Tailscale rows no longer advertise dead loopback rewrites; SSH destinations are option-terminated and reject leading `-`; ControlMaster sockets are per-tunnel-instance; embedded RemoteAgent files are verified at pack time.
 
 ## [1.3.0] - 2026-07-29
 

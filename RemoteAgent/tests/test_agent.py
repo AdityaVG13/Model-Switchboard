@@ -65,8 +65,8 @@ def free_port() -> int:
         return sock.getsockname()[1]
 
 
-def write_profile(root: Path, name: str, values: dict[str, str]) -> None:
-    profiles = root / "model-profiles"
+def write_profile(root: Path, name: str, values: dict[str, str], profiles_dir: Path | None = None) -> None:
+    profiles = profiles_dir or (root / "model-profiles")
     profiles.mkdir(parents=True, exist_ok=True)
     lines = [f'{key}="{value}"' for key, value in values.items()]
     (profiles / f"{name}.env").write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -75,9 +75,15 @@ def write_profile(root: Path, name: str, values: dict[str, str]) -> None:
 class AgentHarness:
     """Runs the agent HTTP server in-process on an ephemeral port."""
 
-    def __init__(self, root: Path, auth_token: str | None = None):
+    def __init__(self, root: Path, auth_token: str | None = None, profiles_dir: Path | None = None):
+        profiles = profiles_dir or (root / "model-profiles")
+        profiles.mkdir(parents=True, exist_ok=True)
         self.configuration = agent.AgentConfiguration(
-            root=root, host="127.0.0.1", port=0, auth_token=auth_token
+            root=root,
+            host="127.0.0.1",
+            port=0,
+            auth_token=auth_token,
+            profiles_dir=profiles,
         )
         self.configuration.profiles_directory.mkdir(parents=True, exist_ok=True)
         self.configuration.run_directory.mkdir(parents=True, exist_ok=True)
@@ -510,6 +516,13 @@ class InstallerSourceResolutionTests(unittest.TestCase):
             launcher = home / ".local/bin/model-switchboard-agent"
             self.assertTrue(launcher.is_file())
             self.assertIn("modelswitchboard-gateway://", result.stdout)
+            self.assertIn("Profiles folder:", result.stdout)
+            profiles = home / "model-profiles"
+            self.assertTrue(profiles.is_dir())
+            config = json.loads(
+                (home / ".local/share/model-switchboard-agent/config.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(config["profiles_dir"], str(profiles))
             installed = home / ".local/share/model-switchboard-agent/model_switchboard_agent.py"
             self.assertEqual(
                 installed.read_text(encoding="utf-8"),
@@ -618,14 +631,103 @@ class ConfigurationTests(unittest.TestCase):
         self.assertTrue(info["name"])
 
     def test_cli_link_json_smoke(self) -> None:
-        result = subprocess.run(
-            [sys.executable, str(AGENT_PATH), "--json", "--port", "9001", "link"],
-            capture_output=True, text=True, timeout=30, check=False,
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        payload = json.loads(result.stdout)
-        self.assertEqual(payload["agent_port"], "9001")
-        self.assertTrue(payload["link"].startswith("modelswitchboard-gateway://"))
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "agent-root"
+            profiles = Path(tmp) / "my-models"
+            profiles.mkdir(parents=True)
+            (profiles / "model.env").write_text(
+                'REQUEST_MODEL="m"\nPORT=8080\n', encoding="utf-8"
+            )
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(AGENT_PATH),
+                    "--json",
+                    "--yes",
+                    "--root",
+                    str(root),
+                    "--profiles-dir",
+                    str(profiles),
+                    "--port",
+                    "9001",
+                    "link",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["agent_port"], "9001")
+            self.assertTrue(payload["link"].startswith("modelswitchboard-gateway://"))
+            self.assertEqual(payload["profiles_dir"], str(profiles.resolve()))
+            config = json.loads((root / "config.json").read_text(encoding="utf-8"))
+            self.assertEqual(config["profiles_dir"], str(profiles.resolve()))
+
+
+class ProfileDirectoryTests(unittest.TestCase):
+    def test_looks_like_profile_file_detects_ai_style_model_env(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "model.env"
+            path.write_text(
+                'DISPLAY_NAME="Qwen"\nREQUEST_MODEL="qwen"\nPORT=8081\n',
+                encoding="utf-8",
+            )
+            self.assertTrue(agent.looks_like_profile_file(path))
+            example = Path(tmp) / "example-vllm.env.example"
+            example.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+            self.assertFalse(agent.looks_like_profile_file(example))
+
+    def test_scan_groups_by_parent_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            folder = home / "spark-models"
+            folder.mkdir()
+            (folder / "model.env").write_text(
+                'REQUEST_MODEL="a"\nPORT=1\n', encoding="utf-8"
+            )
+            (folder / "qwen.env").write_text(
+                'REQUEST_MODEL="b"\nSTART_COMMAND="run"\n', encoding="utf-8"
+            )
+            (home / "notes.txt").write_text("not a profile\n", encoding="utf-8")
+            candidates = agent.scan_profile_directories(home, max_depth=3)
+            self.assertTrue(candidates)
+            self.assertEqual(candidates[0]["path"], str(folder.resolve()))
+            self.assertEqual(candidates[0]["profile_count"], 2)
+
+    def test_resolve_prefers_config_then_legacy_then_home(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "agent"
+            legacy = root / "model-profiles"
+            legacy.mkdir(parents=True)
+            (legacy / "old.env").write_text('REQUEST_MODEL="m"\nPORT=1\n', encoding="utf-8")
+            self.assertEqual(
+                agent.resolve_profiles_directory(root),
+                legacy.resolve(),
+            )
+            custom = Path(tmp) / "custom-profiles"
+            custom.mkdir()
+            agent.save_profiles_directory(root, custom)
+            self.assertEqual(
+                agent.resolve_profiles_directory(root),
+                custom.resolve(),
+            )
+
+    def test_prompt_accepts_pasted_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "agent"
+            root.mkdir()
+            chosen = Path(tmp) / "pasted"
+            answers = iter([str(chosen)])
+            result = agent.prompt_profiles_directory(
+                root,
+                current=Path(tmp) / "current",
+                input_func=lambda _: next(answers),
+                home=Path(tmp),
+            )
+            self.assertEqual(result, chosen.resolve())
+            self.assertTrue(chosen.is_dir())
 
 
 if __name__ == "__main__":

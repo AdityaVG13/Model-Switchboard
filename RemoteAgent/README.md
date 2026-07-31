@@ -32,12 +32,13 @@ cd Model-Switchboard/RemoteAgent
 ```
 
 The installer puts the agent under `~/.local/share/model-switchboard-agent/`,
-creates a `model-profiles/` folder with a sample vLLM profile, and (when
-systemd is present) enables a user service that keeps it running. Run
-`loginctl enable-linger $USER` so the service survives logout.
+creates a visible **`~/model-profiles/`** folder for launch `.env` / `.json`
+files (with sample templates), and (when systemd is present) enables a user
+service that keeps it running. Run `loginctl enable-linger $USER` so the
+service survives logout.
 
-Add one profile per model server to
-`~/.local/share/model-switchboard-agent/model-profiles/`, e.g.:
+Add one profile per model server to `~/model-profiles/` (or any folder you
+point the agent at), e.g.:
 
 ```bash
 # llama31-8b.env
@@ -47,6 +48,12 @@ REQUEST_MODEL=meta-llama/Llama-3.1-8B-Instruct
 PORT=8001
 EXTRA_ARGS="--max-model-len 8192"
 ```
+
+Already have launch files somewhere else (AI setups often drop `model.env`
+next to the model)? Run `model-switchboard-agent link` — it scans your home
+directory for Switchboard-shaped `.env` / `.json` files, asks you to confirm
+a folder (or paste another path), saves it, then prints the pairing code.
+Non-interactive: `--profiles-dir /path --yes`.
 
 Built-in launch templates: `vllm`, `llama.cpp` (`llama-server`), `sglang`,
 `tgi`. Anything else works via `START_COMMAND=...` / `STOP_COMMAND=...`.
