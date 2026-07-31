@@ -82,6 +82,23 @@ import Testing
     #expect(encoded.remotePort == 9001)
 }
 
+@Test func linkCodeDirectModeBuildsDirectGateway() throws {
+    // Emitted by `model-switchboard-agent link --tailscale`.
+    let config = try #require(GatewayLinkCode.parse(
+        "modelswitchboard-gateway://spark.tail1234.ts.net?name=spark&agent_port=8877&mode=direct"
+    ))
+    #expect(config.kind == .direct)
+    #expect(config.name == "spark")
+    #expect(config.baseURL == "http://spark.tail1234.ts.net:8877")
+    #expect(config.sshHost.isEmpty)
+
+    let customPort = try #require(GatewayLinkCode.parse(
+        "modelswitchboard-gateway://100.101.102.103?agent_port=9001&mode=direct"
+    ))
+    #expect(customPort.baseURL == "http://100.101.102.103:9001")
+    #expect(customPort.name == "100.101.102.103")
+}
+
 @Test func linkCodeRejectsForeignStrings() {
     #expect(GatewayLinkCode.parse("https://example.com") == nil)
     #expect(GatewayLinkCode.parse("modelswitchboard-gateway://") == nil)

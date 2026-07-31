@@ -70,9 +70,25 @@ gateway's models then appear in the main panel under its own named section.
   passwords are never handled; connect once from Terminal first so the host
   key is trusted). Running models' ports are forwarded automatically, so
   copied endpoint URLs work directly on the Mac. Zero ports exposed.
-- **Direct URL.** For a trusted LAN, run the agent bound to the network —
-  this **requires** a bearer token of at least 16 bytes, exactly like the
-  macOS controller:
+- **Tailscale.** If both machines are on your tailnet, skip tunnels entirely:
+
+  ```bash
+  ./install-remote-agent.sh --tailscale
+  # or: model-switchboard-agent serve --tailscale
+  ```
+
+  The agent binds only the host's Tailscale address (WireGuard-encrypted,
+  tailnet-only — never the open LAN) and prints a **direct** pairing code
+  using its MagicDNS name (`modelswitchboard-gateway://spark.tail1234.ts.net?…&mode=direct`).
+  Paste it on the Mac and you're connected as a Direct URL gateway — no SSH
+  involved. A bearer token is optional on a personal tailnet and recommended
+  on shared ones (`--auth-token-file`). Model server ports follow the same
+  rule: set `HOST=0.0.0.0` (or the Tailscale IP) in profiles you want to
+  reach from the Mac, since there is no tunnel to forward loopback ports.
+
+- **Direct URL (plain LAN).** For a trusted LAN without Tailscale, run the
+  agent bound to the network — this **requires** a bearer token of at least
+  16 bytes, exactly like the macOS controller:
 
   ```bash
   openssl rand -hex 24 > ~/.config/model-switchboard-agent.token

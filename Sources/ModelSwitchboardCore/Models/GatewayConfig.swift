@@ -93,7 +93,9 @@ public struct GatewayContext: Equatable, Sendable {
 }
 
 /// Parses pairing codes printed by `model-switchboard-agent link` on the
-/// remote host, e.g. `modelswitchboard-gateway://user@host?name=spark&agent_port=8877`.
+/// remote host:
+/// - SSH tunnel: `modelswitchboard-gateway://user@host?name=spark&agent_port=8877`
+/// - Direct (e.g. Tailscale MagicDNS): `modelswitchboard-gateway://spark.tail1234.ts.net?name=spark&agent_port=8877&mode=direct`
 public enum GatewayLinkCode {
     public static let scheme = "modelswitchboard-gateway"
 
@@ -108,13 +110,23 @@ public enum GatewayLinkCode {
         func value(_ name: String) -> String? {
             query.first { $0.name == name }?.value
         }
+        let name = value("name").flatMap { $0.isEmpty ? nil : $0 } ?? host
+        let agentPort = value("agent_port").flatMap(Int.init) ?? 8877
+        if value("mode")?.lowercased() == "direct" {
+            return GatewayConfig(
+                name: name,
+                kind: .direct,
+                baseURL: "http://\(host):\(agentPort)",
+                remotePort: agentPort
+            )
+        }
         return GatewayConfig(
-            name: value("name").flatMap { $0.isEmpty ? nil : $0 } ?? host,
+            name: name,
             kind: .ssh,
             sshUser: components.user ?? "",
             sshHost: host,
             sshPort: components.port ?? 22,
-            remotePort: value("agent_port").flatMap(Int.init) ?? 8877
+            remotePort: agentPort
         )
     }
 }

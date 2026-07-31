@@ -533,6 +533,56 @@ class InstallerSourceResolutionTests(unittest.TestCase):
             self.assertTrue((home / ".local/bin/model-switchboard-agent").is_file())
 
 
+class TailscaleTests(unittest.TestCase):
+    def test_cgnat_range_detection(self) -> None:
+        self.assertTrue(agent.is_tailscale_ip("100.64.0.1"))
+        self.assertTrue(agent.is_tailscale_ip("100.101.102.103"))
+        self.assertTrue(agent.is_tailscale_ip("100.127.255.254"))
+        self.assertFalse(agent.is_tailscale_ip("100.128.0.1"))
+        self.assertFalse(agent.is_tailscale_ip("100.63.0.1"))
+        self.assertFalse(agent.is_tailscale_ip("10.0.0.1"))
+        self.assertFalse(agent.is_tailscale_ip("not-an-ip"))
+
+    def test_tailscale_bind_allows_cgnat_without_token(self) -> None:
+        configuration = agent.AgentConfiguration(
+            root=Path("/tmp/x"), host="100.101.102.103", tailscale_bind=True
+        )
+        self.assertEqual(configuration.host, "100.101.102.103")
+        self.assertIsNone(configuration.auth_token)
+
+    def test_tailscale_bind_rejects_non_cgnat_host(self) -> None:
+        with self.assertRaises(agent.InvalidConfigurationError):
+            agent.AgentConfiguration(root=Path("/tmp/x"), host="0.0.0.0", tailscale_bind=True)
+
+    def test_status_prefers_cli_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fake = Path(tmp) / "tailscale"
+            fake.write_text(
+                "#!/bin/bash\n"
+                "if [ \"$1\" = \"status\" ]; then\n"
+                "  echo '{\"Self\": {\"TailscaleIPs\": [\"100.101.102.103\"], "
+                "\"DNSName\": \"spark.tail1234.ts.net.\"}}'\n"
+                "fi\n",
+                encoding="utf-8",
+            )
+            fake.chmod(0o755)
+            original = os.environ.get("PATH", "")
+            os.environ["PATH"] = f"{tmp}:{original}"
+            try:
+                ipv4, dns_name = agent.tailscale_status()
+            finally:
+                os.environ["PATH"] = original
+            self.assertEqual(ipv4, "100.101.102.103")
+            self.assertEqual(dns_name, "spark.tail1234.ts.net")
+
+    def test_direct_link_code_uses_direct_mode(self) -> None:
+        info = agent.build_link_code(8877, direct_host="spark.tail1234.ts.net")
+        self.assertEqual(info["mode"], "direct")
+        self.assertIn("mode=direct", info["link"])
+        self.assertIn("spark.tail1234.ts.net", info["link"])
+        self.assertNotIn("@", info["link"].split("://", 1)[1].split("?")[0])
+
+
 class ConfigurationTests(unittest.TestCase):
     def test_non_loopback_bind_requires_unsafe_flag_and_token(self) -> None:
         with self.assertRaises(agent.InvalidConfigurationError):

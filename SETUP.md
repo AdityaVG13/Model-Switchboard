@@ -307,10 +307,21 @@ The moving parts:
      ControlMaster socket, so `Copy Endpoint URL` hands you a URL that works
      from the Mac. Tunnels reconnect with backoff and surface SSH failures
      (missing agent key, changed host key, unreachable host) in the panel.
-   - **Direct URL**: point the gateway at `http://host:8877` on a trusted
-     network. Mirroring the local controller's rules, the agent refuses
-     non-loopback binds without `--unsafe-bind` **and** a ≥16-byte bearer
-     token; the token lives in your macOS keychain, per gateway.
+   - **Tailscale**: install the agent with `--tailscale` (or run
+     `serve --tailscale`) and it binds only the host's tailnet address —
+     WireGuard-encrypted, invisible to the open LAN. The pairing code then
+     carries `mode=direct` with the MagicDNS name, so pasting it creates a
+     Direct URL gateway with no SSH tunnel at all. Token optional on a
+     personal tailnet, recommended on shared ones. Profiles whose model
+     endpoints you want to call from the Mac should bind `HOST=0.0.0.0` or
+     the Tailscale IP (no tunnel exists to forward remote loopback ports).
+   - **Direct URL (plain LAN)**: point the gateway at `http://host:8877` on a
+     trusted network. Mirroring the local controller's rules, the agent
+     refuses non-loopback binds without `--unsafe-bind` **and** a ≥16-byte
+     bearer token; the token lives in your macOS keychain, per gateway.
+   - SSH gateways work over Tailscale too — just use the tailnet hostname as
+     the SSH host (pairs well with Tailscale SSH, where no local keys are
+     needed).
 
 Scope notes: benchmarks and integrations stay local-only; the desktop widget
 shows the local gateway. The menu bar count and **Stop Everything** span all

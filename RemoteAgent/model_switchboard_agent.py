@@ -58,6 +58,64 @@ def is_loopback(host: str) -> bool:
     return host.strip().strip("[]").lower() in LOOPBACK_HOSTS
 
 
+def is_tailscale_ip(address: str) -> bool:
+    """Tailscale assigns IPv4 from the CGNAT range 100.64.0.0/10."""
+    parts = address.split(".")
+    if len(parts) != 4:
+        return False
+    try:
+        first, second = int(parts[0]), int(parts[1])
+    except ValueError:
+        return False
+    return first == 100 and 64 <= second <= 127
+
+
+def tailscale_status() -> tuple[str | None, str | None]:
+    """Return (ipv4, magic_dns_name) for this host's tailnet presence.
+
+    Prefers the tailscale CLI; falls back to scanning interfaces for a CGNAT
+    address so it works even when the CLI is not on PATH.
+    """
+    try:
+        result = subprocess.run(
+            ["tailscale", "status", "--json"],
+            capture_output=True, text=True, timeout=5, check=False,
+        )
+        if result.returncode == 0:
+            parsed = json.loads(result.stdout)
+            self_info = parsed.get("Self") or {}
+            ips = [ip for ip in self_info.get("TailscaleIPs") or [] if is_tailscale_ip(ip)]
+            dns_name = (self_info.get("DNSName") or "").rstrip(".") or None
+            if ips:
+                return ips[0], dns_name
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        pass
+    try:
+        result = subprocess.run(
+            ["tailscale", "ip", "-4"],
+            capture_output=True, text=True, timeout=5, check=False,
+        )
+        if result.returncode == 0:
+            for line in result.stdout.split():
+                if is_tailscale_ip(line.strip()):
+                    return line.strip(), None
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    for command in (["ip", "-4", "addr"], ["ifconfig"]):
+        try:
+            result = subprocess.run(
+                command, capture_output=True, text=True, timeout=5, check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if result.returncode != 0:
+            continue
+        for match in re.finditer(r"inet (\d+\.\d+\.\d+\.\d+)", result.stdout):
+            if is_tailscale_ip(match.group(1)):
+                return match.group(1), None
+    return None, None
+
+
 # --------------------------------------------------------------------------
 # Errors (mirrors ControllerError -> ControllerRouter HTTP mapping)
 # --------------------------------------------------------------------------
@@ -636,6 +694,7 @@ class AgentConfiguration:
     port: int = DEFAULT_PORT
     auth_token: str | None = None
     unsafe_bind: bool = False
+    tailscale_bind: bool = False
 
     def __post_init__(self) -> None:
         token = (self.auth_token or "").strip()
@@ -643,7 +702,14 @@ class AgentConfiguration:
             raise InvalidConfigurationError(
                 f"auth token must be at least {MINIMUM_TOKEN_BYTES} bytes"
             )
-        if not is_loopback(self.host):
+        if self.tailscale_bind and not is_tailscale_ip(self.host):
+            raise InvalidConfigurationError(
+                f"--tailscale bind resolved a non-Tailscale address: {self.host}"
+            )
+        if not is_loopback(self.host) and not self.tailscale_bind:
+            # A tailnet is a private, WireGuard-encrypted network, so the
+            # Tailscale bind skips the unsafe-bind gate; a token stays
+            # recommended for shared tailnets.
             if not self.unsafe_bind:
                 raise InvalidConfigurationError(
                     f"non-loopback agent bind requires --unsafe-bind: {self.host}"
@@ -1199,14 +1265,30 @@ def make_server(
 # --------------------------------------------------------------------------
 
 
-def build_link_code(agent_port: int) -> dict[str, str]:
+def build_link_code(agent_port: int, direct_host: str | None = None) -> dict[str, str]:
     """Best-effort pairing code the Mac app can paste to prefill a gateway.
 
-    Everything stays local: the code only encodes user@host + ports for the
-    SSH-tunnel gateway form, which remains fully editable on the Mac.
+    Everything stays local: the code only encodes host/user/ports for the
+    gateway form, which remains fully editable on the Mac. With `direct_host`
+    (e.g. a Tailscale MagicDNS name or IP) the code describes a direct-URL
+    gateway instead of an SSH tunnel.
     """
-    user = getpass.getuser()
     short_host = socket.gethostname().split(".")[0] or "remote"
+    if direct_host is not None:
+        link = (
+            "modelswitchboard-gateway://"
+            f"{direct_host}"
+            f"?name={urllib.parse.quote(short_host)}&agent_port={agent_port}&mode=direct"
+        )
+        return {
+            "user": "",
+            "host": direct_host,
+            "name": short_host,
+            "agent_port": str(agent_port),
+            "mode": "direct",
+            "link": link,
+        }
+    user = getpass.getuser()
     fqdn = socket.getfqdn()
     host = fqdn if fqdn and "." in fqdn and fqdn != "localhost" else socket.gethostname()
     link = (
@@ -1219,6 +1301,7 @@ def build_link_code(agent_port: int) -> dict[str, str]:
         "host": host,
         "name": short_host,
         "agent_port": str(agent_port),
+        "mode": "ssh",
         "link": link,
     }
 
@@ -1241,6 +1324,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--root", type=Path, default=None, help="agent root directory (default: ~/.local/share/model-switchboard-agent)")
     parser.add_argument("--host", default="127.0.0.1", help="bind host (loopback only unless --unsafe-bind)")
     parser.add_argument("--unsafe-bind", metavar="HOST", default=None, help="bind a non-loopback host; requires --auth-token")
+    parser.add_argument("--tailscale", action="store_true", help="bind this host's Tailscale address (tailnet-only; token recommended)")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"bind port (default {DEFAULT_PORT})")
     parser.add_argument("--auth-token", default=None, help="bearer token (>= 16 bytes)")
     parser.add_argument("--auth-token-file", type=Path, default=None, help="file containing the bearer token")
@@ -1262,15 +1346,25 @@ def build_configuration(args: argparse.Namespace) -> AgentConfiguration:
         token = args.auth_token_file.expanduser().read_text(encoding="utf-8").strip()
     host = args.host
     unsafe = False
+    tailscale = False
     if args.unsafe_bind is not None:
         host = args.unsafe_bind
         unsafe = True
+    if getattr(args, "tailscale", False):
+        ipv4, _ = tailscale_status()
+        if ipv4 is None:
+            raise InvalidConfigurationError(
+                "--tailscale: no Tailscale address found — is tailscaled running?"
+            )
+        host = ipv4
+        tailscale = True
     return AgentConfiguration(
         root=args.root or _default_root(),
         host=host,
         port=args.port,
         auth_token=token,
         unsafe_bind=unsafe,
+        tailscale_bind=tailscale,
     )
 
 
@@ -1293,6 +1387,11 @@ def main(argv: list[str] | None = None) -> int:
             configuration.run_directory.mkdir(parents=True, exist_ok=True)
             server = make_server(service, verbose=args.verbose)
             service.start_watchdog()
+            if configuration.tailscale_bind and configuration.auth_token is None:
+                sys.stderr.write(
+                    "note: serving on the tailnet without a bearer token; "
+                    "add --auth-token-file if other people share this tailnet\n"
+                )
             print(f"controller=http://{configuration.host}:{configuration.port}", flush=True)
             try:
                 server.serve_forever()
@@ -1338,7 +1437,15 @@ def main(argv: list[str] | None = None) -> int:
             _print_json(service.action_response())
             return 0
         if args.command == "link":
-            info = build_link_code(configuration.port)
+            direct_host: str | None = None
+            if getattr(args, "tailscale", False):
+                ipv4, dns_name = tailscale_status()
+                if ipv4 is None and dns_name is None:
+                    raise InvalidConfigurationError(
+                        "--tailscale: no Tailscale address found — is tailscaled running?"
+                    )
+                direct_host = dns_name or ipv4
+            info = build_link_code(configuration.port, direct_host=direct_host)
             if args.json:
                 _print_json(info)
             else:

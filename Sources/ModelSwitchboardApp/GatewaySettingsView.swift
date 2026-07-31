@@ -170,8 +170,8 @@ struct GatewaySettingsSection: View {
 
                 deploySection(config: binding.wrappedValue)
             case .direct:
-                field("Controller URL", text: binding.baseURL, prompt: "http://spark.local:8877", monospaced: true)
-                Text("The agent must be reachable at this URL. Non-loopback agents require a bearer token (run the agent with --unsafe-bind and --auth-token-file).")
+                field("Controller URL", text: binding.baseURL, prompt: "http://spark.tail1234.ts.net:8877", monospaced: true)
+                Text("The agent must be reachable at this URL. Tailscale is the easy path: run the agent with --tailscale and use its MagicDNS name here (token optional on your own tailnet). Plain LAN binds require --unsafe-bind plus a bearer token.")
                     .font(.system(size: 10))
                     .foregroundStyle(theme.sub)
                     .fixedSize(horizontal: false, vertical: true)

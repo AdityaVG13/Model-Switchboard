@@ -4,20 +4,26 @@
 # Run ON the remote host (DGX, workstation, server):
 #   ./install-remote-agent.sh                # loopback bind, port 8877
 #   ./install-remote-agent.sh --port 9000
+#   ./install-remote-agent.sh --tailscale    # bind the tailnet address instead
 #   ./install-remote-agent.sh --uninstall
 #
-# The agent binds 127.0.0.1 only; pair it with the app's SSH tunnel so no
-# ports are exposed. For direct LAN mode, run the agent manually with
+# Default: the agent binds 127.0.0.1 only; pair it with the app's SSH tunnel
+# so no ports are exposed. --tailscale binds the host's Tailscale address so
+# the Mac connects directly over the tailnet (no tunnel; token recommended on
+# shared tailnets). For plain LAN mode, run the agent manually with
 # --unsafe-bind and --auth-token-file (see RemoteAgent/README.md).
 set -euo pipefail
 
 PORT=8877
 UNINSTALL=0
+TAILSCALE=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --port)
             PORT="$2"; shift 2 ;;
+        --tailscale)
+            TAILSCALE=1; shift ;;
         --uninstall)
             UNINSTALL=1; shift ;;
         -h|--help)
@@ -124,6 +130,11 @@ log "Launcher: $BIN_PATH"
 
 "$BIN_PATH" --version >/dev/null || die "agent smoke test failed"
 
+SERVE_FLAGS="--port $PORT"
+if [ "$TAILSCALE" = "1" ]; then
+    SERVE_FLAGS="$SERVE_FLAGS --tailscale"
+fi
+
 if has_systemd; then
     mkdir -p "$UNIT_DIR"
     cat > "$UNIT_PATH" <<EOF
@@ -132,7 +143,7 @@ Description=Model Switchboard remote agent
 After=network.target
 
 [Service]
-ExecStart=$BIN_PATH serve --port $PORT
+ExecStart=$BIN_PATH serve $SERVE_FLAGS
 Restart=on-failure
 RestartSec=3
 
@@ -141,15 +152,15 @@ WantedBy=default.target
 EOF
     systemctl --user daemon-reload
     systemctl --user enable --now model-switchboard-agent.service
-    log "systemd user service enabled and started (port $PORT)."
+    log "systemd user service enabled and started ($SERVE_FLAGS)."
     log "Tip: 'loginctl enable-linger $USER' keeps it running after logout."
 else
     log "systemd not available; start the agent manually:"
-    log "  nohup $BIN_PATH serve --port $PORT >/tmp/model-switchboard-agent.log 2>&1 &"
+    log "  nohup $BIN_PATH serve $SERVE_FLAGS >/tmp/model-switchboard-agent.log 2>&1 &"
 fi
 
 sleep 1
-if command -v curl >/dev/null 2>&1; then
+if [ "$TAILSCALE" = "0" ] && command -v curl >/dev/null 2>&1; then
     if curl -fsS "http://127.0.0.1:$PORT/api/status" >/dev/null 2>&1; then
         log "Agent is answering on http://127.0.0.1:$PORT"
     else
@@ -159,4 +170,8 @@ fi
 
 log "Next: add profiles to $INSTALL_ROOT/model-profiles, then pair your Mac:"
 echo
-"$BIN_PATH" --port "$PORT" link
+if [ "$TAILSCALE" = "1" ]; then
+    "$BIN_PATH" --port "$PORT" link --tailscale
+else
+    "$BIN_PATH" --port "$PORT" link
+fi
