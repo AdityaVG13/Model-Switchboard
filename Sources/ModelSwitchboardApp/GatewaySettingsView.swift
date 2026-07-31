@@ -246,17 +246,16 @@ struct GatewaySettingsSection: View {
     @ViewBuilder
     private func deploySection(config: GatewayConfig) -> some View {
         let sshReady = !config.sshHost.trimmingCharacters(in: .whitespaces).isEmpty
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 10) {
-                linkButton(
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 12) {
+                deployButton(
                     deployState == .running ? "Installing Agent…" : "Install Agent on Host",
-                    emphasized: true
+                    prominent: true,
+                    disabled: !sshReady || deployState == .running
                 ) {
                     deployAgent(config: config)
                 }
-                .disabled(!sshReady || deployState == .running)
-                .opacity(sshReady ? 1 : 0.5)
-                linkButton("Copy Install One-Liner") {
+                deployButton("Copy Install One-Liner", prominent: false, disabled: false) {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(Self.installOneLiner, forType: .string)
                 }
@@ -274,6 +273,31 @@ struct GatewaySettingsSection: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+
+    /// Filled buttons (matching the dashboard's row-action style) so the
+    /// primary install action reads clearly apart from the copy helper.
+    private func deployButton(
+        _ title: String,
+        prominent: Bool,
+        disabled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 11, weight: prominent ? .semibold : .regular))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    prominent ? accent.opacity(0.18) : theme.btnBg,
+                    in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+                )
+                .foregroundStyle(prominent ? accent : theme.btnFg)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .opacity(disabled ? 0.5 : 1)
     }
 
     /// Rendered outside the SSH-only controls so a Tailscale install that
