@@ -13,6 +13,7 @@ Everything you need beyond the README's quickstart. This is also what the app's 
 - [Why JSON is the right next step](#why-json-is-the-right-next-step)
 - [Resource profile](#resource-profile)
 - [Controller API contract](#controller-api-contract)
+- [Remote gateways](#remote-gateways)
 - [Benchmark artifacts](#benchmark-artifacts)
 - [Build from source](#build-from-source)
 - [Release pipeline](#release-pipeline)
@@ -274,6 +275,40 @@ The app expects a controller base URL, defaulting to `http://127.0.0.1:8877`.
 | `POST` | `/api/benchmark/start` | Run benchmark(s) (Plus) |
 
 Any backend that returns the same profile-status JSON shape and supports these lifecycle actions is compatible. See `Sources/ModelSwitchboardCore/Models/` and `Sources/ModelSwitchboardControllerCore/ControllerRouter.swift` for the exact contracts.
+
+## Remote gateways
+
+Remote gateways put model servers on **other machines** into the same panel:
+each gateway is just another controller endpoint speaking the contract above.
+The repo ships a reference backend for Linux/Unix hosts — a single stdlib-only
+Python file, the **remote agent** ([RemoteAgent/README.md](RemoteAgent/README.md)).
+
+The moving parts:
+
+1. **On the remote host**: `RemoteAgent/install-remote-agent.sh` installs the
+   agent under `~/.local/share/model-switchboard-agent/` with a systemd user
+   service. Profiles use the exact same `.env` / `.json` format described
+   above, in the agent's own `model-profiles/` folder. Launch templates cover
+   `vllm`, `llama.cpp` (`llama-server`), `sglang`, and `tgi`; anything else
+   works through `START_COMMAND`.
+2. **On the Mac**: Settings → **Remote Gateways** → *Add Remote Gateway*.
+   - **SSH tunnel** (recommended): the agent stays loopback-only and the app
+     maintains `ssh -N -L` to it using your SSH config, keys, and agent
+     (`BatchMode=yes`; the app never handles passwords — connect once from
+     Terminal first so the host key is trusted). While a remote model runs,
+     its port is forwarded to the same local port over the tunnel's
+     ControlMaster socket, so `Copy Endpoint URL` hands you a URL that works
+     from the Mac. Tunnels reconnect with backoff and surface SSH failures
+     (missing agent key, changed host key, unreachable host) in the panel.
+   - **Direct URL**: point the gateway at `http://host:8877` on a trusted
+     network. Mirroring the local controller's rules, the agent refuses
+     non-loopback binds without `--unsafe-bind` **and** a ≥16-byte bearer
+     token; the token lives in your macOS keychain, per gateway.
+
+Scope notes: benchmarks and integrations stay local-only; the desktop widget
+shows the local gateway. The menu bar count and **Stop Everything** span all
+gateways. Remote state never touches the local status cache, so a downed
+tunnel can't masquerade as local models.
 
 ## Benchmark artifacts
 

@@ -104,6 +104,19 @@ Use `RUNTIME_TAGS` for model-level traits such as `coding`, `q8`, `long-context`
 
 ---
 
+## Remote gateways
+
+**Your DGX box, lab workstation, or home server — in the same menu bar panel.** Launching a model server used to mean SSH-ing in, finding the tmux pane, and pasting a `vllm serve` incantation. Now: drop a profile file on the remote host, click `Activate` on your Mac.
+
+- **One-file agent, zero dependencies.** A single stdlib-only Python file ([RemoteAgent/](RemoteAgent/)) speaks the exact controller contract on any host with Python 3.10+. Installed by one script, kept alive by a systemd user service.
+- **SSH tunnels, your keys.** The agent binds loopback only; the app opens the tunnel with your existing SSH config and agent (`BatchMode` — it never touches passwords). Running models' ports are forwarded automatically, so `Copy Endpoint URL` gives you a URL that works on your Mac.
+- **Or direct LAN**, guarded the same way as the local controller: non-loopback binds demand a ≥16-byte bearer token, stored in your keychain.
+- **Everything aggregates.** The menu bar ready-count spans every gateway; `Stop Everything` sweeps them all.
+
+Setup lives in [RemoteAgent/README.md](RemoteAgent/README.md) and the [SETUP.md remote gateways chapter](SETUP.md#remote-gateways).
+
+---
+
 ## Base or Plus
 
 *Same codebase, two apps.* Pick at install time. They live side by side as **Model Switchboard.app** and **Model Switchboard Plus.app** under `~/Applications/`.

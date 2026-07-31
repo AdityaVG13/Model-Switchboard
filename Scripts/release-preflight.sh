@@ -96,6 +96,14 @@ if [[ "${MSW_PREFLIGHT_SKIP_TESTS:-0}" != "1" ]]; then
   fi
   pass "release automation tests"
 
+  note "running remote agent tests"
+  if command -v uv >/dev/null 2>&1; then
+    uv run python3 -m unittest discover -s RemoteAgent/tests -p 'test_*.py'
+  else
+    python3 -m unittest discover -s RemoteAgent/tests -p 'test_*.py'
+  fi
+  pass "remote agent tests"
+
 else
   note "skipping test suite (MSW_PREFLIGHT_SKIP_TESTS=1)"
 fi
