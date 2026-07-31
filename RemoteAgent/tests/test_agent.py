@@ -9,6 +9,7 @@ Stdlib-only (unittest), mirroring Scripts/tests style. Includes:
 import http.client
 import importlib.util
 import json
+import os
 import shutil
 import socket
 import subprocess
@@ -475,6 +476,61 @@ class AgentLifecycleTests(unittest.TestCase):
         status, payload = self.harness.json_request("POST", "/api/stop-all", {})
         self.assertEqual(status, 200, payload)
         self.assertTrue(all(not s["running"] for s in payload["statuses"]))
+
+
+class InstallerSourceResolutionTests(unittest.TestCase):
+    """The installer must work from a checkout AND from a pre-pushed agent
+    (the Mac app deploys over SSH with no checkout on the remote host)."""
+
+    def run_installer(self, script_dir: Path, home: Path) -> subprocess.CompletedProcess:
+        installer = REPO_ROOT / "RemoteAgent" / "install-remote-agent.sh"
+        staged = script_dir / "install-remote-agent.sh"
+        staged.write_text(installer.read_text(encoding="utf-8"), encoding="utf-8")
+        staged.chmod(0o755)
+        env = {
+            "HOME": str(home),
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        }
+        return subprocess.run(
+            ["bash", str(staged), "--port", "8899"],
+            capture_output=True, text=True, timeout=60, env=env, check=False,
+        )
+
+    def test_installs_from_adjacent_agent_source(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            script_dir = Path(tmp) / "checkout"
+            script_dir.mkdir(parents=True)
+            home.mkdir(parents=True)
+            shutil.copy2(AGENT_PATH, script_dir / "model_switchboard_agent.py")
+
+            result = self.run_installer(script_dir, home)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            launcher = home / ".local/bin/model-switchboard-agent"
+            self.assertTrue(launcher.is_file())
+            self.assertIn("modelswitchboard-gateway://", result.stdout)
+            installed = home / ".local/share/model-switchboard-agent/model_switchboard_agent.py"
+            self.assertEqual(
+                installed.read_text(encoding="utf-8"),
+                AGENT_PATH.read_text(encoding="utf-8"),
+            )
+
+    def test_installs_from_prepushed_agent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            script_dir = Path(tmp) / "empty"
+            script_dir.mkdir(parents=True)
+            install_root = home / ".local/share/model-switchboard-agent"
+            install_root.mkdir(parents=True)
+            shutil.copy2(AGENT_PATH, install_root / "model_switchboard_agent.py")
+
+            result = self.run_installer(script_dir, home)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("already present", result.stdout)
+            self.assertIn("modelswitchboard-gateway://", result.stdout)
+            self.assertTrue((home / ".local/bin/model-switchboard-agent").is_file())
 
 
 class ConfigurationTests(unittest.TestCase):

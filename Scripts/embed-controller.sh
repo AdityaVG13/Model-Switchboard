@@ -29,8 +29,17 @@ cp -R "$ROOT_DIR/Controller/model-profiles/examples" \
   "$APP_BUNDLE/Contents/Resources/ControllerSupport/model-profiles/examples"
 cp "$ROOT_DIR/Resources/Controller/io.modelswitchboard.controller.plist" \
   "$APP_BUNDLE/Contents/Library/LaunchAgents/"
+
+# Remote agent, embedded so the app can deploy it to SSH gateways without the
+# remote host downloading anything.
+mkdir -p "$APP_BUNDLE/Contents/Resources/RemoteAgent"
+cp "$ROOT_DIR/RemoteAgent/model_switchboard_agent.py" \
+  "$ROOT_DIR/RemoteAgent/install-remote-agent.sh" \
+  "$APP_BUNDLE/Contents/Resources/RemoteAgent/"
+
 chmod 755 \
   "$APP_BUNDLE/Contents/Resources/ModelSwitchboardController" \
-  "$APP_BUNDLE/Contents/Resources/ControllerSupport/"*.sh
+  "$APP_BUNDLE/Contents/Resources/ControllerSupport/"*.sh \
+  "$APP_BUNDLE/Contents/Resources/RemoteAgent/install-remote-agent.sh"
 
 printf 'embedded_controller=%s\n' "$APP_BUNDLE/Contents/Resources/ModelSwitchboardController"

@@ -9,7 +9,21 @@ stdlib only). It speaks the exact same HTTP contract as the macOS controller,
 reads the same `model-profiles/*.env|*.json` profile format, and is what the
 app's **remote gateways** feature talks to.
 
-## Install (on the remote host)
+## Install
+
+**Nothing to download on the remote host.** In Model Switchboard on your Mac:
+**Settings → Remote Gateways → Add Remote Gateway**, enter `user` + `host`,
+and click **Install Agent on Host** — the app pushes the bundled single-file
+agent over your own SSH connection and sets up its service.
+
+Prefer to run something yourself in your existing SSH session? One line, no
+checkout:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AdityaVG13/Model-Switchboard/main/RemoteAgent/install-remote-agent.sh | bash
+```
+
+Or from a repo checkout:
 
 ```bash
 git clone https://github.com/AdityaVG13/Model-Switchboard.git

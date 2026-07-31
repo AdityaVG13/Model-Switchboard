@@ -285,9 +285,12 @@ Python file, the **remote agent** ([RemoteAgent/README.md](RemoteAgent/README.md
 
 The moving parts:
 
-1. **On the remote host**: `RemoteAgent/install-remote-agent.sh` installs the
-   agent under `~/.local/share/model-switchboard-agent/` with a systemd user
-   service. Profiles use the exact same `.env` / `.json` format described
+1. **On the remote host**: nothing to download — the app bundles the agent
+   and **Install Agent on Host** (in the gateway editor) pushes it over SSH
+   and sets up a systemd user service under
+   `~/.local/share/model-switchboard-agent/`. (Manual alternatives: a
+   `curl | bash` one-liner of `RemoteAgent/install-remote-agent.sh`, or a repo
+   checkout.) Profiles use the exact same `.env` / `.json` format described
    above, in the agent's own `model-profiles/` folder. Launch templates cover
    `vllm`, `llama.cpp` (`llama-server`), `sglang`, and `tgi`; anything else
    works through `START_COMMAND`.

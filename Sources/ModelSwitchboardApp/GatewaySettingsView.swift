@@ -8,11 +8,22 @@ struct GatewaySettingsSection: View {
     let theme: DashboardTheme
     let accent: Color
 
+    enum DeployState: Equatable {
+        case idle
+        case running
+        case success(String)
+        case failure(String)
+    }
+
+    static let installOneLiner =
+        "curl -fsSL https://raw.githubusercontent.com/AdityaVG13/Model-Switchboard/main/RemoteAgent/install-remote-agent.sh | bash"
+
     @State private var draft: GatewayConfig?
     @State private var draftToken = ""
     @State private var draftIsNew = false
     @State private var linkCode = ""
     @State private var validationMessage: String?
+    @State private var deployState: DeployState = .idle
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -156,6 +167,8 @@ struct GatewaySettingsSection: View {
                     .font(.system(size: 10))
                     .foregroundStyle(theme.sub)
                     .fixedSize(horizontal: false, vertical: true)
+
+                deploySection(config: binding.wrappedValue)
             case .direct:
                 field("Controller URL", text: binding.baseURL, prompt: "http://spark.local:8877", monospaced: true)
                 Text("The agent must be reachable at this URL. Non-loopback agents require a bearer token (run the agent with --unsafe-bind and --auth-token-file).")
@@ -225,12 +238,79 @@ struct GatewaySettingsSection: View {
         closeEditor()
     }
 
+    // MARK: - Agent deployment
+
+    @ViewBuilder
+    private func deploySection(config: GatewayConfig) -> some View {
+        let sshReady = !config.sshHost.trimmingCharacters(in: .whitespaces).isEmpty
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 10) {
+                linkButton(
+                    deployState == .running ? "Installing Agent…" : "Install Agent on Host",
+                    emphasized: true
+                ) {
+                    deployAgent(config: config)
+                }
+                .disabled(!sshReady || deployState == .running)
+                .opacity(sshReady ? 1 : 0.5)
+                linkButton("Copy Install One-Liner") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(Self.installOneLiner, forType: .string)
+                }
+            }
+            switch deployState {
+            case .idle:
+                Text("Nothing to install on the remote by hand: this pushes the single-file agent over SSH and sets up its service. Or copy the one-liner to run there yourself.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(theme.sub)
+                    .fixedSize(horizontal: false, vertical: true)
+            case .running:
+                Text("Pushing the agent and running the installer over SSH…")
+                    .font(.system(size: 10))
+                    .foregroundStyle(DashboardTheme.pendingOrange)
+            case .success(let message):
+                Text(message)
+                    .font(.system(size: 10))
+                    .foregroundStyle(DashboardTheme.runningGreen)
+                    .fixedSize(horizontal: false, vertical: true)
+            case .failure(let message):
+                Text(message)
+                    .font(.system(size: 10))
+                    .foregroundStyle(DashboardTheme.stopRed)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func deployAgent(config: GatewayConfig) {
+        deployState = .running
+        Task {
+            let deployer = RemoteAgentDeployer()
+            do {
+                let result = try await deployer.deploy(to: config)
+                let suffix = result.pairingLink == nil
+                    ? "" : " The host printed its pairing code, so the connection details check out."
+                deployState = .success("Agent installed on \(config.sshHost).\(suffix) Save the gateway to connect.")
+            } catch let error as RemoteAgentDeployer.DeployError {
+                switch error {
+                case .missingResources:
+                    deployState = .failure("This build is missing the bundled agent. Reinstall the app, or use the one-liner instead.")
+                case .sshFailed(let step, let message):
+                    deployState = .failure("Install failed while trying to \(step): \(message)")
+                }
+            } catch {
+                deployState = .failure("Install failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
     private func closeEditor() {
         draft = nil
         draftToken = ""
         draftIsNew = false
         linkCode = ""
         validationMessage = nil
+        deployState = .idle
     }
 
     // MARK: - Small helpers (visually matching SettingsView)

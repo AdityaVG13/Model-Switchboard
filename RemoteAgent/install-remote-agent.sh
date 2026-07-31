@@ -59,10 +59,25 @@ python3 - <<'EOF' || die "Python 3.10+ is required"
 import sys
 raise SystemExit(0 if sys.version_info >= (3, 10) else 1)
 EOF
-[ -f "$AGENT_SOURCE" ] || die "agent source not found next to installer: $AGENT_SOURCE"
 
 mkdir -p "$INSTALL_ROOT/model-profiles" "$INSTALL_ROOT/run" "$BIN_DIR"
-install -m 0755 "$AGENT_SOURCE" "$INSTALL_ROOT/model_switchboard_agent.py"
+
+# Agent source, in order: next to this script (repo checkout), already pushed
+# to the install root (the Mac app deploys it over SSH), or fetched from the
+# repo (curl | bash one-liner with no checkout at all).
+REPO_RAW_URL="${REPO_RAW_URL:-https://raw.githubusercontent.com/AdityaVG13/Model-Switchboard/main/RemoteAgent}"
+if [ -f "$AGENT_SOURCE" ]; then
+    install -m 0755 "$AGENT_SOURCE" "$INSTALL_ROOT/model_switchboard_agent.py"
+elif [ -f "$INSTALL_ROOT/model_switchboard_agent.py" ]; then
+    chmod 0755 "$INSTALL_ROOT/model_switchboard_agent.py"
+    log "Using agent already present at $INSTALL_ROOT"
+else
+    command -v curl >/dev/null 2>&1 || die "no agent source found and curl is unavailable"
+    log "Downloading agent from $REPO_RAW_URL"
+    curl -fsSL "$REPO_RAW_URL/model_switchboard_agent.py" -o "$INSTALL_ROOT/model_switchboard_agent.py" \
+        || die "could not download the agent"
+    chmod 0755 "$INSTALL_ROOT/model_switchboard_agent.py"
+fi
 
 cat > "$BIN_PATH" <<EOF
 #!/usr/bin/env bash
