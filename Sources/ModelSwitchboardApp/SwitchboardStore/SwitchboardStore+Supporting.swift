@@ -31,7 +31,7 @@ extension SwitchboardStore {
     func markBenchmarkStarted() {
         let now = Date()
         lastBenchmarkStartedAt = now
-        UserDefaults.standard.set(now.timeIntervalSince1970, forKey: Constants.benchmarkCooldownKey)
+        UserDefaults.standard.set(now.timeIntervalSince1970, forKey: benchmarkCooldownDefaultsKey)
     }
 
     func openProfilesDirectory() {

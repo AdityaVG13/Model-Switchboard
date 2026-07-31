@@ -28,6 +28,7 @@ extension SwitchboardStore {
     }
 
     func probeLoopbackEndpointsIfNeeded(relativeTo now: Date = .now) async {
+        guard gateway.isLocal else { return }
         guard !isRefreshing else { return }
         guard shouldProbeLoopbackEndpoints(relativeTo: now) else { return }
 
@@ -54,6 +55,9 @@ extension SwitchboardStore {
     }
 
     func startLoopbackEndpointProbe() {
+        // Remote profiles report URLs that are loopback on the *remote* host;
+        // probing 127.0.0.1 here would mark healthy remote servers dead.
+        guard gateway.isLocal else { return }
         loopbackEndpointProbeTask?.cancel()
         loopbackEndpointProbeSession = loopbackEndpointProbeSession ?? Self.makeLoopbackEndpointProbeSession()
         loopbackEndpointProbeTask = Task { [weak self] in

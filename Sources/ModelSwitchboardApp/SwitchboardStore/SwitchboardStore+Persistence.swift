@@ -3,8 +3,23 @@ import OSLog
 import ModelSwitchboardCore
 
 extension SwitchboardStore {
+    /// Local keeps the pre-gateway key strings byte-for-byte; remote gateways
+    /// get suffixed keys so their profile names never leak into local state
+    /// (e.g. "Reopen Last Active" starting a remote-only profile locally).
+    var lastActiveProfilesDefaultsKey: String {
+        gateway.isLocal
+            ? Constants.lastActiveProfilesKey
+            : "\(Constants.lastActiveProfilesKey).\(gateway.id)"
+    }
+
+    var benchmarkCooldownDefaultsKey: String {
+        gateway.isLocal
+            ? Constants.benchmarkCooldownKey
+            : "\(Constants.benchmarkCooldownKey).\(gateway.id)"
+    }
+
     func loadCachedState() {
-        guard let cached = ControllerStatusCache.load() else { return }
+        guard let cached = cachedStateLoader() else { return }
         apply(payload: cached.payload)
         lastUpdated = cached.cachedAt
     }
@@ -17,6 +32,10 @@ extension SwitchboardStore {
         cachePayloadWriter(payload, context)
     }
 
+    /// Default writer for remote-gateway stores: the shared cache file feeds the
+    /// widget and local-controller migration, so remote payloads never touch it.
+    nonisolated static func discardCachePayload(_ payload: ControllerStatusPayload, context: String) {}
+
     nonisolated static func writeCachePayload(_ payload: ControllerStatusPayload, context: String) {
         do {
             try ControllerStatusCache.write(payload)
@@ -27,11 +46,11 @@ extension SwitchboardStore {
     }
 
     func loadLastActiveProfiles() {
-        lastActiveProfiles = UserDefaults.standard.stringArray(forKey: Constants.lastActiveProfilesKey) ?? []
+        lastActiveProfiles = UserDefaults.standard.stringArray(forKey: lastActiveProfilesDefaultsKey) ?? []
     }
 
     func loadBenchmarkCooldownState() {
-        guard let timestamp = UserDefaults.standard.object(forKey: Constants.benchmarkCooldownKey) as? TimeInterval else {
+        guard let timestamp = UserDefaults.standard.object(forKey: benchmarkCooldownDefaultsKey) as? TimeInterval else {
             lastBenchmarkStartedAt = nil
             return
         }
@@ -50,6 +69,6 @@ extension SwitchboardStore {
             deduplicated.append(profile)
         }
         lastActiveProfiles = deduplicated
-        UserDefaults.standard.set(deduplicated, forKey: Constants.lastActiveProfilesKey)
+        UserDefaults.standard.set(deduplicated, forKey: lastActiveProfilesDefaultsKey)
     }
 }

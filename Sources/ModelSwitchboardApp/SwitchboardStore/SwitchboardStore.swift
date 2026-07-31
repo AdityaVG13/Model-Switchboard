@@ -39,10 +39,15 @@ final class SwitchboardStore {
     typealias LoopbackEndpointProbe = ([ModelProfileStatus]) async -> Set<String>
     typealias ControllerClientFactory = (String, String?) throws -> ControllerClient
     typealias CachePayloadWriter = @MainActor (ControllerStatusPayload, String) -> Void
+    typealias CachedStateLoader = () -> CachedControllerStatusPayload?
 
     var controllerBaseURL: String
     var controllerAuthToken: String
     let features: AppFeatures
+    /// Which gateway this store fronts. Remote stores skip local-only behavior:
+    /// the loopback endpoint probe (remote profiles report loopback URLs that
+    /// are only loopback *on the remote host*) and the shared status cache.
+    let gateway: GatewayContext
     var statuses: [ModelProfileStatus] = [] {
         didSet { sortedStatusesCache = nil }
     }
@@ -76,25 +81,32 @@ final class SwitchboardStore {
     let loopbackEndpointProbe: LoopbackEndpointProbe
     let controllerClientFactory: ControllerClientFactory
     let cachePayloadWriter: CachePayloadWriter
+    let cachedStateLoader: CachedStateLoader
     static let logger = Logger(subsystem: "io.modelswitchboard.app", category: "switchboard-store")
 
     init(
         controllerBaseURL: String,
         controllerAuthToken: String = "",
         features: AppFeatures = .current,
+        gateway: GatewayContext = .local,
         autoStartRefresh: Bool = true,
         loopbackEndpointProbe: LoopbackEndpointProbe? = nil,
         controllerClientFactory: @escaping ControllerClientFactory = { try ControllerClient(baseURLString: $0, authToken: $1) },
-        cachePayloadWriter: CachePayloadWriter? = nil
+        cachePayloadWriter: CachePayloadWriter? = nil,
+        cachedStateLoader: CachedStateLoader? = nil
     ) {
         self.controllerBaseURL = controllerBaseURL
         self.controllerAuthToken = controllerAuthToken
         self.features = features
+        self.gateway = gateway
         self.loopbackEndpointProbeFastUntil = Date().addingTimeInterval(Constants.loopbackEndpointProbeFastWindowSeconds)
         self.usesCustomLoopbackEndpointProbe = loopbackEndpointProbe != nil
         self.loopbackEndpointProbe = loopbackEndpointProbe ?? { _ in [] }
         self.controllerClientFactory = controllerClientFactory
-        self.cachePayloadWriter = cachePayloadWriter ?? Self.writeCachePayload
+        // Remote stores default to no cache I/O: the single cache file feeds the
+        // widget and local-controller migration, and must only hold local state.
+        self.cachePayloadWriter = cachePayloadWriter ?? (gateway.isLocal ? Self.writeCachePayload : Self.discardCachePayload)
+        self.cachedStateLoader = cachedStateLoader ?? (gateway.isLocal ? { ControllerStatusCache.load() } : { nil })
         loadLastActiveProfiles()
         loadBenchmarkCooldownState()
         loadCachedState()

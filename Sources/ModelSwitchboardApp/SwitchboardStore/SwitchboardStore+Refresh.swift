@@ -52,7 +52,7 @@ extension SwitchboardStore {
             lastUpdated = Date()
         } catch {
             if isBenignCancellation(error) { return }
-            if statuses.isEmpty, let cached = ControllerStatusCache.load() {
+            if statuses.isEmpty, let cached = cachedStateLoader() {
                 apply(payload: cached.payload)
                 lastUpdated = cached.cachedAt
                 lastError = bootstrapDiagnostic ?? "Controller unavailable. Showing cached state."
