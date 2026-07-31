@@ -27,6 +27,7 @@ struct MenuBarContentView: View {
     }
 
     @Bindable var store: SwitchboardStore
+    @Bindable var hub: GatewayHub
     let features: AppFeatures
     @ObservedObject var launchAtLoginManager: LaunchAtLoginManager
     @Binding var controllerBaseURL: String
@@ -36,6 +37,7 @@ struct MenuBarContentView: View {
 
     init(
         store: SwitchboardStore,
+        hub: GatewayHub? = nil,
         features: AppFeatures,
         launchAtLoginManager: LaunchAtLoginManager,
         controllerBaseURL: Binding<String>,
@@ -45,6 +47,7 @@ struct MenuBarContentView: View {
         systemMetrics: SystemMetricsMonitor? = nil
     ) {
         self.store = store
+        self.hub = hub ?? GatewayHub(localStore: store)
         self.features = features
         self.launchAtLoginManager = launchAtLoginManager
         self._controllerBaseURL = controllerBaseURL
@@ -138,7 +141,7 @@ struct MenuBarContentView: View {
             } else {
                 systemMetrics.stop()
             }
-            updateMenuBarHelp(store.menuBarHelp)
+            updateMenuBarHelp(hub.menuBarHelp)
             synchronizeInspectorWindow()
         }
         .onDisappear {
@@ -146,7 +149,7 @@ struct MenuBarContentView: View {
             inspectorController.hide()
             inspectorCoordinator.reset()
         }
-        .onChange(of: store.menuBarHelp) { _, newValue in
+        .onChange(of: hub.menuBarHelp) { _, newValue in
             updateMenuBarHelp(newValue)
         }
         .onChange(of: storedMainPanelWidth) { _, newValue in

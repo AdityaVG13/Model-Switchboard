@@ -25,11 +25,11 @@ extension MenuBarContentView {
             }
 
             footerTextButton(
-                "Stop All",
+                hub.hasRemoteGateways ? "Stop Everything" : "Stop All",
                 color: DashboardTheme.stopRed,
-                isBusy: store.pendingGlobalActions.contains("stop-all")
+                isBusy: hub.isStopEverythingBusy
             ) {
-                Task { await store.stopAll() }
+                Task { await hub.stopEverything() }
             }
 
             Spacer()

@@ -31,6 +31,7 @@ extension MenuBarContentView {
                 VStack(alignment: .leading, spacing: 0) {
                     heroSection
                     modelListSection
+                    remoteGatewaySections
                 }
             }
             .frame(maxHeight: .infinity)

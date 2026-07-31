@@ -2,6 +2,7 @@ import SwiftUI
 import ModelSwitchboardCore
 
 struct SettingsView: View {
+    var hub: GatewayHub?
     @Binding var controllerBaseURL: String
     @Binding var controllerAuthToken: String
     let profilesDirectory: String?
@@ -38,6 +39,9 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     appearanceGroup
                     connectionGroup
+                    if let hub {
+                        GatewaySettingsSection(hub: hub, theme: theme, accent: accent)
+                    }
                     behaviorGroup
                     controllerGroup
                 }

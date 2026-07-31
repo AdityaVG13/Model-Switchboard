@@ -50,6 +50,7 @@ extension MenuBarContentView {
         switch panel {
         case .settings:
             SettingsView(
+                hub: hub,
                 controllerBaseURL: $controllerBaseURL,
                 controllerAuthToken: $controllerAuthToken,
                 profilesDirectory: store.profilesDirectory,

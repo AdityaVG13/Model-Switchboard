@@ -1,0 +1,289 @@
+import Foundation
+import Observation
+import OSLog
+import ModelSwitchboardCore
+
+/// One gateway's live state: its store, and for SSH gateways the tunnel.
+@MainActor
+@Observable
+final class GatewayRuntime: Identifiable {
+    nonisolated let id: String
+    let config: GatewayConfig
+    let store: SwitchboardStore
+    let tunnel: SSHTunnelManager?
+    var tunnelState: SSHTunnelManager.State = .idle
+    /// Remote model ports currently forwarded to the same local port.
+    var forwardedPorts: Set<Int> = []
+    @ObservationIgnored var forwardSyncTask: Task<Void, Never>?
+
+    init(config: GatewayConfig, store: SwitchboardStore, tunnel: SSHTunnelManager?) {
+        self.id = config.id
+        self.config = config
+        self.store = store
+        self.tunnel = tunnel
+    }
+
+    var name: String { config.name }
+
+    /// A URL for this profile that is valid from this Mac, or nil when the
+    /// endpoint is only reachable on the remote host.
+    func reachableEndpointURL(for status: ModelProfileStatus) -> String? {
+        switch config.kind {
+        case .ssh:
+            // Forwards map remote port N to local port N, so the remote's own
+            // loopback URL is exactly the working local URL once forwarded.
+            guard let port = Int(status.port), forwardedPorts.contains(port) else { return nil }
+            return status.baseURL
+        case .direct:
+            if !status.usesLoopbackEndpoint {
+                return status.baseURL
+            }
+            guard
+                let controllerHost = URL(string: config.baseURL)?.host,
+                !LoopbackHost.isLoopback(controllerHost),
+                var components = URLComponents(string: status.baseURL)
+            else { return nil }
+            components.host = controllerHost
+            return components.url?.absoluteString
+        }
+    }
+}
+
+/// Owns the local store plus one runtime per configured remote gateway,
+/// and the cross-gateway aggregates the menu bar shows.
+@MainActor
+@Observable
+final class GatewayHub {
+    typealias RemoteStoreFactory = @MainActor (GatewayConfig, String, String) -> SwitchboardStore
+
+    private static let logger = Logger(subsystem: "io.modelswitchboard.app", category: "gateway-hub")
+    private static let forwardSyncIntervalSeconds: TimeInterval = 5
+
+    let localStore: SwitchboardStore
+    private(set) var remoteRuntimes: [GatewayRuntime] = []
+
+    @ObservationIgnored private let defaults: UserDefaults
+    @ObservationIgnored private let remoteStoreFactory: RemoteStoreFactory
+    @ObservationIgnored private let tokenStorageFactory: (String) -> KeychainTokenStorage
+    @ObservationIgnored private let sshExecutableURL: URL
+
+    init(
+        localStore: SwitchboardStore,
+        defaults: UserDefaults = .standard,
+        remoteStoreFactory: RemoteStoreFactory? = nil,
+        tokenStorageFactory: @escaping (String) -> KeychainTokenStorage = { KeychainTokenStorage.forGateway(id: $0) },
+        sshExecutableURL: URL = URL(fileURLWithPath: "/usr/bin/ssh")
+    ) {
+        self.localStore = localStore
+        self.defaults = defaults
+        self.remoteStoreFactory = remoteStoreFactory ?? Self.makeRemoteStore
+        self.tokenStorageFactory = tokenStorageFactory
+        self.sshExecutableURL = sshExecutableURL
+        applyConfigs(GatewayConfigStore.load(from: defaults))
+    }
+
+    // MARK: - Configuration lifecycle
+
+    var gatewayConfigs: [GatewayConfig] { remoteRuntimes.map(\.config) }
+    var hasRemoteGateways: Bool { !remoteRuntimes.isEmpty }
+    var enabledRemoteRuntimes: [GatewayRuntime] { remoteRuntimes.filter(\.config.enabled) }
+
+    func upsertGateway(_ config: GatewayConfig, token: String) {
+        let storage = tokenStorageFactory(config.id)
+        storage.save(token)
+        var configs = GatewayConfigStore.load(from: defaults)
+        if let index = configs.firstIndex(where: { $0.id == config.id }) {
+            configs[index] = config
+        } else {
+            configs.append(config)
+        }
+        GatewayConfigStore.save(configs, to: defaults)
+        applyConfigs(configs)
+    }
+
+    func removeGateway(id: String) {
+        tokenStorageFactory(id).delete()
+        let configs = GatewayConfigStore.load(from: defaults).filter { $0.id != id }
+        GatewayConfigStore.save(configs, to: defaults)
+        applyConfigs(configs)
+    }
+
+    func authToken(forGateway id: String) -> String {
+        tokenStorageFactory(id).load() ?? ""
+    }
+
+    func applyConfigs(_ configs: [GatewayConfig]) {
+        var kept: [String: GatewayRuntime] = [:]
+        for runtime in remoteRuntimes {
+            if let config = configs.first(where: { $0.id == runtime.id }), config == runtime.config {
+                kept[runtime.id] = runtime
+            } else {
+                teardown(runtime)
+            }
+        }
+        remoteRuntimes = configs.compactMap { config in
+            if let existing = kept[config.id] { return existing }
+            guard config.enabled else { return nil }
+            return makeRuntime(config: config)
+        }
+    }
+
+    private func makeRuntime(config: GatewayConfig) -> GatewayRuntime {
+        let token = tokenStorageFactory(config.id).load() ?? ""
+        switch config.kind {
+        case .direct:
+            let store = remoteStoreFactory(config, config.baseURL, token)
+            return GatewayRuntime(config: config, store: store, tunnel: nil)
+        case .ssh:
+            let hubReference = WeakHub(self)
+            let tunnel = SSHTunnelManager(
+                gatewayID: config.id,
+                configuration: .init(config: config),
+                executableURL: sshExecutableURL,
+                onStateChange: { state in
+                    await hubReference.value?.tunnelStateChanged(gatewayID: config.id, state: state)
+                }
+            )
+            let store = remoteStoreFactory(config, tunnel.localBaseURL, token)
+            let runtime = GatewayRuntime(config: config, store: store, tunnel: tunnel)
+            Task { await tunnel.start() }
+            return runtime
+        }
+    }
+
+    private func teardown(_ runtime: GatewayRuntime) {
+        runtime.store.stopAutoRefresh()
+        runtime.forwardSyncTask?.cancel()
+        runtime.forwardSyncTask = nil
+        if let tunnel = runtime.tunnel {
+            Task { await tunnel.stop() }
+        }
+    }
+
+    // MARK: - Tunnel state
+
+    func tunnelStateChanged(gatewayID: String, state: SSHTunnelManager.State) {
+        guard let runtime = remoteRuntimes.first(where: { $0.id == gatewayID }) else { return }
+        runtime.tunnelState = state
+        switch state {
+        case .established:
+            // (Re)start the refresh loop now that requests can get through, and
+            // keep model-endpoint forwards aligned with running profiles.
+            runtime.store.startAutoRefresh()
+            startForwardSync(for: runtime)
+        case .failed(let message):
+            runtime.store.applyBootstrapDiagnostic(message)
+            runtime.forwardSyncTask?.cancel()
+            runtime.forwardSyncTask = nil
+            runtime.forwardedPorts = []
+        case .connecting, .idle:
+            runtime.forwardSyncTask?.cancel()
+            runtime.forwardSyncTask = nil
+            runtime.forwardedPorts = []
+        }
+    }
+
+    private func startForwardSync(for runtime: GatewayRuntime) {
+        runtime.forwardSyncTask?.cancel()
+        guard let tunnel = runtime.tunnel else { return }
+        runtime.forwardSyncTask = Task { [weak runtime] in
+            while !Task.isCancelled {
+                guard let runtime else { return }
+                let runningPorts = Set(
+                    runtime.store.statuses
+                        .filter { $0.running || $0.ready }
+                        .compactMap { Int($0.port) }
+                )
+                let forwarded = await tunnel.syncForwards(remotePorts: runningPorts)
+                if runtime.forwardedPorts != forwarded {
+                    runtime.forwardedPorts = forwarded
+                }
+                try? await Task.sleep(for: .seconds(Self.forwardSyncIntervalSeconds))
+            }
+        }
+    }
+
+    // MARK: - Aggregates
+
+    var allStores: [SwitchboardStore] { [localStore] + enabledRemoteRuntimes.map(\.store) }
+
+    var totalProfiles: Int {
+        allStores.reduce(0) { $0 + $1.summary.totalProfiles }
+    }
+
+    var displayedReadyProfiles: Int {
+        allStores.reduce(0) { $0 + $1.displayedReadyProfiles }
+    }
+
+    var displayedRunningProfiles: Int {
+        allStores.reduce(0) { $0 + $1.displayedRunningProfiles }
+    }
+
+    var menuBarHelp: String {
+        guard hasRemoteGateways else { return localStore.menuBarHelp }
+        let parts = [
+            "This Mac: \(localStore.displayedReadyProfiles)/\(localStore.summary.totalProfiles) ready"
+        ] + enabledRemoteRuntimes.map { runtime in
+            "\(runtime.name): \(runtime.store.displayedReadyProfiles)/\(runtime.store.summary.totalProfiles) ready"
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    var isStopEverythingBusy: Bool {
+        allStores.contains { $0.pendingGlobalActions.contains("stop-all") }
+    }
+
+    func stopEverything() async {
+        // Unstructured MainActor-inheriting tasks: stores run their stop-alls
+        // concurrently while each store mutation stays on the main actor.
+        let tasks = allStores.map { store in
+            Task { await store.stopAll() }
+        }
+        for task in tasks {
+            await task.value
+        }
+    }
+
+    func refreshAll() {
+        for store in allStores {
+            Task { await store.refresh() }
+        }
+    }
+
+    // MARK: - Default remote store construction
+
+    @MainActor
+    private static func makeRemoteStore(
+        config: GatewayConfig, baseURL: String, token: String
+    ) -> SwitchboardStore {
+        // Short timeouts: a half-open tunnel must not hang the panel for 60s.
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.timeoutIntervalForRequest = 5
+        sessionConfiguration.timeoutIntervalForResource = 15
+        sessionConfiguration.waitsForConnectivity = false
+        let session = URLSession(configuration: sessionConfiguration)
+        return SwitchboardStore(
+            controllerBaseURL: baseURL,
+            controllerAuthToken: token,
+            features: .base,
+            gateway: GatewayContext(config: config),
+            autoStartRefresh: config.kind == .direct,
+            controllerClientFactory: { baseURLString, authToken in
+                try ControllerClient(baseURLString: baseURLString, authToken: authToken, session: session)
+            }
+        )
+    }
+}
+
+/// Lets the tunnel's @Sendable callback reach the MainActor hub without a
+/// retain cycle (hub → tunnel → callback → hub).
+private final class WeakHub: @unchecked Sendable {
+    private weak var hub: GatewayHub?
+
+    init(_ hub: GatewayHub) {
+        self.hub = hub
+    }
+
+    @MainActor
+    var value: GatewayHub? { hub }
+}
