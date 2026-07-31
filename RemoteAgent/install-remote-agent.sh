@@ -70,18 +70,37 @@ exec python3 "$INSTALL_ROOT/model_switchboard_agent.py" --root "$INSTALL_ROOT" "
 EOF
 chmod 0755 "$BIN_PATH"
 
-SAMPLE="$INSTALL_ROOT/model-profiles/example-vllm.env.example"
-if [ ! -f "$SAMPLE" ]; then
-    cat > "$SAMPLE" <<'EOF'
-# Rename to <name>.env to activate. One file per model server.
-# Full format reference: SETUP.md in the Model Switchboard repo.
+# One sample per launch style. Rename any of them to <name>.env to activate;
+# one file per model server. Full format reference: SETUP.md in the repo.
+if [ ! -f "$INSTALL_ROOT/model-profiles/example-vllm.env.example" ]; then
+    cat > "$INSTALL_ROOT/model-profiles/example-vllm.env.example" <<'EOF'
 DISPLAY_NAME="Llama 3.1 8B (vLLM)"
 RUNTIME=vllm
 REQUEST_MODEL=meta-llama/Llama-3.1-8B-Instruct
 PORT=8001
 # EXTRA_ARGS="--max-model-len 8192 --gpu-memory-utilization 0.90"
-# Or take full control of the launch:
-# START_COMMAND="vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8001"
+EOF
+fi
+if [ ! -f "$INSTALL_ROOT/model-profiles/example-llamacpp.env.example" ]; then
+    cat > "$INSTALL_ROOT/model-profiles/example-llamacpp.env.example" <<'EOF'
+DISPLAY_NAME="Qwen 2.5 7B (llama.cpp)"
+RUNTIME=llama.cpp
+REQUEST_MODEL=qwen2.5-7b-instruct
+MODEL_FILE=~/models/qwen2.5-7b-instruct-q5_k_m.gguf
+PORT=8002
+# EXTRA_ARGS="-c 8192 -ngl 99"
+EOF
+fi
+if [ ! -f "$INSTALL_ROOT/model-profiles/example-custom.env.example" ]; then
+    cat > "$INSTALL_ROOT/model-profiles/example-custom.env.example" <<'EOF'
+# Any runtime works: give the agent a launch command and a health endpoint.
+DISPLAY_NAME="My Server (custom)"
+RUNTIME=command
+REQUEST_MODEL=my-model
+PORT=8003
+START_COMMAND="my-model-server --port 8003"
+# STOP_COMMAND="my-model-server --shutdown"     # optional
+# HEALTHCHECK_MODE=http-200                     # if not OpenAI-compatible
 EOF
 fi
 
@@ -123,5 +142,6 @@ if command -v curl >/dev/null 2>&1; then
     fi
 fi
 
-log "Next: add profiles to $INSTALL_ROOT/model-profiles, then add this host"
-log "as a remote gateway in Model Switchboard's Settings on your Mac."
+log "Next: add profiles to $INSTALL_ROOT/model-profiles, then pair your Mac:"
+echo
+"$BIN_PATH" --port "$PORT" link

@@ -503,6 +503,24 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertIn("model-switchboard-agent", result.stdout)
 
+    def test_link_code_encodes_pairing_details(self) -> None:
+        info = agent.build_link_code(9001)
+        self.assertTrue(info["link"].startswith("modelswitchboard-gateway://"))
+        self.assertIn("agent_port=9001", info["link"])
+        self.assertIn(f"@{info['host']}", info["link"])
+        self.assertTrue(info["user"])
+        self.assertTrue(info["name"])
+
+    def test_cli_link_json_smoke(self) -> None:
+        result = subprocess.run(
+            [sys.executable, str(AGENT_PATH), "--json", "--port", "9001", "link"],
+            capture_output=True, text=True, timeout=30, check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["agent_port"], "9001")
+        self.assertTrue(payload["link"].startswith("modelswitchboard-gateway://"))
+
 
 if __name__ == "__main__":
     unittest.main()

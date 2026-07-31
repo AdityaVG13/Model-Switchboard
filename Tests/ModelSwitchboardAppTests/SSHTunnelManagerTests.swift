@@ -50,7 +50,7 @@ private func waitFor(
 
 @Test func stderrClassificationCoversCommonFailures() {
     #expect(SSHTunnelManager.classifyFailure(
-        stderrLines: ["aditya@spark: Permission denied (publickey,password)."]
+        stderrLines: ["gpuadmin@spark: Permission denied (publickey,password)."]
     ).contains("ssh-add"))
     #expect(SSHTunnelManager.classifyFailure(
         stderrLines: ["Host key verification failed."]
@@ -77,7 +77,7 @@ private func waitFor(
     let manager = SSHTunnelManager(
         gatewayID: "gw-args",
         configuration: .init(
-            destination: "aditya@spark.local",
+            destination: "gpuadmin@spark.local",
             sshPort: 2222,
             remotePort: 9101,
             identityFile: "~/.ssh/spark_ed25519",
@@ -88,7 +88,7 @@ private func waitFor(
     let joined = arguments.joined(separator: " ")
 
     #expect(arguments.first == "-N")
-    #expect(arguments.last == "aditya@spark.local")
+    #expect(arguments.last == "gpuadmin@spark.local")
     #expect(joined.contains("BatchMode=yes"))
     #expect(joined.contains("ExitOnForwardFailure=yes"))
     #expect(joined.contains("ControlMaster=auto"))
@@ -104,7 +104,7 @@ private func waitFor(
     let fakeSSH = try writeExecutable(
         """
         #!/bin/bash
-        echo "aditya@spark: Permission denied (publickey)." >&2
+        echo "gpuadmin@spark: Permission denied (publickey)." >&2
         exit 255
         """,
         name: "fake-ssh-denied"
@@ -114,7 +114,7 @@ private func waitFor(
     let recorder = StateRecorder()
     let manager = SSHTunnelManager(
         gatewayID: "gw-denied",
-        configuration: .init(destination: "aditya@spark"),
+        configuration: .init(destination: "gpuadmin@spark"),
         executableURL: fakeSSH,
         onStateChange: { state in await recorder.record(state) }
     )
@@ -158,7 +158,7 @@ private func waitFor(
     let recorder = StateRecorder()
     let manager = SSHTunnelManager(
         gatewayID: "gw-up",
-        configuration: .init(destination: "aditya@spark"),
+        configuration: .init(destination: "gpuadmin@spark"),
         executableURL: fakeSSH,
         onStateChange: { state in await recorder.record(state) }
     )

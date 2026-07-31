@@ -11,6 +11,7 @@ struct GatewaySettingsSection: View {
     @State private var draft: GatewayConfig?
     @State private var draftToken = ""
     @State private var draftIsNew = false
+    @State private var linkCode = ""
     @State private var validationMessage: String?
 
     var body: some View {
@@ -101,6 +102,29 @@ struct GatewaySettingsSection: View {
             set: { draft = $0 }
         )
         VStack(alignment: .leading, spacing: 8) {
+            if draftIsNew {
+                VStack(alignment: .leading, spacing: 4) {
+                    field(
+                        "Link code (optional)",
+                        text: $linkCode,
+                        prompt: "modelswitchboard-gateway://…",
+                        monospaced: true
+                    )
+                    Text("Run `model-switchboard-agent link` on the remote host and paste the result to prefill this form.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(theme.sub)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .onChange(of: linkCode) { _, newValue in
+                    guard var parsed = GatewayLinkCode.parse(newValue) else { return }
+                    if let existing = draft {
+                        parsed.id = existing.id
+                    }
+                    draft = parsed
+                    validationMessage = nil
+                }
+            }
+
             field("Name", text: binding.name, prompt: "DGX Spark")
 
             HStack(spacing: 8) {
@@ -205,6 +229,7 @@ struct GatewaySettingsSection: View {
         draft = nil
         draftToken = ""
         draftIsNew = false
+        linkCode = ""
         validationMessage = nil
     }
 

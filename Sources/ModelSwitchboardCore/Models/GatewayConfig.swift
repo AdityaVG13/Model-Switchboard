@@ -92,6 +92,33 @@ public struct GatewayContext: Equatable, Sendable {
     }
 }
 
+/// Parses pairing codes printed by `model-switchboard-agent link` on the
+/// remote host, e.g. `modelswitchboard-gateway://user@host?name=spark&agent_port=8877`.
+public enum GatewayLinkCode {
+    public static let scheme = "modelswitchboard-gateway"
+
+    public static func parse(_ raw: String) -> GatewayConfig? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard
+            let components = URLComponents(string: trimmed),
+            components.scheme?.lowercased() == scheme,
+            let host = components.host, !host.isEmpty
+        else { return nil }
+        let query = components.queryItems ?? []
+        func value(_ name: String) -> String? {
+            query.first { $0.name == name }?.value
+        }
+        return GatewayConfig(
+            name: value("name").flatMap { $0.isEmpty ? nil : $0 } ?? host,
+            kind: .ssh,
+            sshUser: components.user ?? "",
+            sshHost: host,
+            sshPort: components.port ?? 22,
+            remotePort: value("agent_port").flatMap(Int.init) ?? 8877
+        )
+    }
+}
+
 /// Persists remote gateway configurations as JSON in UserDefaults.
 public enum GatewayConfigStore {
     public static let defaultsKey = "modelswitchboard.gateways.v1"

@@ -40,7 +40,16 @@ Daemon-style runtimes (`ollama`, LiteLLM, …) are monitored health-only.
 
 ## Connect from the Mac
 
-In Model Switchboard: **Settings → Remote Gateways → Add Remote Gateway**.
+The installer ends by printing a **pairing code** (get it again anytime with
+`model-switchboard-agent link`):
+
+```
+modelswitchboard-gateway://user@host?name=spark&agent_port=8877
+```
+
+In Model Switchboard: **Settings → Remote Gateways → Add Remote Gateway**,
+paste the code, and the form prefills — every field stays editable. The
+gateway's models then appear in the main panel under its own named section.
 
 - **SSH tunnel (recommended).** The agent binds `127.0.0.1` only; the app
   opens `ssh -N -L` to it using your existing SSH keys/agent (`BatchMode` —

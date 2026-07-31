@@ -292,6 +292,10 @@ The moving parts:
    `vllm`, `llama.cpp` (`llama-server`), `sglang`, and `tgi`; anything else
    works through `START_COMMAND`.
 2. **On the Mac**: Settings → **Remote Gateways** → *Add Remote Gateway*.
+   The installer (and `model-switchboard-agent link`) prints a
+   `modelswitchboard-gateway://…` pairing code; paste it into the form to
+   prefill user/host/ports. It only encodes those fields — pairing is fully
+   local, no service involved.
    - **SSH tunnel** (recommended): the agent stays loopback-only and the app
      maintains `ssh -N -L` to it using your SSH config, keys, and agent
      (`BatchMode=yes`; the app never handles passwords — connect once from

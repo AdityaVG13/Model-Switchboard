@@ -19,6 +19,7 @@ Design constraints:
 from __future__ import annotations
 
 import argparse
+import getpass
 import hmac
 import json
 import os
@@ -1194,6 +1195,35 @@ def make_server(
 
 
 # --------------------------------------------------------------------------
+# Pairing link codes
+# --------------------------------------------------------------------------
+
+
+def build_link_code(agent_port: int) -> dict[str, str]:
+    """Best-effort pairing code the Mac app can paste to prefill a gateway.
+
+    Everything stays local: the code only encodes user@host + ports for the
+    SSH-tunnel gateway form, which remains fully editable on the Mac.
+    """
+    user = getpass.getuser()
+    short_host = socket.gethostname().split(".")[0] or "remote"
+    fqdn = socket.getfqdn()
+    host = fqdn if fqdn and "." in fqdn and fqdn != "localhost" else socket.gethostname()
+    link = (
+        "modelswitchboard-gateway://"
+        f"{urllib.parse.quote(user)}@{host}"
+        f"?name={urllib.parse.quote(short_host)}&agent_port={agent_port}"
+    )
+    return {
+        "user": user,
+        "host": host,
+        "name": short_host,
+        "agent_port": str(agent_port),
+        "link": link,
+    }
+
+
+# --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
 
@@ -1220,7 +1250,7 @@ def build_parser() -> argparse.ArgumentParser:
         "command",
         nargs="?",
         default="serve",
-        choices=["serve", "status", "list", "start", "stop", "restart", "switch", "activate", "stop-all"],
+        choices=["serve", "status", "list", "start", "stop", "restart", "switch", "activate", "stop-all", "link"],
     )
     parser.add_argument("profiles", nargs="*", help="profile names for start/stop/restart/switch")
     return parser
@@ -1306,6 +1336,19 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "stop-all":
             service.stop_all()
             _print_json(service.action_response())
+            return 0
+        if args.command == "link":
+            info = build_link_code(configuration.port)
+            if args.json:
+                _print_json(info)
+            else:
+                print("Pairing code for Model Switchboard on your Mac:")
+                print()
+                print(f"  {info['link']}")
+                print()
+                print("Settings → Remote Gateways → Add Remote Gateway → paste it into")
+                print("the link-code field. Every field stays editable — fix the host or")
+                print("user there if this machine is reached differently from your Mac.")
             return 0
     except AgentError as error:
         sys.stderr.write(f"model-switchboard-agent: {error.message}\n")

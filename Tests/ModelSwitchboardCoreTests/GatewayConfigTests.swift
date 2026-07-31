@@ -6,7 +6,7 @@ import Testing
     let gateway = GatewayConfig(
         name: "DGX Spark",
         kind: .ssh,
-        sshUser: "aditya",
+        sshUser: "gpuadmin",
         sshHost: "spark.local",
         sshPort: 2222,
         remotePort: 8877,
@@ -53,12 +53,48 @@ import Testing
     #expect(GatewayContext.local.isLocal == true)
 }
 
+@Test func linkCodeParsesAgentOutputFormat() throws {
+    // Exact shape emitted by `model-switchboard-agent link` (see
+    // RemoteAgent/model_switchboard_agent.py build_link_code).
+    let config = try #require(GatewayLinkCode.parse(
+        "modelswitchboard-gateway://gpuadmin@spark.local?name=spark&agent_port=8877\n"
+    ))
+    #expect(config.kind == .ssh)
+    #expect(config.name == "spark")
+    #expect(config.sshUser == "gpuadmin")
+    #expect(config.sshHost == "spark.local")
+    #expect(config.sshPort == 22)
+    #expect(config.remotePort == 8877)
+}
+
+@Test func linkCodeDefaultsAndDecoding() throws {
+    let bare = try #require(GatewayLinkCode.parse("modelswitchboard-gateway://box-01"))
+    #expect(bare.name == "box-01")
+    #expect(bare.sshUser.isEmpty)
+    #expect(bare.remotePort == 8877)
+
+    let encoded = try #require(GatewayLinkCode.parse(
+        "modelswitchboard-gateway://gpu%20admin@10.0.0.9:2222?name=lab%20box&agent_port=9001"
+    ))
+    #expect(encoded.sshUser == "gpu admin")
+    #expect(encoded.name == "lab box")
+    #expect(encoded.sshPort == 2222)
+    #expect(encoded.remotePort == 9001)
+}
+
+@Test func linkCodeRejectsForeignStrings() {
+    #expect(GatewayLinkCode.parse("https://example.com") == nil)
+    #expect(GatewayLinkCode.parse("modelswitchboard-gateway://") == nil)
+    #expect(GatewayLinkCode.parse("not a link at all") == nil)
+    #expect(GatewayLinkCode.parse("") == nil)
+}
+
 @Test func endpointSummaryDescribesConnection() {
     let direct = GatewayConfig(name: "Lab", kind: .direct, baseURL: "http://10.0.0.9:8877")
     #expect(direct.endpointSummary == "http://10.0.0.9:8877")
 
-    let ssh = GatewayConfig(name: "Spark", kind: .ssh, sshUser: "aditya", sshHost: "spark.local")
-    #expect(ssh.endpointSummary == "ssh aditya@spark.local → 127.0.0.1:8877")
+    let ssh = GatewayConfig(name: "Spark", kind: .ssh, sshUser: "gpuadmin", sshHost: "spark.local")
+    #expect(ssh.endpointSummary == "ssh gpuadmin@spark.local → 127.0.0.1:8877")
 
     let customPort = GatewayConfig(name: "Spark", kind: .ssh, sshHost: "spark.local", sshPort: 2222)
     #expect(customPort.sshDestination == "spark.local")
