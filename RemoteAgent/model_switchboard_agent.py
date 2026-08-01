@@ -1057,6 +1057,9 @@ def parse_loose_env_assignments(file: Path) -> dict[str, str]:
 
 # Short-TTL inventory cache: (monotonic_ts, rows). Thread-safe for
 # ThreadingHTTPServer; concurrent callers may share a snapshot that lags ≤TTL.
+# list_listening_tcp always returns a caller-private shallow copy so handlers
+# cannot mutate cached rows. Misses fill under the lock (no stampede / DCL race
+# with clear_listening_tcp_cache mid-inventory).
 _listening_tcp_cache_lock = threading.Lock()
 _listening_tcp_cache: tuple[float, list[dict[str, Any]]] | None = None
 
@@ -1066,6 +1069,11 @@ def clear_listening_tcp_cache() -> None:
     global _listening_tcp_cache
     with _listening_tcp_cache_lock:
         _listening_tcp_cache = None
+
+
+def _copy_listening_tcp_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Caller-private copy of inventory rows (list + per-row dict)."""
+    return [dict(row) for row in rows]
 
 
 def list_listening_tcp() -> list[dict[str, Any]]:
@@ -1088,17 +1096,20 @@ def list_listening_tcp() -> list[dict[str, Any]]:
     Module-level cache (LISTENING_TCP_CACHE_TTL_SECONDS, default 75ms) so
     concurrent or back-to-back status/ports polls in the same process skip
     re-running inventory. Results may lag ≤TTL -- intentional for poll
-    coalescing.
+    coalescing. Each call returns a fresh list of dicts (safe under
+    ThreadingHTTPServer if a handler mutates its result).
     """
     global _listening_tcp_cache
     now = time.monotonic()
     with _listening_tcp_cache_lock:
         cached = _listening_tcp_cache
         if cached is not None and (now - cached[0]) < LISTENING_TCP_CACHE_TTL_SECONDS:
-            return cached[1]
+            return _copy_listening_tcp_rows(cached[1])
+        # Hold the lock across inventory so concurrent misses coalesce into one
+        # fill and clear_listening_tcp_cache cannot interleave mid-write.
         result = _list_listening_tcp_uncached()
         _listening_tcp_cache = (now, result)
-        return result
+        return _copy_listening_tcp_rows(result)
 
 
 # /proc/net/tcp{,6} connection state: TCP_LISTEN

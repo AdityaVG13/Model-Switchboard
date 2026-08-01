@@ -1193,12 +1193,27 @@ class ListListeningTcpTests(unittest.TestCase):
                         # Still well inside LISTENING_TCP_CACHE_TTL_SECONDS (75ms).
                         clock["t"] = 1000.0 + 0.05
                         second = agent.list_listening_tcp()
+                        self.assertEqual(first, second)
+                        # Caller-private copies: same content, not the cached list object.
+                        self.assertIsNot(first, second)
+                        self.assertIsNot(first[0], second[0])
+                        self.assertEqual(first[0]["port"], 8080)
+                        # Mutating a returned list/row must not poison the module cache.
+                        first.append(
+                            {
+                                "port": 9999,
+                                "pid": 1,
+                                "command": "x",
+                                "bind": "0.0.0.0",
+                            }
+                        )
+                        first[0]["port"] = 1
+                        third = agent.list_listening_tcp()
+                        self.assertEqual(len(third), 1)
+                        self.assertEqual(third[0]["port"], 8080)
 
         ss_calls = [c for c in run_mock.call_args_list if c[0][0][0] == "ss"]
         self.assertEqual(len(ss_calls), 1)
-        self.assertEqual(first, second)
-        self.assertIs(first, second)
-        self.assertEqual(first[0]["port"], 8080)
 
     def test_call_after_ttl_reinvokes_ss(self) -> None:
         """Past TTL the inventory is refreshed (ss runs again)."""
@@ -1229,6 +1244,79 @@ class ListListeningTcpTests(unittest.TestCase):
 
         ss_calls = [c for c in run_mock.call_args_list if c[0][0][0] == "ss"]
         self.assertEqual(len(ss_calls), 2)
+
+    def test_concurrent_list_listening_tcp_with_mock(self) -> None:
+        """Many threads: stable results, coalesced fill, mutation isolation."""
+        inventory = [
+            {
+                "port": 8080,
+                "pid": 4242,
+                "command": "python -m server",
+                "bind": "127.0.0.1",
+            }
+        ]
+        call_count = {"n": 0}
+        call_lock = threading.Lock()
+
+        def fake_uncached() -> list[dict]:
+            with call_lock:
+                call_count["n"] += 1
+            # Stretch the locked fill so concurrent waiters exercise the cache path.
+            time.sleep(0.02)
+            return [dict(inventory[0])]
+
+        n_threads = 16
+        barrier = threading.Barrier(n_threads)
+        errors: list[BaseException] = []
+        errors_lock = threading.Lock()
+
+        def worker() -> None:
+            try:
+                barrier.wait(timeout=5)
+                for _ in range(25):
+                    rows = agent.list_listening_tcp()
+                    if len(rows) != 1 or rows[0]["port"] != 8080:
+                        raise AssertionError(f"unexpected rows: {rows!r}")
+                    # Caller-private: clear must not affect other threads / cache.
+                    rows.clear()
+                    rows.append(
+                        {
+                            "port": 0,
+                            "pid": None,
+                            "command": None,
+                            "bind": "",
+                        }
+                    )
+            except BaseException as exc:  # noqa: BLE001 -- collect for main thread
+                with errors_lock:
+                    errors.append(exc)
+
+        with unittest.mock.patch.object(
+            agent, "_list_listening_tcp_uncached", side_effect=fake_uncached
+        ):
+            threads = [
+                threading.Thread(target=worker, name=f"ltcp-{i}")
+                for i in range(n_threads)
+            ]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=30)
+                self.assertFalse(thread.is_alive(), "worker thread hung")
+
+            self.assertEqual(errors, [])
+            # One coalesced fill under the lock (all calls within TTL).
+            self.assertEqual(call_count["n"], 1)
+            final = agent.list_listening_tcp()
+            self.assertEqual(len(final), 1)
+            self.assertEqual(final[0]["port"], 8080)
+            self.assertEqual(call_count["n"], 1)
+
+            # clear must drop cache so the next call refills.
+            agent.clear_listening_tcp_cache()
+            after_clear = agent.list_listening_tcp()
+            self.assertEqual(after_clear[0]["port"], 8080)
+            self.assertEqual(call_count["n"], 2)
 
 
 class ListeningInventoryOnceTests(unittest.TestCase):
