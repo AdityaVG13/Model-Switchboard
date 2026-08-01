@@ -827,8 +827,30 @@ def process_command(pid: int | None) -> str | None:
 
 
 def process_rss_mb(pid: int | None) -> float | None:
+    """Return resident set size in MB for *pid*, or None.
+
+    Linux: parse VmRSS from /proc/<pid>/status (kB) without spawning.
+    Other platforms, or missing /proc entry: fall back to `ps -o rss=`.
+    Rounding matches the historical `ps` path: one decimal place.
+    """
     if not pid:
         return None
+    # Prefer /proc on Linux -- avoids one `ps` subprocess per listener PID.
+    try:
+        status = Path(f"/proc/{pid}/status").read_text(encoding="utf-8")
+    except OSError:
+        status = ""
+    if status:
+        for line in status.splitlines():
+            if line.startswith("VmRSS:"):
+                parts = line.split()
+                if len(parts) >= 2:
+                    try:
+                        rss_kb = float(parts[1])
+                    except ValueError:
+                        break
+                    return round(rss_kb / 1024 * 10) / 10
+                break
     try:
         result = subprocess.run(
             ["ps", "-o", "rss=", "-p", str(pid)],

@@ -753,6 +753,55 @@ class ProcessCommandTests(unittest.TestCase):
         self.assertEqual(args[:3], ["ps", "-o", "command="])
 
 
+class ProcessRssMbTests(unittest.TestCase):
+    """process_rss_mb: Linux /proc status VmRSS first, ps fallback elsewhere."""
+
+    def test_process_rss_mb_rejects_missing_pid(self) -> None:
+        self.assertIsNone(agent.process_rss_mb(None))
+        self.assertIsNone(agent.process_rss_mb(0))
+
+    def test_process_rss_mb_self_nonnegative(self) -> None:
+        rss = agent.process_rss_mb(os.getpid())
+        self.assertIsNotNone(rss)
+        assert rss is not None
+        self.assertIsInstance(rss, float)
+        self.assertGreaterEqual(rss, 0.0)
+
+    def test_process_rss_mb_prefers_proc_status_without_ps(self) -> None:
+        """On Linux path, VmRSS from /proc is authoritative; no ps."""
+        fake = "Name:\tpython\nVmRSS:\t  2048 kB\nVmSize:\t  4096 kB\n"
+        with unittest.mock.patch.object(agent, "Path") as mock_path:
+            mock_path.return_value.read_text.return_value = fake
+            with unittest.mock.patch.object(agent.subprocess, "run") as run_mock:
+                rss = agent.process_rss_mb(4242)
+        mock_path.assert_called_with("/proc/4242/status")
+        # 2048 kB / 1024 = 2.0 MB; same one-decimal rounding as ps path.
+        self.assertEqual(rss, 2.0)
+        run_mock.assert_not_called()
+
+    def test_process_rss_mb_rounds_like_ps_path(self) -> None:
+        # 1536 kB -> 1.5 MB; 100 kB -> 0.1 MB after one-decimal rounding.
+        fake = "VmRSS:\t1536 kB\n"
+        with unittest.mock.patch.object(agent, "Path") as mock_path:
+            mock_path.return_value.read_text.return_value = fake
+            self.assertEqual(agent.process_rss_mb(7), 1.5)
+        fake = "VmRSS:\t100 kB\n"
+        with unittest.mock.patch.object(agent, "Path") as mock_path:
+            mock_path.return_value.read_text.return_value = fake
+            self.assertEqual(agent.process_rss_mb(7), 0.1)
+
+    def test_process_rss_mb_falls_back_to_ps_when_proc_missing(self) -> None:
+        with unittest.mock.patch.object(agent, "Path") as mock_path:
+            mock_path.return_value.read_text.side_effect = OSError("no /proc")
+            with unittest.mock.patch.object(agent.subprocess, "run") as run_mock:
+                run_mock.return_value = unittest.mock.Mock(stdout="  3072\n")
+                rss = agent.process_rss_mb(99)
+        self.assertEqual(rss, 3.0)
+        run_mock.assert_called_once()
+        args = run_mock.call_args[0][0]
+        self.assertEqual(args[:3], ["ps", "-o", "rss="])
+
+
 class ConfigurationTests(unittest.TestCase):
     def test_non_loopback_bind_requires_unsafe_flag_and_token(self) -> None:
         with self.assertRaises(agent.InvalidConfigurationError):
