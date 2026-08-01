@@ -19,6 +19,7 @@ import textwrap
 import threading
 import time
 import unittest
+import unittest.mock
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -703,6 +704,53 @@ class ProcessLifecycleTests(unittest.TestCase):
             self.assertEqual(service._supervised, set())
             status = service.status(service.profiles.profile("ghost"))
             self.assertFalse(status["running"])
+
+
+class ProcessCommandTests(unittest.TestCase):
+    """process_command: Linux /proc cmdline first, ps fallback elsewhere."""
+
+    def test_process_command_rejects_missing_pid(self) -> None:
+        self.assertIsNone(agent.process_command(None))
+        self.assertIsNone(agent.process_command(0))
+
+    def test_process_command_self_nonempty(self) -> None:
+        cmd = agent.process_command(os.getpid())
+        self.assertIsNotNone(cmd)
+        assert cmd is not None
+        self.assertTrue(cmd.strip())
+        # Content varies (ps vs /proc); only require a usable command string.
+        lowered = cmd.lower()
+        self.assertTrue(
+            "python" in lowered
+            or "unittest" in lowered
+            or Path(sys.executable).name.lower() in lowered
+            or sys.executable in cmd,
+            msg=f"unexpected self cmdline: {cmd!r}",
+        )
+
+    def test_process_command_prefers_proc_cmdline_without_ps(self) -> None:
+        """On Linux path, NUL-separated /proc cmdline is authoritative; no ps."""
+        fake = b"python\x00-m\x00uvicorn\x00app:main\x00"
+        with unittest.mock.patch.object(agent, "Path") as mock_path:
+            mock_path.return_value.read_bytes.return_value = fake
+            with unittest.mock.patch.object(agent.subprocess, "run") as run_mock:
+                cmd = agent.process_command(4242)
+        mock_path.assert_called_with("/proc/4242/cmdline")
+        self.assertEqual(cmd, "python -m uvicorn app:main")
+        run_mock.assert_not_called()
+
+    def test_process_command_falls_back_to_ps_when_proc_missing(self) -> None:
+        with unittest.mock.patch.object(agent, "Path") as mock_path:
+            mock_path.return_value.read_bytes.side_effect = OSError("no /proc")
+            with unittest.mock.patch.object(agent.subprocess, "run") as run_mock:
+                run_mock.return_value = unittest.mock.Mock(
+                    stdout="  /usr/bin/python3 -c pass\n"
+                )
+                cmd = agent.process_command(99)
+        self.assertEqual(cmd, "/usr/bin/python3 -c pass")
+        run_mock.assert_called_once()
+        args = run_mock.call_args[0][0]
+        self.assertEqual(args[:3], ["ps", "-o", "command="])
 
 
 class ConfigurationTests(unittest.TestCase):

@@ -799,8 +799,22 @@ def terminate_process_tree(
 
 
 def process_command(pid: int | None) -> str | None:
+    """Return the process command line for *pid*, or None.
+
+    Linux: read /proc/<pid>/cmdline (NUL-separated → spaces) without spawning.
+    Other platforms, or empty/missing /proc entry: fall back to `ps -o command=`.
+    """
     if not pid:
         return None
+    # Prefer /proc on Linux -- avoids one `ps` subprocess per listener PID.
+    try:
+        raw = Path(f"/proc/{pid}/cmdline").read_bytes()
+    except OSError:
+        raw = b""
+    if raw:
+        command = raw.replace(b"\x00", b" ").decode("utf-8", errors="replace").strip()
+        if command:
+            return command
     try:
         result = subprocess.run(
             ["ps", "-o", "command=", "-p", str(pid)],
