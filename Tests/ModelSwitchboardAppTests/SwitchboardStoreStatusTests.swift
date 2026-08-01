@@ -39,7 +39,7 @@ private func makeStore(
 @Test func staleRunningStateIsHiddenFromLiveCounts() {
     let store = makeStore()
     let now = Date(timeIntervalSince1970: 200)
-    let staleDate = now.addingTimeInterval(-60)
+    let staleDate = now.addingTimeInterval(-901)
     let status = ModelFixtures.profileStatus()
 
     store.statuses = [status]

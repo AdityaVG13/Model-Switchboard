@@ -29,7 +29,7 @@ extension MenuBarContentView {
                     Spacer()
                 }
             }
-            .padding(EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14))
+            .padding(EdgeInsets(top: 12, leading: DashboardChromeMetrics.inspectorChromeInset(), bottom: 12, trailing: DashboardChromeMetrics.inspectorChromeInset()))
             panelDivider
 
             inspectorView(panel)
@@ -37,9 +37,9 @@ extension MenuBarContentView {
         }
         .frame(width: inspectorPanelWidth, height: panelHeight, alignment: .topLeading)
         .background(theme.panelBg)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: DashboardChromeMetrics.continuousCornerRadius, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: DashboardChromeMetrics.continuousCornerRadius, style: .continuous)
                 .stroke(theme.panelBorder, lineWidth: 1)
         }
         .preferredColorScheme(themePreference.colorScheme)

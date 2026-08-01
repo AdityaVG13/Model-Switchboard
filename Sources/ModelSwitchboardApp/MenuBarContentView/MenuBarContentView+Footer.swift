@@ -72,8 +72,8 @@ extension MenuBarContentView {
         }
         .padding(.top, 8)
         .padding(.bottom, 10)
-        .padding(.leading, 14)
-        .padding(.trailing, 14)
+        .padding(.leading, DashboardChromeMetrics.continuousCornerSafeInset)
+        .padding(.trailing, DashboardChromeMetrics.footerTrailingInset())
     }
 
     private var stopButtonTitle: String {
@@ -92,11 +92,11 @@ extension MenuBarContentView {
 
     /// True when any gateway (local or remote) still has a running process.
     var hasAnythingToStop: Bool {
-        if hub.isStopEverythingBusy { return true }
-        return hub.allStores.contains { store in
-            store.statuses.contains(where: \.running)
-                || !store.pendingProfileActions.isEmpty
-        }
+        DashboardChromeMetrics.canStopAnything(
+            isBusy: hub.isStopEverythingBusy,
+            storesHaveRunning: hub.allStores.contains { $0.statuses.contains(where: \.running) },
+            storesHavePending: hub.allStores.contains { !$0.pendingProfileActions.isEmpty }
+        )
     }
 
     var syncableIntegrations: [ControllerIntegration] {
@@ -139,7 +139,11 @@ extension MenuBarContentView {
                 .foregroundStyle(theme.faint)
                 // Square hit target keeps the glyph centered away from the
                 // continuous corner clip at the panel's bottom-right.
-                .frame(width: 26, height: 26, alignment: .center)
+                .frame(
+                    width: DashboardChromeMetrics.footerIconHitSize,
+                    height: DashboardChromeMetrics.footerIconHitSize,
+                    alignment: .center
+                )
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

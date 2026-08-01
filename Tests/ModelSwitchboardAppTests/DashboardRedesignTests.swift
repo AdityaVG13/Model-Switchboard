@@ -67,7 +67,7 @@ import ModelSwitchboardTestSupport
     let status = ModelFixtures.profileStatus()
 
     store.statuses = [status]
-    store.lastUpdated = now.addingTimeInterval(-60)
+    store.lastUpdated = now.addingTimeInterval(-901)
 
     #expect(MenuBarContentView.isDisplayedRunning(status, in: store, relativeTo: now) == false)
 }

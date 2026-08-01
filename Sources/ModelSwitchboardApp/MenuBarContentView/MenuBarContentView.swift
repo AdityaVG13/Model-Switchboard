@@ -71,10 +71,10 @@ struct MenuBarContentView: View {
 
     @Environment(\.colorScheme) var systemColorScheme
 
-    let minMainPanelWidth: Double = 400
-    let maxMainPanelWidth: Double = 620
-    let inspectorPanelWidth: CGFloat = 372
-    let panelHeight: CGFloat = 620
+    var minMainPanelWidth: Double { Double(DashboardChromeMetrics.minMainPanelWidth) }
+    var maxMainPanelWidth: Double { Double(DashboardChromeMetrics.maxMainPanelWidth) }
+    var inspectorPanelWidth: CGFloat { DashboardChromeMetrics.inspectorPanelWidth }
+    var panelHeight: CGFloat { DashboardChromeMetrics.panelHeight }
     let panelGap: CGFloat = 10
     let inspectorAnimation = Animation.easeInOut(duration: 0.2)
 

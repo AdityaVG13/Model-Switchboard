@@ -56,7 +56,7 @@ extension MenuBarContentView {
                 theme: theme
             )
         }
-        .padding(EdgeInsets(top: 14, leading: 16, bottom: 10, trailing: 16))
+        .padding(EdgeInsets(top: 14, leading: DashboardChromeMetrics.continuousCornerSafeInset + 2, bottom: 10, trailing: DashboardChromeMetrics.continuousCornerSafeInset + 2))
     }
 
     var utilizationGrid: some View {
