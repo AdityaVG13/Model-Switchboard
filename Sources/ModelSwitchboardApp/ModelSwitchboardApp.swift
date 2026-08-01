@@ -16,6 +16,7 @@ struct ModelSwitchboardApp: App {
     @StateObject private var launchAtLoginManager = LaunchAtLoginManager.shared
     @State private var isMenuPresented = false
     @State private var statusItem: NSStatusItem?
+    @State private var statusItemClickGate = StatusItemClickGate()
     private let features = AppFeatures.current
 
     init() {
@@ -60,7 +61,8 @@ struct ModelSwitchboardApp: App {
                 },
                 updateMenuBarHelp: { helpText in
                     statusItem?.button?.toolTip = helpText
-                }
+                },
+                isMenuPresented: isMenuPresented
             )
                 .onAppear {
                     if store.controllerBaseURL != controllerBaseURL {
@@ -124,6 +126,14 @@ struct ModelSwitchboardApp: App {
             // Let SwiftUI own button contents; clearing title / forcing imageOnly
             // clips the ready-count onto neighboring menu bar items.
             item.button?.setAccessibilityLabel(features.appDisplayName)
+            // Rate-limit spam clicks on the menu bar icon (black-flash thrash).
+            statusItemClickGate.attach(to: item)
+        }
+        .onChange(of: isMenuPresented) { _, presented in
+            // Paint host window as soon as presentation flips on — before content settles.
+            if presented, let window = MenuBarExtraWindowBackdrop.menuBarExtraWindow(for: statusItem) {
+                MenuBarExtraWindowBackdrop.apply(to: window)
+            }
         }
         .menuBarExtraStyle(.window)
     }
