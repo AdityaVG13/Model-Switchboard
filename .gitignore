@@ -84,3 +84,6 @@ refactor/artifacts/
 # macOS noise
 .DS_Store
 **/.DS_Store
+
+# Local profiling artifacts (profiling-software-performance skill)
+tests/artifacts/
