@@ -46,11 +46,11 @@ There are three layers:
 
 The app only needs a controller URL. The controller discovers profiles, launches runtimes, and reports health.
 
-This repo includes one generic reference implementation under `Controller/`. You can use it directly or replace it with your own backend that exposes the same HTTP contract.
+This repo includes one generic reference implementation under `Controller/`. Use it directly, or replace it with your own backend that exposes the same HTTP contract.
 
 ## One central folder
 
-A practical adapter layout is:
+Adapter layout:
 
 - `<adapter-root>/model-profiles`
 
@@ -84,7 +84,7 @@ Typical fields:
 - `SERVER_MODEL_ID`
 
 ### `mlx`
-Best when you have an MLX-native converted model and want very strong Apple-local throughput.
+Best when you have an MLX-native converted model and want strong Apple-local throughput.
 
 Typical fields:
 
@@ -122,7 +122,7 @@ Typical fields:
 ### Universal launchers
 Best when the model is owned by another runtime, desktop app, daemon, or wrapper.
 
-Model Switchboard now uses three launch modes:
+Model Switchboard uses three launch modes:
 
 - `adapter`: known runtimes where the controller builds the command (`llama.cpp`, `mlx`, `rvllm-mlx`, `vllm-mlx`, `ollama`, `vllm`, `sglang`, `tgi`, `llama-cpp-python`).
 - `command`: profile-owned `START_COMMAND`, optional `STOP_COMMAND`, and readiness.
@@ -191,7 +191,7 @@ Supported health-check modes:
   - generic HTTP readiness
   - considers the profile ready when the configured URL returns success
 - `disabled`
-  - only use this when you truly cannot probe readiness
+  - only use this when you cannot probe readiness
   - process state may still be visible, but endpoint health is not verified
 
 The UI is launcher-agnostic as long as each profile defines startup and readiness checks.
@@ -204,7 +204,7 @@ For Apple Silicon local inference, common stacks are:
 - `MLX` / `mlx_lm.server`
 - `rvllm-mlx`
 
-Other tools usually fit into one of these buckets:
+Other tools fit into one of these buckets:
 
 - `Ollama`
   - convenience packaging and model management around a local runtime
@@ -215,7 +215,7 @@ Other tools usually fit into one of these buckets:
 - `vLLM`
   - strong on CUDA/Linux, not the default serious choice on Apple Silicon laptops
 
-A high-performance macOS stack is usually:
+A high-performance macOS stack:
 
 - `llama.cpp` for GGUF
 - `MLX` for MLX-native models
@@ -223,7 +223,7 @@ A high-performance macOS stack is usually:
 
 ## Why JSON is the right next step
 
-JSON is usually easier to operate than raw env files for shared setups.
+JSON is easier to operate than raw env files for shared setups.
 
 Reasons:
 
@@ -253,7 +253,7 @@ Design choices that keep the app light:
 - the menu bar hover text is derived from the same lightweight controller snapshot the shell uses
 - the widget refreshes on a simple timeline instead of running its own always-on helper
 
-Most memory/thermal load should remain in runtimes, not the operator UI.
+Most memory/thermal load stays in runtimes, not the operator UI.
 
 ---
 
@@ -279,7 +279,7 @@ Any backend that returns the same profile-status JSON shape and supports these l
 ## Remote gateways
 
 Remote gateways put model servers on **other machines** into the same panel:
-each gateway is just another controller endpoint speaking the contract above.
+each gateway is another controller endpoint speaking the contract above.
 The repo ships a reference backend for Linux/Unix hosts, a single stdlib-only
 Python file, the **remote agent** ([RemoteAgent/README.md](RemoteAgent/README.md)).
 
@@ -327,7 +327,7 @@ The moving parts:
      trusted network. Mirroring the local controller's rules, the agent
      refuses non-loopback binds without `--unsafe-bind` **and** a ≥16-byte
      bearer token; the token lives in your macOS keychain, per gateway.
-   - SSH gateways work over Tailscale too; just use the tailnet hostname as
+   - SSH gateways work over Tailscale too; use the tailnet hostname as
      the SSH host (pairs well with Tailscale SSH, where no local keys are
      needed).
 
@@ -426,7 +426,7 @@ The release workflow signs, notarizes, verifies, and uploads both editions when 
 - a `v*` tag is pushed
 - a commit on `main` changes `VERSION`
 
-That means the normal maintainer flow can be:
+Normal maintainer flow:
 
 ```bash
 python3 Scripts/bump-version.py patch   # or minor / major / x.y.z
@@ -502,7 +502,7 @@ Run `MSW_VERIFY_UI=0 ./Scripts/verify-installed-app.sh` to execute lifecycle/API
 ## Known limitations
 
 **Desktop / Notification Center widget requires a Developer-ID-signed build.**
-The widget target (`ModelSwitchboardWidget`) is real, embedded into the app bundle at `Contents/PlugIns/ModelSwitchboardWidget.appex`, and wired through `project.yml`. However, local installs from `./Scripts/install.sh` ad-hoc sign the bundle (`codesign --sign -`), and ad-hoc-signed widget extensions are not reliably registered by WidgetKit's gallery. The widget begins to register once the app is installed from a Developer ID-signed, notarized DMG (i.e. the GitHub Release build). If you want to verify on a local build, try:
+The widget target (`ModelSwitchboardWidget`) is real, embedded into the app bundle at `Contents/PlugIns/ModelSwitchboardWidget.appex`, and wired through `project.yml`. Local installs from `./Scripts/install.sh` ad-hoc sign the bundle (`codesign --sign -`), and ad-hoc-signed widget extensions are not reliably registered by WidgetKit's gallery. The widget begins to register once the app is installed from a Developer ID-signed, notarized DMG (i.e. the GitHub Release build). To verify on a local build:
 
 ```bash
 pluginkit -a "$HOME/Applications/Model Switchboard.app/Contents/PlugIns/ModelSwitchboardWidget.appex"
@@ -512,7 +512,7 @@ open -a "Model Switchboard"
 
 Then wait ~60 seconds and check the Widget gallery. Results vary across macOS versions.
 
-**Widget note.** WidgetKit distribution follows the host app: users install and launch the containing app once before the widget appears in the gallery, once registration actually succeeds.
+**Widget note.** WidgetKit distribution follows the host app: users install and launch the containing app once before the widget appears in the gallery, once registration succeeds.
 
 ---
 
