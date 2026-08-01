@@ -802,6 +802,84 @@ class ProcessRssMbTests(unittest.TestCase):
         self.assertEqual(args[:3], ["ps", "-o", "rss="])
 
 
+class ListListeningTcpTests(unittest.TestCase):
+    """list_listening_tcp: one ss/lsof parse; process_command once per unique pid."""
+
+    def test_ss_path_resolves_cmdline_once_per_unique_pid(self) -> None:
+        # Same PID on two ports (and a third line without pid): one process_command.
+        ss_out = "\n".join(
+            [
+                "LISTEN 0 128 127.0.0.1:8080 0.0.0.0:* users:((\"py\",pid=4242,fd=3))",
+                "LISTEN 0 128 127.0.0.1:8081 0.0.0.0:* users:((\"py\",pid=4242,fd=4))",
+                "LISTEN 0 128 0.0.0.0:22 0.0.0.0:*",
+                "",
+            ]
+        )
+
+        def run_side_effect(cmd, *args, **kwargs):  # type: ignore[no-untyped-def]
+            if cmd and cmd[0] == "ss":
+                return unittest.mock.Mock(stdout=ss_out, returncode=0)
+            return unittest.mock.Mock(stdout="", returncode=1)
+
+        with unittest.mock.patch.object(
+            agent.subprocess, "run", side_effect=run_side_effect
+        ) as run_mock:
+            with unittest.mock.patch.object(
+                agent, "process_command", return_value="python -m server"
+            ) as cmd_mock:
+                rows = agent.list_listening_tcp()
+
+        # ss once; lsof must not run when ss yields listeners.
+        ss_calls = [c for c in run_mock.call_args_list if c[0][0][0] == "ss"]
+        lsof_calls = [c for c in run_mock.call_args_list if c[0][0][0] == "lsof"]
+        self.assertEqual(len(ss_calls), 1)
+        self.assertEqual(lsof_calls, [])
+        cmd_mock.assert_called_once_with(4242)
+
+        by_port = {row["port"]: row for row in rows}
+        self.assertEqual(set(by_port), {8080, 8081, 22})
+        self.assertEqual(by_port[8080]["pid"], 4242)
+        self.assertEqual(by_port[8080]["command"], "python -m server")
+        self.assertEqual(by_port[8081]["pid"], 4242)
+        self.assertEqual(by_port[8081]["command"], "python -m server")
+        self.assertIsNone(by_port[22]["pid"])
+        self.assertIsNone(by_port[22]["command"])
+        # Schema keys unchanged.
+        for row in rows:
+            self.assertEqual(set(row), {"port", "pid", "command", "bind"})
+
+    def test_lsof_fallback_when_ss_empty_dedupes_pid(self) -> None:
+        lsof_out = "\n".join(
+            [
+                "COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME",
+                "python  99 me 3u IPv4 1 0t0 TCP 127.0.0.1:9000 (LISTEN)",
+                "python  99 me 4u IPv6 2 0t0 TCP [::1]:9001 (LISTEN)",
+                "",
+            ]
+        )
+
+        def run_side_effect(cmd, *args, **kwargs):  # type: ignore[no-untyped-def]
+            if cmd and cmd[0] == "ss":
+                return unittest.mock.Mock(stdout="", returncode=0)
+            if cmd and cmd[0] == "lsof":
+                return unittest.mock.Mock(stdout=lsof_out, returncode=0)
+            return unittest.mock.Mock(stdout="", returncode=1)
+
+        with unittest.mock.patch.object(
+            agent.subprocess, "run", side_effect=run_side_effect
+        ):
+            with unittest.mock.patch.object(
+                agent, "process_command", return_value="/usr/bin/python3 app"
+            ) as cmd_mock:
+                rows = agent.list_listening_tcp()
+
+        cmd_mock.assert_called_once_with(99)
+        by_port = {row["port"]: row for row in rows}
+        self.assertEqual(set(by_port), {9000, 9001})
+        self.assertEqual(by_port[9000]["command"], "/usr/bin/python3 app")
+        self.assertEqual(by_port[9001]["command"], "/usr/bin/python3 app")
+
+
 class ConfigurationTests(unittest.TestCase):
     def test_non_loopback_bind_requires_unsafe_flag_and_token(self) -> None:
         with self.assertRaises(agent.InvalidConfigurationError):

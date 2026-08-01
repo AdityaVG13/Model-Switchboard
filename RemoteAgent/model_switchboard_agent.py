@@ -974,8 +974,20 @@ def list_listening_tcp() -> list[dict[str, Any]]:
 
     Mirrors the Ports.app idea: port + owning process + command line. Cross
     platform via `ss` (Linux) then `lsof` (macOS/Linux).
+
+    One `ss` (or, if empty, one `lsof`) parse. Command lines are resolved once
+    per unique PID via process_command -- no cross-request cache.
     """
     by_port: dict[int, dict[str, Any]] = {}
+    # Same PID often owns several binds (IPv4+IPv6, multi-port). Resolve once.
+    cmd_by_pid: dict[int, str | None] = {}
+
+    def cmdline(pid: int | None) -> str | None:
+        if not pid:
+            return None
+        if pid not in cmd_by_pid:
+            cmd_by_pid[pid] = process_command(pid)
+        return cmd_by_pid[pid]
 
     def note(port: int, pid: int | None, command: str | None, bind: str) -> None:
         if port <= 0 or port > 65535:
@@ -1019,12 +1031,10 @@ def list_listening_tcp() -> list[dict[str, Any]]:
                 continue
             bind = local.rsplit(":", 1)[0].strip("[]") if ":" in local else local
             pid = None
-            command = None
             pid_match = re.search(r"pid=(\d+)", line)
             if pid_match:
                 pid = int(pid_match.group(1))
-                command = process_command(pid)
-            note(port, pid, command, bind)
+            note(port, pid, cmdline(pid), bind)
     except (OSError, subprocess.TimeoutExpired):
         pass
 
@@ -1050,8 +1060,7 @@ def list_listening_tcp() -> list[dict[str, Any]]:
                 if port is None:
                     continue
                 bind = name.rsplit(":", 1)[0].strip("[]") if ":" in name else name
-                command = process_command(pid) if pid else None
-                note(port, pid, command, bind)
+                note(port, pid, cmdline(pid), bind)
         except (OSError, subprocess.TimeoutExpired):
             pass
 
