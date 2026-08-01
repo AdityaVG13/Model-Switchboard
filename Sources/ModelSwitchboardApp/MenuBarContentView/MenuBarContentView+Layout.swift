@@ -124,5 +124,20 @@ extension MenuBarContentView {
         window.showsResizeIndicator = false
         window.minSize = NSSize(width: minMainPanelWidth, height: panelHeight)
         window.maxSize = NSSize(width: maxMainPanelWidth, height: panelHeight)
+        // MenuBarExtra windows are transparent by default. During heavy SwiftUI
+        // invalidations (spam refresh / status apply) the content tree can blank
+        // for a frame and the desktop shows through as a black flash. Paint a
+        // solid backdrop that matches the dashboard panel.
+        window.isOpaque = true
+        window.backgroundColor = Self.hostWindowBackdropColor(for: themePreference.colorScheme ?? systemColorScheme)
+    }
+
+    private static func hostWindowBackdropColor(for scheme: ColorScheme) -> NSColor {
+        switch scheme {
+        case .light:
+            return NSColor(srgbRed: 246 / 255, green: 246 / 255, blue: 248 / 255, alpha: 1)
+        default:
+            return NSColor(srgbRed: 26 / 255, green: 26 / 255, blue: 29 / 255, alpha: 1)
+        }
     }
 }

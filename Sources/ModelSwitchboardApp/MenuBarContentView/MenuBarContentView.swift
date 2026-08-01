@@ -170,8 +170,16 @@ struct MenuBarContentView: View {
             synchronizeInspectorWindow()
         }
         .animation(inspectorAnimation, value: inspectorCoordinator.openPanel)
+        // Scope snappy animations to pending action chrome only — do not animate
+        // full status list replacements (causes black flicker in MenuBarExtra).
         .animation(.snappy(duration: 0.18), value: store.pendingProfileActions)
         .animation(.snappy(duration: 0.18), value: store.pendingGlobalActions)
+        .transaction(value: store.statuses.count) { transaction in
+            // Status payload apply should be instant; never crossfade the panel.
+            if transaction.animation != nil {
+                transaction.animation = nil
+            }
+        }
         .preferredColorScheme(themePreference.colorScheme)
         .onChange(of: sidePreferenceRaw) { _, _ in
             synchronizeInspectorWindow()
