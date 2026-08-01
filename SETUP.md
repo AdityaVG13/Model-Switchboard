@@ -1,4 +1,4 @@
-# Model Switchboard — Setup & Reference
+# Model Switchboard (Setup & Reference)
 
 Everything you need beyond the README's quickstart. This is also what the app's **Help** button opens.
 
@@ -280,12 +280,12 @@ Any backend that returns the same profile-status JSON shape and supports these l
 
 Remote gateways put model servers on **other machines** into the same panel:
 each gateway is just another controller endpoint speaking the contract above.
-The repo ships a reference backend for Linux/Unix hosts — a single stdlib-only
+The repo ships a reference backend for Linux/Unix hosts, a single stdlib-only
 Python file, the **remote agent** ([RemoteAgent/README.md](RemoteAgent/README.md)).
 
 The moving parts:
 
-1. **On the remote host**: nothing to download — the app bundles the agent
+1. **On the remote host**: nothing to download; the app bundles the agent
    and **Install Agent on Host** (in the gateway editor) pushes it over SSH
    and sets up a systemd user service under
    `~/.local/share/model-switchboard-agent/`. (Manual alternatives: a
@@ -294,7 +294,7 @@ The moving parts:
    above. Default folder is the visible **`~/model-profiles/`** (agent state
    stays under `~/.local/share/…`). `model-switchboard-agent link` scans your
    home for existing launch `.env` files (e.g. AI-authored `model.env`), asks
-   you to confirm or paste another path, and persists it — or pass
+   you to confirm or paste another path, and persists it, or pass
    `--profiles-dir` / `MODEL_SWITCHBOARD_PROFILES_DIR`. Launch templates cover
    `vllm`, `llama.cpp` (`llama-server`), `sglang`, and `tgi`; anything else
    works through `START_COMMAND`. The Mac controller accepts the same
@@ -303,11 +303,11 @@ The moving parts:
 2. **On the Mac**: Settings → **Remote Gateways** → *Add Remote Gateway*.
    The installer (and `model-switchboard-agent link`) prints a
    `modelswitchboard-gateway://…` pairing code; paste it into the form to
-   prefill user/host/ports. It only encodes those fields — pairing is fully
+   prefill user/host/ports. It only encodes those fields; pairing is fully
    local, no service involved.
    - **SSH tunnel** (recommended): the agent stays loopback-only and the app
      maintains `ssh -N -L` to it using your SSH config, keys, and agent
-     (`BatchMode=yes`; the app never handles passwords — connect once from
+     (`BatchMode=yes`; the app never handles passwords; connect once from
      Terminal first so the host key is trusted). While a remote model runs,
      its port is forwarded to the same local port over the tunnel's
      ControlMaster socket, so `Copy Endpoint URL` hands you a URL that works
@@ -315,7 +315,7 @@ The moving parts:
      (missing agent key, changed host key, unreachable host) in the panel.
    - **Tailscale**: install the agent with `--tailscale` (or run
      `serve --tailscale --auth-token-file …`) and it binds only the host's
-     tailnet address — WireGuard-encrypted, invisible to the open LAN. A
+     tailnet address (WireGuard-encrypted, invisible to the open LAN). A
      **bearer token is required by default** (installer generates one and
      prints it; paste it into the gateway token field on the Mac). Opt out
      only on a personal tailnet with `--allow-unauthenticated`. The pairing
@@ -327,7 +327,7 @@ The moving parts:
      trusted network. Mirroring the local controller's rules, the agent
      refuses non-loopback binds without `--unsafe-bind` **and** a ≥16-byte
      bearer token; the token lives in your macOS keychain, per gateway.
-   - SSH gateways work over Tailscale too — just use the tailnet hostname as
+   - SSH gateways work over Tailscale too; just use the tailnet hostname as
      the SSH host (pairs well with Tailscale SSH, where no local keys are
      needed).
 
@@ -362,11 +362,11 @@ swift test
 # Iterative dev (launches a debug build)
 ./Scripts/run-dev.sh
 
-# Release build — produces dist/Model Switchboard.app
+# Release build (produces dist/Model Switchboard.app)
 ./Scripts/build-app.sh
 APP_VARIANT=plus ./Scripts/build-app.sh   # Plus edition
 
-# DMG — produces dist/Model-Switchboard-<version>.dmg
+# DMG (produces dist/Model-Switchboard-<version>.dmg)
 ./Scripts/build-dmg.sh
 APP_VARIANT=plus ./Scripts/build-dmg.sh   # Plus DMG
 
@@ -477,7 +477,7 @@ If Finder shows `.app` extensions, that is the macOS `AppleShowAllExtensions` Fi
 ## Troubleshooting
 
 **The app doesn't appear in Spotlight or Raycast.**
-Run `./Scripts/install.sh` — it registers the bundle with Launch Services and forces a Spotlight import. If the old `ModelSwitchboard.app` name is still cached, the installer removes it automatically.
+Run `./Scripts/install.sh`; it registers the bundle with Launch Services and forces a Spotlight import. If the old `ModelSwitchboard.app` name is still cached, the installer removes it automatically.
 
 **A profile shows "Not Running" even though I can `curl` the endpoint.**
 The default health check for `llama.cpp` and `mlx` profiles probes `/v1/models` and verifies the expected model ID is present. If your server returns a different id, set `SERVER_MODEL_ID` in the profile to match, or switch the profile to `HEALTHCHECK_MODE=http-200` for a looser check.
@@ -486,7 +486,7 @@ The default health check for `llama.cpp` and `mlx` profiles probes `/v1/models` 
 Each runtime is tracked by a managed PID file. If you started the process outside Model Switchboard (e.g. a terminal `llama-server` invocation), the controller doesn't own that PID. Stop the outside process manually, then use `Activate`.
 
 **The widget doesn't show up in the widget gallery.**
-See [Known limitations](#known-limitations) — the widget extension is bundled correctly but only registers reliably with a Developer-ID-signed build.
+See [Known limitations](#known-limitations); the widget extension is bundled correctly but only registers reliably with a Developer-ID-signed build.
 
 **Benchmarks panel is empty or cooldown won't clear.**
 The Plus panel reads `Controller/benchmark-results/latest.json`. Delete it to reset the panel, or run `Benchmark All` once to regenerate.
@@ -512,7 +512,7 @@ open -a "Model Switchboard"
 
 Then wait ~60 seconds and check the Widget gallery. Results vary across macOS versions.
 
-**Widget note.** WidgetKit distribution follows the host app: users install and launch the containing app once before the widget appears in the gallery — once registration actually succeeds.
+**Widget note.** WidgetKit distribution follows the host app: users install and launch the containing app once before the widget appears in the gallery, once registration actually succeeds.
 
 ---
 
