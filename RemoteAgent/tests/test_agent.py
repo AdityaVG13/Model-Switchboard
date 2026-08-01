@@ -1254,6 +1254,132 @@ class ListeningInventoryOnceTests(unittest.TestCase):
             self.assertEqual(profile.endpoint_port, "9666")
 
 
+
+class InventoryPortLookupTests(unittest.TestCase):
+    """status_payload uses shared inventory instead of N× port_is_listening/lsof."""
+
+    def test_port_listening_from_inventory(self) -> None:
+        rows = [
+            {"port": 8080, "pid": 11, "command": "x", "bind": "127.0.0.1"},
+            {"port": 9000, "pid": None, "command": None, "bind": "*"},
+        ]
+        self.assertTrue(agent.port_listening_from_inventory(8080, rows))
+        self.assertTrue(agent.port_listening_from_inventory("9000", rows))
+        self.assertFalse(agent.port_listening_from_inventory(1, rows))
+        self.assertFalse(agent.port_listening_from_inventory("bad", rows))
+
+    def test_listener_pid_from_inventory(self) -> None:
+        rows = [
+            {"port": 8080, "pid": 42, "command": "x", "bind": "127.0.0.1"},
+            {"port": 9000, "pid": None, "command": None, "bind": "*"},
+        ]
+        self.assertEqual(agent.listener_pid_from_inventory("8080", rows), 42)
+        self.assertIsNone(agent.listener_pid_from_inventory(9000, rows))
+        self.assertIsNone(agent.listener_pid_from_inventory(1, rows))
+
+    def _service(self, root: Path) -> agent.AgentService:
+        profiles = root / "model-profiles"
+        profiles.mkdir(parents=True, exist_ok=True)
+        (profiles / "demo.env").write_text(
+            "REQUEST_MODEL=demo\nPORT=8080\nHOST=127.0.0.1\n"
+            "HEALTHCHECK_MODE=disabled\n",
+            encoding="utf-8",
+        )
+        configuration = agent.AgentConfiguration(
+            root=root,
+            host="127.0.0.1",
+            port=18880,
+            profiles_dir=profiles,
+        )
+        return agent.AgentService(configuration)
+
+    def test_status_payload_skips_live_port_probes_when_inventory_known(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            service = self._service(Path(tmp))
+            fake = [
+                {
+                    "port": 8080,
+                    "pid": 4242,
+                    "command": "python -m vllm.entrypoints.openai.api_server --port 8080",
+                    "bind": "127.0.0.1",
+                }
+            ]
+            with unittest.mock.patch.object(
+                agent, "list_listening_tcp", return_value=fake
+            ):
+                with unittest.mock.patch.object(
+                    agent, "discover_live_model_endpoints", return_value=[]
+                ):
+                    with unittest.mock.patch.object(
+                        agent, "scan_port_claim_directories", return_value=[]
+                    ):
+                        with unittest.mock.patch.object(
+                            agent,
+                            "port_is_listening",
+                            side_effect=AssertionError("no live connect"),
+                        ):
+                            with unittest.mock.patch.object(
+                                agent,
+                                "listener_pid",
+                                side_effect=AssertionError("no per-port lsof"),
+                            ):
+                                with unittest.mock.patch.object(
+                                    agent, "process_is_alive", return_value=True
+                                ):
+                                    with unittest.mock.patch.object(
+                                        agent,
+                                        "process_command",
+                                        return_value=fake[0]["command"],
+                                    ):
+                                        with unittest.mock.patch.object(
+                                            agent, "process_rss_mb", return_value=None
+                                        ):
+                                            payload = service.status_payload()
+            demo = next(s for s in payload["statuses"] if s["profile"] == "demo")
+            self.assertEqual(demo["pid"], 4242)
+            self.assertTrue(demo["running"])
+
+    def test_status_without_listeners_still_uses_live_checks(self) -> None:
+        """stop/start/watchdog call status() without inventory -- live path."""
+        with tempfile.TemporaryDirectory() as tmp:
+            service = self._service(Path(tmp))
+            profile = service.profiles.load()["demo"]
+            with unittest.mock.patch.object(
+                agent, "listener_pid", return_value=99
+            ) as live_pid:
+                with unittest.mock.patch.object(
+                    agent, "port_is_listening", return_value=True
+                ) as live_port:
+                    with unittest.mock.patch.object(
+                        agent, "process_is_alive", return_value=True
+                    ):
+                        with unittest.mock.patch.object(
+                            agent, "process_command", return_value="llama-server --port 8080"
+                        ):
+                            with unittest.mock.patch.object(
+                                agent, "process_rss_mb", return_value=None
+                            ):
+                                # Force ready so port_is_listening path is exercised when needed.
+                                with unittest.mock.patch.object(
+                                    service,
+                                    "_probe_health",
+                                    return_value=(True, ["demo"]),
+                                ):
+                                    with unittest.mock.patch.object(
+                                        service, "_read_pid", return_value=None
+                                    ):
+                                        with unittest.mock.patch.object(
+                                            service, "_process_matches", return_value=True
+                                        ):
+                                            row = service.status(profile)
+            live_pid.assert_called()
+            self.assertEqual(row["pid"], 99)
+            self.assertTrue(row["running"])
+            # live_port mock is installed so accidental inventory-only path would
+            # still resolve; the assertion above is that listener_pid was used.
+            self.assertGreaterEqual(live_port.call_count, 0)
+
+
 class ConfigurationTests(unittest.TestCase):
     def test_non_loopback_bind_requires_unsafe_flag_and_token(self) -> None:
         with self.assertRaises(agent.InvalidConfigurationError):

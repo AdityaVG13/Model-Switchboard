@@ -932,6 +932,59 @@ def listener_pid(port: str) -> int | None:
     return None
 
 
+def port_listening_from_inventory(
+    port: str | int,
+    listeners: list[dict[str, Any]],
+) -> bool:
+    """True when *port* appears in an existing list_listening_tcp snapshot.
+
+    Prefer this on status_payload hot paths that already paid for one inventory
+    (ss/lsof). Avoids N× loopback connect checks. Incomplete only if the
+    snapshot is stale (same lag as LISTENING_TCP_CACHE_TTL_SECONDS).
+    """
+    try:
+        want = int(port)
+    except (TypeError, ValueError):
+        return False
+    for row in listeners:
+        try:
+            if int(row.get("port", -1)) == want:
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
+
+
+def listener_pid_from_inventory(
+    port: str | int,
+    listeners: list[dict[str, Any]],
+) -> int | None:
+    """Owning LISTEN pid from inventory, or None if absent / unknown.
+
+    No socket connect and no per-port lsof/ss. Used when status already holds
+    a shared listeners snapshot. stop/start keep calling listener_pid() for
+    live accuracy.
+    """
+    try:
+        want = int(port)
+    except (TypeError, ValueError):
+        return None
+    for row in listeners:
+        try:
+            if int(row.get("port", -1)) != want:
+                continue
+        except (TypeError, ValueError):
+            continue
+        pid = row.get("pid")
+        if pid is None:
+            return None
+        try:
+            return int(pid)
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
 # --------------------------------------------------------------------------
 # Host discovery (Ports-style listening + portable port claims)
 # --------------------------------------------------------------------------
@@ -1611,6 +1664,7 @@ def status_dict_from_discovery(
     *,
     source: str,
     profile_name: str | None = None,
+    listeners: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Shape a discovery/claim record like a controller status entry."""
     port = str(item.get("port", ""))
@@ -1629,10 +1683,23 @@ def status_dict_from_discovery(
 
     ready = bool(item.get("ready"))
     pid = item.get("pid")
-    alive = process_is_alive(pid) if pid else (ready and port_is_listening(port))
+    if pid is None and listeners is not None:
+        pid = listener_pid_from_inventory(port, listeners)
+    if pid:
+        alive = process_is_alive(pid)
+    elif ready:
+        if listeners is not None:
+            alive = port_listening_from_inventory(port, listeners)
+        else:
+            alive = port_is_listening(port)
+    else:
+        alive = False
     if ready and not pid:
-        pid = listener_pid(port)
-        alive = process_is_alive(pid) if pid else ready
+        if listeners is None:
+            # Live path only when no shared inventory (avoid N× lsof on status).
+            pid = listener_pid(port)
+            alive = process_is_alive(pid) if pid else ready
+        # With inventory: port known listening without pid still counts ready below.
 
     request_model = item.get("request_model") or item.get("model_hint") or f"port-{port}"
     if isinstance(request_model, str) and request_model and not item.get("request_model"):
@@ -2132,13 +2199,22 @@ class AgentService:
         loaded = self.profiles.load()
         conflicts = self.profiles.conflicts(loaded)
         names = selected if selected is not None else sorted(loaded.keys())
+        # One inventory for profile port attribution (no N× socket/lsof) and,
+        # when listing everything, claim scan + live discovery.
+        listeners = list_listening_tcp()
         statuses = []
         profile_ports: set[int] = set()
         for name in names:
             profile = loaded.get(name)
             if profile is None:
                 raise ProfileNotFoundError(name)
-            statuses.append(self.status(profile, allow_port_fallback=name not in conflicts))
+            statuses.append(
+                self.status(
+                    profile,
+                    allow_port_fallback=name not in conflicts,
+                    listeners=listeners,
+                )
+            )
             try:
                 profile_ports.add(int(profile.endpoint_port))
             except (TypeError, ValueError):
@@ -2146,10 +2222,9 @@ class AgentService:
 
         claims: list[dict[str, Any]] = []
         listening: list[dict[str, Any]] = []
-        # Full inventory only when listing everything — targeted status stays profile-only.
+        # Full discovery only when listing everything — targeted stays profile-only.
         if selected is None:
-            # Capture listeners once; scan + discover reuse (no second inventory).
-            listeners = list_listening_tcp()
+            # Reuse the same listeners snapshot (no second inventory).
             start_cmds = [
                 profile.get("START_COMMAND")
                 for profile in loaded.values()
@@ -2208,6 +2283,7 @@ class AgentService:
                         merged,
                         source="claim",
                         profile_name=f"port-{port}",
+                        listeners=listeners,
                     )
                 )
                 covered_ports.add(port)
@@ -2222,6 +2298,7 @@ class AgentService:
                         live,
                         source="listening",
                         profile_name=f"discovered-{port}",
+                        listeners=listeners,
                     )
                 )
                 covered_ports.add(port)
@@ -2324,7 +2401,13 @@ class AgentService:
     def benchmark_status(self) -> dict[str, Any]:
         return {"running": False, "pid": None, "log_path": None, "latest": None}
 
-    def status(self, profile: Profile, allow_port_fallback: bool = True) -> dict[str, Any]:
+    def status(
+        self,
+        profile: Profile,
+        allow_port_fallback: bool = True,
+        *,
+        listeners: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         ready, server_ids = self._probe_health(profile)
         pid = self._read_pid(profile.name)
         zombie = bool(pid and process_is_zombie(pid))
@@ -2338,7 +2421,10 @@ class AgentService:
                 # running stays false; next successful stop clears the file.
                 pass
         if pid is None and allow_port_fallback:
-            listener = listener_pid(profile.endpoint_port)
+            if listeners is not None:
+                listener = listener_pid_from_inventory(profile.endpoint_port, listeners)
+            else:
+                listener = listener_pid(profile.endpoint_port)
             if listener is not None:
                 # Prefer cmdline match, but if health already succeeded on this
                 # port trust the listener — external launch scripts rarely share
@@ -2350,12 +2436,24 @@ class AgentService:
         alive = process_is_alive(pid)
         # Healthy OpenAI/loopback endpoint on the claimed port counts as live
         # even when we could not attribute a pid (permission / pid namespace).
-        if ready and not alive and port_is_listening(profile.endpoint_port):
-            alive = True
-            if pid is None:
-                pid = listener_pid(profile.endpoint_port)
-                zombie = bool(pid and process_is_zombie(pid))
-                alive = process_is_alive(pid) or ready
+        if ready and not alive:
+            if listeners is not None:
+                listening = port_listening_from_inventory(
+                    profile.endpoint_port, listeners
+                )
+            else:
+                listening = port_is_listening(profile.endpoint_port)
+            if listening:
+                alive = True
+                if pid is None:
+                    if listeners is not None:
+                        pid = listener_pid_from_inventory(
+                            profile.endpoint_port, listeners
+                        )
+                    else:
+                        pid = listener_pid(profile.endpoint_port)
+                    zombie = bool(pid and process_is_zombie(pid))
+                    alive = process_is_alive(pid) or ready
         state = process_lifecycle_state(pid, ready=ready and alive)
         if ready and alive:
             state = "ready"
