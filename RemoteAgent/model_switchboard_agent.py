@@ -39,7 +39,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
 
-AGENT_VERSION = "1.0.0"
+AGENT_VERSION = "1.1.1"
 DEFAULT_PORT = 8877
 MINIMUM_TOKEN_BYTES = 16
 MAXIMUM_BODY_BYTES = 64 * 1024
@@ -89,8 +89,51 @@ PROFILE_SCAN_SKIP_DIRS = frozenset({
 })
 PROFILE_SCAN_MAX_DEPTH = 5
 PROFILE_SCAN_MAX_CANDIDATES = 8
+# Optional colon-separated roots for "claimed port" folder scans (never assumed).
+# Example: MODEL_SWITCHBOARD_SCAN_ROOTS=/opt/models:/srv/launch
+SCAN_ROOTS_ENV = "MODEL_SWITCHBOARD_SCAN_ROOTS"
+# Numeric dir name = claimed TCP port (2–5 digits). Parent path is not fixed.
+PORT_CLAIM_DIR_RE = re.compile(r"^\d{2,5}$")
+PORT_CLAIM_MARKERS = ("flags.env", "launch.sh", "start.sh", "run.sh", "serve.sh", "ctrl.sh")
+# Cmdline tokens that suggest a local model / OpenAI-compatible server.
+MODEL_SERVER_COMMAND_MARKERS = (
+    "llama-server",
+    "llama.cpp",
+    "llamacpp",
+    "vllm",
+    "sglang",
+    "text-generation-launcher",
+    "text-generation-server",
+    "ollama",
+    "tabbyapi",
+    "aphrodite",
+    "tgi-",
+    "openai",
+    "mlc_llm",
+    "koboldcpp",
+    "kobold",
+    "exllamav2",
+    "exllama",
+    "lmdeploy",
+    "tensorrt_llm",
+    "trtllm",
+    "localai",
+    "llama-cpp",
+    "gguf",
+)
+# System / clearly non-model listeners we never probe.
+SKIP_LISTEN_PORTS = frozenset({
+    22, 25, 53, 67, 68, 69, 80, 110, 123, 135, 139, 143, 161, 389, 443,
+    445, 465, 587, 631, 636, 993, 995, 2375, 2376, 3306, 3389, 5432, 5900,
+    6379, 6443, 8088, 8443, 9100, 10250, 27017,
+})
+DISCOVERY_PROBE_BUDGET = 24
+DISCOVERY_PROBE_TIMEOUT = 0.6
 
 PROFILE_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+SHELL_DEFAULT_RE = re.compile(
+    r"^\$\{[A-Za-z_][A-Za-z0-9_]*:-((?:\\.|[^\\}])*)\}$"
+)
 
 LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
@@ -817,8 +860,652 @@ def listener_pid(port: str) -> int | None:
 
 
 # --------------------------------------------------------------------------
-# Agent service (parity with ControllerService.swift)
+# Host discovery (Ports-style listening + portable port claims)
 # --------------------------------------------------------------------------
+# Never hardcode a host's layout (no /data/launch, no fixed product ports).
+# Sources of truth, in order of trust for identity:
+#   1) user-authored Switchboard profiles (.env/.json)
+#   2) live process cmdline + /v1/models|/health probes
+#   3) portable "claimed port" folders: any dir named <port> that contains
+#      launch/flags markers, wherever the user put them
+# --------------------------------------------------------------------------
+
+
+def _configured_scan_roots(agent_root: Path | None = None) -> list[Path]:
+    """Env + optional config.json scan_roots — never product-specific defaults."""
+    roots: list[Path] = []
+    raw = (os.environ.get(SCAN_ROOTS_ENV) or "").strip()
+    if raw:
+        for part in raw.split(":"):
+            part = part.strip()
+            if part:
+                roots.append(Path(part).expanduser())
+    if agent_root is not None:
+        configured = load_agent_config(agent_root).get("scan_roots")
+        if isinstance(configured, str) and configured.strip():
+            roots.append(Path(configured).expanduser())
+        elif isinstance(configured, list):
+            for item in configured:
+                if isinstance(item, str) and item.strip():
+                    roots.append(Path(item).expanduser())
+    return roots
+
+
+def parse_loose_env_assignments(file: Path) -> dict[str, str]:
+    """Parse KEY=value including bash ${VAR:-default} defaults — no shell exec."""
+    try:
+        content = file.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return {}
+    values: dict[str, str] = {}
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :].strip()
+        equals = line.find("=")
+        if equals <= 0:
+            continue
+        key = line[:equals].strip()
+        if not PROFILE_KEY_RE.match(key):
+            continue
+        rest = line[equals + 1 :].strip()
+        if " #" in rest and not (rest[:1] in "'\"" and rest.endswith(rest[:1])):
+            rest = rest.split(" #", 1)[0].rstrip()
+        if rest.startswith("#"):
+            continue
+        if len(rest) >= 2 and rest[0] == rest[-1] and rest[0] in "'\"":
+            rest = rest[1:-1]
+        match = SHELL_DEFAULT_RE.fullmatch(rest)
+        if match:
+            rest = match.group(1)
+            # Unescape common shell sequences inside the default.
+            rest = rest.replace("\\$", "$").replace("\\\"", '"').replace("\\'", "'")
+        elif rest.startswith("$"):
+            # Unresolved reference with no default — skip.
+            continue
+        values[key] = rest
+    return values
+
+
+def list_listening_tcp() -> list[dict[str, Any]]:
+    """Inventory local TCP listeners with pid/command when available.
+
+    Mirrors the Ports.app idea: port + owning process + command line. Cross
+    platform via `ss` (Linux) then `lsof` (macOS/Linux).
+    """
+    by_port: dict[int, dict[str, Any]] = {}
+
+    def note(port: int, pid: int | None, command: str | None, bind: str) -> None:
+        if port <= 0 or port > 65535:
+            return
+        existing = by_port.get(port)
+        if existing is None:
+            by_port[port] = {
+                "port": port,
+                "pid": pid,
+                "command": command,
+                "bind": bind,
+            }
+            return
+        if existing.get("pid") is None and pid is not None:
+            existing["pid"] = pid
+        if not existing.get("command") and command:
+            existing["command"] = command
+        if bind and bind not in (existing.get("bind") or ""):
+            existing["bind"] = bind
+
+    # Linux ss: State Recv-Q Send-Q Local Address:Port Peer Address:Port Process
+    try:
+        result = subprocess.run(
+            ["ss", "-lntupH"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        for line in result.stdout.splitlines():
+            # Local address is usually field 4.
+            parts = line.split()
+            if len(parts) < 4:
+                continue
+            local = parts[3]
+            if local.startswith("%"):
+                continue
+            # Formats: 127.0.0.1:8080, *:8080, [::1]:8080, [::]:8080
+            port = _parse_local_port(local)
+            if port is None:
+                continue
+            bind = local.rsplit(":", 1)[0].strip("[]") if ":" in local else local
+            pid = None
+            command = None
+            pid_match = re.search(r"pid=(\d+)", line)
+            if pid_match:
+                pid = int(pid_match.group(1))
+                command = process_command(pid)
+            note(port, pid, command, bind)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+    if not by_port:
+        try:
+            result = subprocess.run(
+                ["lsof", "-nP", "-iTCP", "-sTCP:LISTEN"],
+                capture_output=True,
+                text=True,
+                timeout=8,
+                check=False,
+            )
+            for line in result.stdout.splitlines()[1:]:
+                parts = line.split()
+                if len(parts) < 9:
+                    continue
+                try:
+                    pid = int(parts[1])
+                except ValueError:
+                    pid = None
+                name = parts[8]
+                port = _parse_local_port(name)
+                if port is None:
+                    continue
+                bind = name.rsplit(":", 1)[0].strip("[]") if ":" in name else name
+                command = process_command(pid) if pid else None
+                note(port, pid, command, bind)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+    return [by_port[key] for key in sorted(by_port)]
+
+
+def _parse_local_port(local: str) -> int | None:
+    local = local.strip()
+    if not local:
+        return None
+    # [ipv6]:port
+    if local.startswith("["):
+        close = local.find("]")
+        if close > 0 and close + 1 < len(local) and local[close + 1] == ":":
+            try:
+                return int(local[close + 2 :])
+            except ValueError:
+                return None
+    if local.count(":") == 1:
+        try:
+            return int(local.rsplit(":", 1)[1])
+        except ValueError:
+            return None
+    # bare :port
+    if local.startswith(":") and local[1:].isdigit():
+        return int(local[1:])
+    return None
+
+
+def command_looks_like_model_server(command: str | None) -> bool:
+    if not command:
+        return False
+    lowered = command.lower()
+    return any(marker in lowered for marker in MODEL_SERVER_COMMAND_MARKERS)
+
+
+def infer_runtime_from_command(command: str | None) -> str:
+    """Best-effort runtime label from a live process — never invent a stack."""
+    if not command:
+        return "unknown"
+    lowered = command.lower()
+    if "vllm" in lowered:
+        return "vllm"
+    if "sglang" in lowered:
+        return "sglang"
+    if "text-generation" in lowered or "tgi" in lowered:
+        return "tgi"
+    if "ollama" in lowered:
+        return "ollama"
+    if any(
+        token in lowered
+        for token in ("llama-server", "llama.cpp", "llamacpp", "llama-cpp", "kobold")
+    ):
+        return "llama.cpp"
+    if "tabby" in lowered:
+        return "tabbyapi"
+    return "unknown"
+
+
+def infer_model_from_command(command: str | None) -> str | None:
+    """Pull a model path/id out of argv when present. None if not visible."""
+    if not command:
+        return None
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        tokens = command.split()
+    for index, token in enumerate(tokens):
+        if token in ("-m", "--model", "--model-path", "--model-id", "--served-model-name"):
+            if index + 1 < len(tokens):
+                return tokens[index + 1]
+        if token.startswith("--model="):
+            return token.split("=", 1)[1]
+        if token.startswith("--model-path="):
+            return token.split("=", 1)[1]
+        if token.startswith("--model-id="):
+            return token.split("=", 1)[1]
+    # vllm serve <model>
+    for index, token in enumerate(tokens):
+        if token == "serve" and index + 1 < len(tokens):
+            candidate = tokens[index + 1]
+            if not candidate.startswith("-"):
+                return candidate
+    # Last path-like arg ending in .gguf / looking like HF repo
+    for token in reversed(tokens):
+        if token.startswith("-"):
+            continue
+        if token.endswith(".gguf") or "/" in token:
+            return token
+    return None
+
+
+def probe_model_endpoint(port: int, host: str = "127.0.0.1") -> dict[str, Any]:
+    """Probe common local model HTTP surfaces. Does not invent identity."""
+    result: dict[str, Any] = {
+        "port": port,
+        "host": host,
+        "ready": False,
+        "health_ok": False,
+        "openai_models": False,
+        "model_ids": [],
+        "base_url": f"http://{host}:{port}/v1",
+    }
+    health_urls = (
+        f"http://{host}:{port}/health",
+        f"http://{host}:{port}/v1/health",
+    )
+    for url in health_urls:
+        try:
+            request = urllib.request.Request(url, headers={"Accept": "application/json"})
+            with urllib.request.urlopen(request, timeout=DISCOVERY_PROBE_TIMEOUT) as response:
+                if 200 <= response.status < 300:
+                    result["health_ok"] = True
+                    break
+        except (urllib.error.URLError, OSError, ValueError):
+            continue
+
+    models_url = f"http://{host}:{port}/v1/models"
+    try:
+        request = urllib.request.Request(models_url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(request, timeout=DISCOVERY_PROBE_TIMEOUT) as response:
+            body = response.read()
+        parsed = json.loads(body)
+        entries = parsed.get("data", []) if isinstance(parsed, dict) else []
+        ids = [
+            entry["id"]
+            for entry in entries
+            if isinstance(entry, dict) and isinstance(entry.get("id"), str) and entry["id"]
+        ]
+        if ids:
+            result["openai_models"] = True
+            result["model_ids"] = ids
+    except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError, AttributeError):
+        pass
+
+    result["ready"] = bool(result["health_ok"] or result["openai_models"])
+    return result
+
+
+def _roots_hinted_by_path_token(token: str) -> list[Path]:
+    """If a cmdline/profile path sits inside a numeric port folder, return its parent."""
+    try:
+        path = Path(token).expanduser()
+    except (TypeError, ValueError):
+        return []
+    candidates: list[Path] = []
+    # Walk up a few levels: …/launch/8080/launch.sh → …/launch
+    current = path if path.suffix else path
+    for _ in range(4):
+        if PORT_CLAIM_DIR_RE.fullmatch(current.name):
+            parent = current.parent
+            if parent != current:
+                candidates.append(parent)
+        current = current.parent
+        if current == current.parent:
+            break
+    return candidates
+
+
+def roots_hinted_by_commands(commands: list[str | None]) -> list[Path]:
+    """Derive scan roots from live argv / START_COMMAND paths (host-agnostic)."""
+    found: list[Path] = []
+    seen: set[Path] = set()
+    for command in commands:
+        if not command:
+            continue
+        try:
+            tokens = shlex.split(command)
+        except ValueError:
+            tokens = command.split()
+        for token in tokens:
+            if "/" not in token and not token.startswith("~"):
+                continue
+            for root in _roots_hinted_by_path_token(token):
+                try:
+                    resolved = root.resolve()
+                except OSError:
+                    continue
+                if resolved not in seen and resolved.is_dir():
+                    seen.add(resolved)
+                    found.append(resolved)
+    return found
+
+
+def scan_port_claim_directories(
+    roots: list[Path] | None = None,
+    *,
+    agent_root: Path | None = None,
+    listeners: list[dict[str, Any]] | None = None,
+    max_depth: int = 3,
+    home_depth: int = 2,
+    limit: int = 64,
+) -> list[dict[str, Any]]:
+    """Find claimed-port folders under configured / hinted roots.
+
+    Convention only: a directory whose name is a TCP port (2–5 digits) and that
+    contains a launch/flags marker. Parent path is whatever the user chose —
+    no product-specific roots are assumed. Roots come from:
+      • explicit `roots` argument
+      • MODEL_SWITCHBOARD_SCAN_ROOTS / config.json scan_roots
+      • paths embedded in live process commands / profile START_COMMANDs
+      • $HOME (shallow only — developer homes are huge)
+    """
+    hinted: list[Path] = []
+    try:
+        live = listeners if listeners is not None else list_listening_tcp()
+        hinted.extend(
+            roots_hinted_by_commands([item.get("command") for item in live])
+        )
+    except Exception:
+        pass
+
+    primary: list[Path] = []
+    for root in (roots or []) + _configured_scan_roots(agent_root) + hinted:
+        try:
+            resolved = root.expanduser().resolve()
+        except OSError:
+            continue
+        if resolved not in primary and resolved.is_dir():
+            primary.append(resolved)
+
+    home_roots: list[Path] = []
+    try:
+        home = Path.home().resolve()
+        if home.is_dir() and home not in primary:
+            home_roots.append(home)
+    except OSError:
+        pass
+
+    claims: dict[int, dict[str, Any]] = {}
+
+    def consider_claim(directory: Path) -> None:
+        if len(claims) >= limit:
+            return
+        name = directory.name
+        if not PORT_CLAIM_DIR_RE.fullmatch(name):
+            return
+        markers = [m for m in PORT_CLAIM_MARKERS if (directory / m).is_file()]
+        if not markers:
+            return
+        port = int(name)
+        flags: dict[str, str] = {}
+        flags_path = directory / "flags.env"
+        if flags_path.is_file():
+            flags = parse_loose_env_assignments(flags_path)
+        configured_port = flags.get("PORT") or str(port)
+        try:
+            port = int(str(configured_port).strip())
+        except ValueError:
+            port = int(name)
+        model_hint = (
+            flags.get("MODEL")
+            or flags.get("MODEL_FILE")
+            or flags.get("MODEL_PATH")
+            or flags.get("MODEL_DIR")
+            or flags.get("MODEL_REPO")
+            or flags.get("REQUEST_MODEL")
+            or ""
+        )
+        runtime_hint = ""
+        if flags.get("RUNTIME"):
+            runtime_hint = canonical_runtime(flags.get("RUNTIME"))
+        elif flags.get("BACKEND"):
+            runtime_hint = infer_runtime_from_command(flags.get("BACKEND"))
+        elif flags.get("LLAMA_BIN") or flags.get("LLAMA_SERVER"):
+            runtime_hint = "llama.cpp"
+        elif flags.get("VLLM_BIN") or "vllm" in (flags.get("BACKEND") or "").lower():
+            runtime_hint = "vllm"
+        display = flags.get("DISPLAY_NAME") or ""
+        if not display and model_hint:
+            display = Path(model_hint).name
+        if not display:
+            display = f"Port {port}"
+        start_command = ""
+        for candidate in ("ctrl.sh", "launch.sh", "start.sh", "run.sh", "serve.sh"):
+            script = directory / candidate
+            if script.is_file() and os.access(script, os.X_OK):
+                if candidate == "ctrl.sh":
+                    start_command = f"{shlex.quote(str(script))} start"
+                else:
+                    start_command = shlex.quote(str(script))
+                break
+        claims[port] = {
+            "port": port,
+            "path": str(directory),
+            "markers": markers,
+            "display_name": display,
+            "model_hint": model_hint,
+            "runtime_hint": runtime_hint or "unknown",
+            "host": flags.get("HOST") or "127.0.0.1",
+            "start_command": start_command,
+            "flags": {
+                key: flags[key]
+                for key in (
+                    "MODEL",
+                    "MODEL_FILE",
+                    "MODEL_PATH",
+                    "MODEL_DIR",
+                    "MODEL_REPO",
+                    "LLAMA_BIN",
+                    "BACKEND",
+                    "VLLM_BIN",
+                    "REQUEST_MODEL",
+                    "DISPLAY_NAME",
+                    "PORT",
+                    "HOST",
+                )
+                if key in flags
+            },
+        }
+
+    def walk(directory: Path, depth: int, depth_limit: int) -> None:
+        if depth > depth_limit or len(claims) >= limit:
+            return
+        consider_claim(directory)
+        try:
+            entries = list(directory.iterdir())
+        except OSError:
+            return
+        for entry in entries:
+            if entry.name in PROFILE_SCAN_SKIP_DIRS or entry.name.startswith("."):
+                continue
+            try:
+                if entry.is_dir():
+                    walk(entry, depth + 1, depth_limit)
+            except OSError:
+                continue
+
+    for root in primary:
+        walk(root, 0, max_depth)
+        if len(claims) >= limit:
+            break
+    for root in home_roots:
+        walk(root, 0, home_depth)
+        if len(claims) >= limit:
+            break
+
+    return [claims[key] for key in sorted(claims)]
+
+
+def discover_live_model_endpoints(
+    *,
+    profile_ports: set[int] | None = None,
+    claim_ports: set[int] | None = None,
+    listeners: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Ports-style live discovery of model-looking listeners.
+
+    Probes only when the owning command looks like a model server, or the port
+    is already claimed by a profile / port-folder. Caps probe budget.
+    """
+    profile_ports = profile_ports or set()
+    claim_ports = claim_ports or set()
+    discovered: list[dict[str, Any]] = []
+    probes_left = DISCOVERY_PROBE_BUDGET
+
+    for listener in (listeners if listeners is not None else list_listening_tcp()):
+        port = int(listener["port"])
+        if port in SKIP_LISTEN_PORTS:
+            continue
+        # Skip the agent itself.
+        if port == DEFAULT_PORT and command_looks_like_model_server(
+            listener.get("command") or ""
+        ) is False:
+            command = (listener.get("command") or "").lower()
+            if "model_switchboard_agent" in command or "model-switchboard-agent" in command:
+                continue
+
+        command = listener.get("command")
+        looks_model = command_looks_like_model_server(command)
+        claimed = port in profile_ports or port in claim_ports
+        if not looks_model and not claimed:
+            continue
+
+        probe: dict[str, Any] = {
+            "port": port,
+            "host": "127.0.0.1",
+            "ready": False,
+            "health_ok": False,
+            "openai_models": False,
+            "model_ids": [],
+            "base_url": f"http://127.0.0.1:{port}/v1",
+        }
+        if probes_left > 0 and port_is_listening(str(port)):
+            probes_left -= 1
+            probe = probe_model_endpoint(port)
+
+        # Drop pure system listeners that didn't respond as a model API unless
+        # the cmdline clearly says model server / the port is claimed.
+        if not probe["ready"] and not looks_model and not claimed:
+            continue
+
+        runtime = infer_runtime_from_command(command)
+        model_from_cmd = infer_model_from_command(command)
+        model_ids = list(probe.get("model_ids") or [])
+        request_model = (
+            (model_ids[0] if model_ids else None)
+            or model_from_cmd
+            or f"port-{port}"
+        )
+        display = request_model
+        if isinstance(display, str) and ("/" in display or display.endswith(".gguf")):
+            display = Path(display).name
+
+        discovered.append(
+            {
+                "port": port,
+                "pid": listener.get("pid"),
+                "command": command,
+                "bind": listener.get("bind"),
+                "runtime": runtime,
+                "request_model": request_model,
+                "server_ids": model_ids,
+                "display_name": display,
+                "ready": bool(probe.get("ready")),
+                "health_ok": bool(probe.get("health_ok")),
+                "base_url": probe.get("base_url") or f"http://127.0.0.1:{port}/v1",
+                "source": "listening",
+            }
+        )
+    return discovered
+
+
+def status_dict_from_discovery(
+    item: dict[str, Any],
+    *,
+    source: str,
+    profile_name: str | None = None,
+) -> dict[str, Any]:
+    """Shape a discovery/claim record like a controller status entry."""
+    port = str(item.get("port", ""))
+    runtime = item.get("runtime") or item.get("runtime_hint") or "unknown"
+    if runtime == "unknown" and item.get("runtime_hint"):
+        runtime = item["runtime_hint"]
+    label, tags, launch_mode = RUNTIME_SPECS.get(
+        runtime, (runtime, ["discovered", "external"], "external")
+    )
+    if source == "claim":
+        launch_mode = "command" if item.get("start_command") else "external"
+        tags = list(dict.fromkeys(["claimed", "launch-folder"] + list(tags)))
+    else:
+        tags = list(dict.fromkeys(["discovered", "listening"] + list(tags)))
+        launch_mode = "external"
+
+    ready = bool(item.get("ready"))
+    pid = item.get("pid")
+    alive = process_is_alive(pid) if pid else (ready and port_is_listening(port))
+    if ready and not pid:
+        pid = listener_pid(port)
+        alive = process_is_alive(pid) if pid else ready
+
+    request_model = item.get("request_model") or item.get("model_hint") or f"port-{port}"
+    if isinstance(request_model, str) and request_model and not item.get("request_model"):
+        # Prefer basename for display-ish model paths from flags.
+        pass
+    display = item.get("display_name") or Path(str(request_model)).name or f"Port {port}"
+    name = profile_name or f"discovered-{port}"
+    state = process_lifecycle_state(pid if alive else None, ready=ready and alive)
+    if ready and not alive:
+        # Health answered; treat as ready even if we could not attribute a pid.
+        state = "ready"
+        alive = True
+
+    return {
+        "profile": name,
+        "display_name": display,
+        "runtime": runtime,
+        "runtime_label": label if runtime != "unknown" else "Discovered",
+        "runtime_tags": tags,
+        "launch_mode": launch_mode,
+        "host": item.get("host") or "127.0.0.1",
+        "port": port,
+        "base_url": item.get("base_url") or f"http://127.0.0.1:{port}/v1",
+        "request_model": str(request_model),
+        "server_model_id": str(
+            (item.get("server_ids") or [None])[0] or request_model
+        ),
+        "pid": pid if alive else None,
+        "running": alive,
+        "state": state,
+        "ready": ready,
+        "server_ids": item.get("server_ids") or item.get("model_ids") or [],
+        "rss_mb": process_rss_mb(pid) if alive and pid else None,
+        "command": item.get("command") if alive else None,
+        # Mac app ModelProfileStatus.logPath is a non-optional String — never null.
+        "log_path": item.get("log_path")
+        or (
+            f"/tmp/launch-{port}.log"
+            if port
+            else f"/tmp/{name}.log"
+        ),
+        "discovery_source": source,
+        "claim_path": item.get("path"),
+    }
 
 
 # --------------------------------------------------------------------------
@@ -1168,17 +1855,179 @@ class AgentService:
         conflicts = self.profiles.conflicts(loaded)
         names = selected if selected is not None else sorted(loaded.keys())
         statuses = []
+        profile_ports: set[int] = set()
         for name in names:
             profile = loaded.get(name)
             if profile is None:
                 raise ProfileNotFoundError(name)
             statuses.append(self.status(profile, allow_port_fallback=name not in conflicts))
+            try:
+                profile_ports.add(int(profile.endpoint_port))
+            except (TypeError, ValueError):
+                pass
+
+        claims: list[dict[str, Any]] = []
+        listening: list[dict[str, Any]] = []
+        # Full inventory only when listing everything — targeted status stays profile-only.
+        if selected is None:
+            listeners = list_listening_tcp()
+            start_cmds = [
+                profile.get("START_COMMAND")
+                for profile in loaded.values()
+            ]
+            claim_roots = roots_hinted_by_commands(
+                start_cmds + [item.get("command") for item in listeners]
+            )
+            claims = scan_port_claim_directories(
+                roots=claim_roots or None,
+                agent_root=self.configuration.root,
+                listeners=listeners,
+            )
+            claim_ports = {int(item["port"]) for item in claims}
+            listening = discover_live_model_endpoints(
+                profile_ports=profile_ports,
+                claim_ports=claim_ports,
+                listeners=listeners,
+            )
+            covered_ports = {
+                int(item["port"])
+                for item in statuses
+                if str(item.get("port") or "").isdigit()
+            }
+
+            # Claimed port folders not already represented by a profile.
+            for claim in claims:
+                port = int(claim["port"])
+                if port in covered_ports:
+                    continue
+                live = next((item for item in listening if int(item["port"]) == port), None)
+                merged = dict(claim)
+                if live:
+                    merged.update(
+                        {
+                            "pid": live.get("pid"),
+                            "command": live.get("command"),
+                            "ready": live.get("ready"),
+                            "server_ids": live.get("server_ids"),
+                            "base_url": live.get("base_url"),
+                            "runtime": live.get("runtime")
+                            if live.get("runtime") != "unknown"
+                            else claim.get("runtime_hint") or "unknown",
+                            "request_model": live.get("request_model")
+                            if live.get("request_model")
+                            and not str(live.get("request_model")).startswith("port-")
+                            else (claim.get("model_hint") or live.get("request_model")),
+                            "display_name": claim.get("display_name")
+                            or live.get("display_name"),
+                        }
+                    )
+                else:
+                    merged["ready"] = False
+                    merged["request_model"] = claim.get("model_hint") or f"port-{port}"
+                    merged["runtime"] = claim.get("runtime_hint") or "unknown"
+                statuses.append(
+                    status_dict_from_discovery(
+                        merged,
+                        source="claim",
+                        profile_name=f"port-{port}",
+                    )
+                )
+                covered_ports.add(port)
+
+            # Pure listeners not claimed and not profiled.
+            for live in listening:
+                port = int(live["port"])
+                if port in covered_ports:
+                    continue
+                statuses.append(
+                    status_dict_from_discovery(
+                        live,
+                        source="listening",
+                        profile_name=f"discovered-{port}",
+                    )
+                )
+                covered_ports.add(port)
+
         return {
             "statuses": statuses,
             "benchmark": self.benchmark_status(),
             "integrations": [],
             "profiles_dir": str(self.configuration.profiles_directory),
             "controller_root": str(self.configuration.root),
+            "discovery": {
+                "listening": listening if selected is None else [],
+                "claims": [
+                    {
+                        "port": item["port"],
+                        "path": item["path"],
+                        "display_name": item.get("display_name"),
+                        "model_hint": item.get("model_hint"),
+                        "runtime_hint": item.get("runtime_hint"),
+                    }
+                    for item in (claims if selected is None else [])
+                ],
+                "scan_roots_env": SCAN_ROOTS_ENV,
+            },
+        }
+
+    def ports_payload(self) -> dict[str, Any]:
+        """Ports-style inventory: every listener + model probe outcome."""
+        loaded = self.profiles.load()
+        profile_ports: set[int] = set()
+        for profile in loaded.values():
+            try:
+                profile_ports.add(int(profile.endpoint_port))
+            except (TypeError, ValueError):
+                pass
+        listeners = list_listening_tcp()
+        claims = scan_port_claim_directories(
+            agent_root=self.configuration.root,
+            listeners=listeners,
+        )
+        claim_ports = {int(item["port"]) for item in claims}
+        live = discover_live_model_endpoints(
+            profile_ports=profile_ports,
+            claim_ports=claim_ports,
+            listeners=listeners,
+        )
+        live_by_port = {int(item["port"]): item for item in live}
+        ports: list[dict[str, Any]] = []
+        for listener in listeners:
+            port = int(listener["port"])
+            entry = {
+                "port": port,
+                "pid": listener.get("pid"),
+                "command": listener.get("command"),
+                "bind": listener.get("bind"),
+                "looks_like_model": command_looks_like_model_server(listener.get("command")),
+                "model": live_by_port.get(port),
+                "claimed": next(
+                    (claim for claim in claims if int(claim["port"]) == port),
+                    None,
+                ),
+            }
+            ports.append(entry)
+        # Claims with nothing listening yet still appear.
+        listening_ports = {int(item["port"]) for item in listeners}
+        for claim in claims:
+            if int(claim["port"]) not in listening_ports:
+                ports.append(
+                    {
+                        "port": int(claim["port"]),
+                        "pid": None,
+                        "command": None,
+                        "bind": None,
+                        "looks_like_model": False,
+                        "model": None,
+                        "claimed": claim,
+                    }
+                )
+        ports.sort(key=lambda item: int(item["port"]))
+        return {
+            "ports": ports,
+            "profiles_dir": str(self.configuration.profiles_directory),
+            "controller_root": str(self.configuration.root),
+            "scan_roots_env": SCAN_ROOTS_ENV,
         }
 
     def action_response(self) -> dict[str, Any]:
@@ -1211,14 +2060,30 @@ class AgentService:
                 pass
         if pid is None and allow_port_fallback:
             listener = listener_pid(profile.endpoint_port)
-            if listener is not None and self._process_matches(listener, profile):
-                pid = listener
-                zombie = process_is_zombie(pid)
+            if listener is not None:
+                # Prefer cmdline match, but if health already succeeded on this
+                # port trust the listener — external launch scripts rarely share
+                # profile name tokens with the model process argv.
+                if self._process_matches(listener, profile) or ready:
+                    pid = listener
+                    zombie = process_is_zombie(pid)
         label, _, launch_mode = profile.runtime_spec
         alive = process_is_alive(pid)
+        # Healthy OpenAI/loopback endpoint on the claimed port counts as live
+        # even when we could not attribute a pid (permission / pid namespace).
+        if ready and not alive and port_is_listening(profile.endpoint_port):
+            alive = True
+            if pid is None:
+                pid = listener_pid(profile.endpoint_port)
+                zombie = bool(pid and process_is_zombie(pid))
+                alive = process_is_alive(pid) or ready
         state = process_lifecycle_state(pid, ready=ready and alive)
-        if zombie and not alive:
+        if ready and alive:
+            state = "ready"
+        if zombie and not process_is_alive(pid):
             state = "zombie"
+            if not ready:
+                alive = False
         return {
             "profile": profile.name,
             "display_name": profile.display_name,
@@ -1234,11 +2099,12 @@ class AgentService:
             "pid": pid if (alive or zombie) else None,
             "running": alive,
             "state": state,
-            "ready": ready and alive,
+            "ready": bool(ready and alive),
             "server_ids": server_ids if alive else [],
-            "rss_mb": process_rss_mb(pid) if alive else None,
-            "command": process_command(pid) if (alive or zombie) else None,
+            "rss_mb": process_rss_mb(pid) if alive and pid else None,
+            "command": process_command(pid) if ((alive or zombie) and pid) else None,
             "log_path": profile.log_path,
+            "discovery_source": "profile",
         }
 
     # -- lifecycle ---------------------------------------------------------
@@ -1456,12 +2322,19 @@ class AgentService:
             profile.name, profile.get("MODEL_ALIAS"), profile.request_model,
             profile.server_model_id, profile.get("MODEL_PATH"), profile.get("MODEL_DIR"),
             profile.get("MODEL_FILE"), profile.get("MODEL_REPO"),
+            profile.get("START_COMMAND"),
         ]
-        return any(
-            marker.lower() in command
-            for marker in markers
-            if marker and len(marker) >= 4
-        )
+        for marker in markers:
+            if marker and len(marker) >= 4 and marker.lower() in command:
+                return True
+        # Port tokens common to llama-server / vllm argv.
+        port = profile.endpoint_port
+        if port:
+            if f"--port {port}" in command or f"--port={port}" in command:
+                return True
+            if f":{port}" in command:
+                return True
+        return command_looks_like_model_server(command) and port_is_listening(port)
 
     def _probe_health(self, profile: Profile) -> tuple[bool, list[str]]:
         if profile.healthcheck_mode == "disabled":
@@ -1678,6 +2551,8 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
         if method == "GET":
             if path == "/api/status":
                 return lambda _: service.status_payload()
+            if path == "/api/ports":
+                return lambda _: service.ports_payload()
             if path == "/api/doctor":
                 return lambda _: service.doctor_report()
             if path == "/api/benchmark/status":
@@ -1872,6 +2747,8 @@ def build_parser() -> argparse.ArgumentParser:
             "kill-all",
             "link",
             "scan-profiles",
+            "scan-ports",
+            "ports",
         ],
     )
     parser.add_argument("profiles", nargs="*", help="profile names for start/stop/restart/switch")
@@ -1946,6 +2823,9 @@ def _run_link(args: argparse.Namespace, configuration: AgentConfiguration) -> in
         direct_host = dns_name or ipv4
     info = build_link_code(configuration.port, direct_host=direct_host)
     info["profiles_dir"] = str(configuration.profiles_directory)
+    claims = scan_port_claim_directories(agent_root=configuration.root)
+    info["port_claims"] = len(claims)
+    info["scan_roots_env"] = SCAN_ROOTS_ENV
     if args.json:
         _print_json(info)
     else:
@@ -1958,6 +2838,10 @@ def _run_link(args: argparse.Namespace, configuration: AgentConfiguration) -> in
         print("Drop one .env/.json per model there (PORT / START_COMMAND / …), then")
         print("Settings → Remote Gateways → Add Remote Gateway → paste the link.")
         print("Every gateway field stays editable on the Mac.")
+        print()
+        print("Discovery is host-generic: listening model ports + any numeric")
+        print("port folders (…/8080/flags.env) under $HOME or")
+        print(f"${SCAN_ROOTS_ENV}. Nothing is invented for unknown ports.")
     return 0
 
 
@@ -2010,9 +2894,21 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "scan-profiles":
             candidates = scan_profile_directories()
+            claims = scan_port_claim_directories(agent_root=configuration.root)
             payload = {
                 "profiles_dir": str(configuration.profiles_directory),
                 "candidates": candidates,
+                "port_claims": [
+                    {
+                        "port": item["port"],
+                        "path": item["path"],
+                        "display_name": item.get("display_name"),
+                        "model_hint": item.get("model_hint"),
+                        "runtime_hint": item.get("runtime_hint"),
+                    }
+                    for item in claims
+                ],
+                "scan_roots_env": SCAN_ROOTS_ENV,
             }
             if args.json:
                 _print_json(payload)
@@ -2025,6 +2921,49 @@ def main(argv: list[str] | None = None) -> int:
                         f"[{index}] {candidate['path']} "
                         f"({candidate['profile_count']}: {', '.join(candidate['files'][:6])})"
                     )
+                if claims:
+                    print()
+                    print("Claimed port folders (numeric dir + launch/flags markers):")
+                    for claim in claims:
+                        model = claim.get("model_hint") or "—"
+                        print(
+                            f"  :{claim['port']}  {claim['path']}  "
+                            f"({claim.get('runtime_hint') or 'unknown'})  {model}"
+                        )
+                else:
+                    print()
+                    print(
+                        "No claimed port folders found. Optional: export "
+                        f"{SCAN_ROOTS_ENV}=/path/to/scan"
+                    )
+            return 0
+        if args.command in ("scan-ports", "ports"):
+            payload = service.ports_payload()
+            if args.json:
+                _print_json(payload)
+            else:
+                print("Listening / claimed ports (Ports-style):")
+                for entry in payload["ports"]:
+                    port = entry["port"]
+                    claimed = entry.get("claimed")
+                    model = entry.get("model")
+                    cmd = (entry.get("command") or "")[:80]
+                    flags = []
+                    if entry.get("looks_like_model"):
+                        flags.append("model-cmd")
+                    if claimed:
+                        flags.append("claimed")
+                    if model and model.get("ready"):
+                        flags.append("ready")
+                    elif model:
+                        flags.append("probe-fail")
+                    flag_s = ",".join(flags) if flags else "-"
+                    identity = ""
+                    if model and model.get("request_model"):
+                        identity = str(model["request_model"])
+                    elif claimed and claimed.get("model_hint"):
+                        identity = str(claimed["model_hint"])
+                    print(f"  :{port:<5}  {flag_s:<18}  {identity or cmd or '—'}")
             return 0
         if args.command in ("start", "stop", "restart"):
             if not args.profiles:

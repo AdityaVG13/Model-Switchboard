@@ -152,3 +152,29 @@ the agent answers those endpoints with structured "unsupported" responses.
 
 Tests: `python3 -m unittest discover -s RemoteAgent/tests -p 'test_*.py'` —
 includes conformance cases shared with the reference controller.
+
+## Discovery (host-generic)
+
+The agent does **not** invent models or assume a host layout (no hard-coded
+`/data/launch`, no fixed product ports). On each `/api/status` it merges:
+
+1. **Profiles** — `.env` / `.json` in the profiles folder (start/stop/manage).
+2. **Listening ports** — Ports.app-style inventory (`ss`/`lsof`) + short probes
+   of `/health` and `/v1/models` when the process cmdline looks like a model
+   server (or the port is already claimed).
+3. **Claimed port folders** — any directory named like a TCP port (`8080`,
+   `9123`, …) that contains `flags.env` / `launch.sh` / `ctrl.sh` / … under
+   `$HOME`, paths hinted by live process argv, or extra roots from:
+
+   - env: `MODEL_SWITCHBOARD_SCAN_ROOTS=/path/a:/path/b`
+   - config: `~/.local/share/model-switchboard-agent/config.json` → `"scan_roots": ["…"]`
+
+Identity comes from `/v1/models`, process argv (`-m`, `vllm serve …`), or
+flags keys that already exist — never a fabricated HF repo name.
+
+```bash
+model-switchboard-agent ports          # listening + claims
+model-switchboard-agent scan-profiles  # profile folders + port claims
+curl -sS -H "Authorization: Bearer $TOKEN" http://HOST:8877/api/ports | jq .
+```
+

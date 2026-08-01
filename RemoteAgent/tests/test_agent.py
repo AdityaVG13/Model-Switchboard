@@ -839,5 +839,113 @@ class ProfileDirectoryTests(unittest.TestCase):
             self.assertTrue(chosen.is_dir())
 
 
+
+
+class DiscoveryTests(unittest.TestCase):
+    def test_parse_loose_env_bash_defaults(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "flags.env"
+            path.write_text(
+                'PORT="${PORT:-9099}"\n'
+                'MODEL="${MODEL:-/models/demo.gguf}"\n'
+                'HOST="${HOST:-127.0.0.1}"\n'
+                'BACKEND="${BACKEND:-vllm}"\n',
+                encoding="utf-8",
+            )
+            values = agent.parse_loose_env_assignments(path)
+            self.assertEqual(values["PORT"], "9099")
+            self.assertEqual(values["MODEL"], "/models/demo.gguf")
+            self.assertEqual(values["BACKEND"], "vllm")
+
+    def test_infer_runtime_and_model_from_command(self) -> None:
+        cmd = "/opt/bin/llama-server -m /models/foo-Q8_0.gguf --port 8027 --host 127.0.0.1"
+        self.assertEqual(agent.infer_runtime_from_command(cmd), "llama.cpp")
+        self.assertEqual(agent.infer_model_from_command(cmd), "/models/foo-Q8_0.gguf")
+        vllm = "python -m vllm.entrypoints.openai.api_server --model org/model-7b --port 8081"
+        self.assertEqual(agent.infer_runtime_from_command(vllm), "vllm")
+        # Never invent a model when argv has none.
+        self.assertIsNone(agent.infer_model_from_command("some-random-daemon --port 99"))
+
+    def test_scan_port_claim_directories_is_path_agnostic(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            # Arbitrary parent name — not /data/launch.
+            claim = root / "my-servers" / "9123"
+            claim.mkdir(parents=True)
+            (claim / "flags.env").write_text(
+                'PORT="${PORT:-9123}"\n'
+                'MODEL="${MODEL:-/w/custom.gguf}"\n'
+                'LLAMA_BIN="${LLAMA_BIN:-/usr/bin/llama-server}"\n',
+                encoding="utf-8",
+            )
+            (claim / "launch.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+            (claim / "launch.sh").chmod(0o755)
+            found = agent.scan_port_claim_directories(roots=[root], max_depth=3)
+            ports = {item["port"] for item in found}
+            self.assertIn(9123, ports)
+            item = next(item for item in found if item["port"] == 9123)
+            self.assertEqual(item["runtime_hint"], "llama.cpp")
+            self.assertIn("custom.gguf", item["model_hint"])
+            self.assertEqual(item["path"], str(claim.resolve()))
+
+    def test_status_merges_claims_without_inventing_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profiles = root / "model-profiles"
+            profiles.mkdir()
+            claims_root = root / "wherever"
+            port_dir = claims_root / "9555"
+            port_dir.mkdir(parents=True)
+            (port_dir / "flags.env").write_text(
+                'MODEL="${MODEL:-/models/real.gguf}"\nPORT="${PORT:-9555}"\n',
+                encoding="utf-8",
+            )
+            (port_dir / "launch.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+            (port_dir / "launch.sh").chmod(0o755)
+            configuration = agent.AgentConfiguration(
+                root=root,
+                host="127.0.0.1",
+                port=18877,
+                profiles_dir=profiles,
+            )
+            service = agent.AgentService(configuration)
+            # Point scan at our temp tree via env.
+            old = os.environ.get(agent.SCAN_ROOTS_ENV)
+            os.environ[agent.SCAN_ROOTS_ENV] = str(claims_root)
+            try:
+                payload = service.status_payload()
+            finally:
+                if old is None:
+                    os.environ.pop(agent.SCAN_ROOTS_ENV, None)
+                else:
+                    os.environ[agent.SCAN_ROOTS_ENV] = old
+            names = {item["profile"] for item in payload["statuses"]}
+            self.assertIn("port-9555", names)
+            claim_status = next(item for item in payload["statuses"] if item["profile"] == "port-9555")
+            self.assertEqual(claim_status["port"], "9555")
+            self.assertIn("real.gguf", claim_status["request_model"])
+            # Down + unprobed: not ready, not a fake vLLM.
+            self.assertFalse(claim_status["ready"])
+            self.assertNotEqual(claim_status["runtime"], "vllm")
+            self.assertEqual(claim_status["discovery_source"], "claim")
+            self.assertIsInstance(claim_status["log_path"], str)
+
+    def test_discovered_status_log_path_is_string(self) -> None:
+        """Mac Codable requires log_path: String — null breaks the gateway UI."""
+        status = agent.status_dict_from_discovery(
+            {
+                "port": 9555,
+                "display_name": "demo",
+                "runtime": "llama.cpp",
+                "request_model": "/models/demo.gguf",
+                "ready": False,
+            },
+            source="claim",
+            profile_name="port-9555",
+        )
+        self.assertIsInstance(status["log_path"], str)
+        self.assertTrue(status["log_path"])
+
+
 if __name__ == "__main__":
     unittest.main()
