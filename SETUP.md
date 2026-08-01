@@ -25,7 +25,7 @@ Everything you need beyond the README's quickstart. This is also what the app's 
 
 ## The operating model
 
-`ModelSwitchboard` is the control surface, not the runtime.
+`ModelSwitchboard` is the control surface; model processes live in the runtimes.
 
 There are three layers:
 
@@ -213,7 +213,7 @@ Other tools fit into one of these buckets:
 - `Jan`, `Open WebUI`, `SoulForge`, `vLLM Studio`
   - client UX, orchestration, or alternate serving layers
 - `vLLM`
-  - strong on CUDA/Linux, not the default serious choice on Apple Silicon laptops
+  - strong on CUDA/Linux; a secondary option on Apple Silicon laptops
 
 A high-performance macOS stack:
 
