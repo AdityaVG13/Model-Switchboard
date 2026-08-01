@@ -35,6 +35,7 @@ extension MenuBarContentView {
                     modelListSection
                     remoteGatewaySections
                 }
+                .padding(.bottom, 8)
             }
             .frame(maxHeight: .infinity)
             panelDivider

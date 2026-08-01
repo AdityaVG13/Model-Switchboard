@@ -6,6 +6,9 @@ extension SwitchboardStore {
     var canReopenLastActive: Bool {
         features.supportsBenchmarks &&
         !lastActiveProfiles.isEmpty &&
+        // Only offer reopen when those profiles still exist in this store
+        // (avoids a dead "Reopen Last Active" after profiles were removed).
+        lastActiveProfiles.contains { name in statuses.contains { $0.profile == name } } &&
         !pendingGlobalActions.contains("reopen-last") &&
         !statuses.contains(where: \.running) &&
         pendingProfileActions.isEmpty

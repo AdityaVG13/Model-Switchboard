@@ -8,6 +8,14 @@ extension MenuBarContentView {
     /// visually unchanged.
     @ViewBuilder
     var remoteGatewaySections: some View {
+        // Hairline only when local content sits above remotes (otherwise it
+        // double-divides under the filter tabs).
+        if !hub.enabledRemoteRuntimes.isEmpty, !store.sortedStatuses.isEmpty {
+            theme.line
+                .frame(height: 1)
+                .padding(.horizontal, 10)
+                .padding(.top, 4)
+        }
         ForEach(hub.enabledRemoteRuntimes) { runtime in
             RemoteGatewaySectionView(
                 runtime: runtime,
@@ -126,6 +134,10 @@ struct RemoteGatewaySectionView: View {
         if runtime.tunnelState == .connecting { return DashboardTheme.pendingOrange }
         if store.lastError != nil { return DashboardTheme.stopRed }
         if store.displayedReadyProfiles > 0 { return DashboardTheme.runningGreen }
+        // Fresh contact with the agent counts as online even with 0 models ready.
+        if store.lastUpdated != nil, store.statusFreshness(relativeTo: .now) == .fresh {
+            return DashboardTheme.runningGreen.opacity(0.55)
+        }
         return theme.dotOff
     }
 

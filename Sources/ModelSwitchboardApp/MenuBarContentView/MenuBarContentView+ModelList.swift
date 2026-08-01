@@ -80,9 +80,66 @@ extension MenuBarContentView {
     var heroSection: some View {
         if let hero = heroProfile {
             heroCard(hero)
-        } else if store.canReopenLastActive {
+        } else if let remoteActive = remoteActiveSummary {
+            remoteActiveCard(remoteActive)
+        } else if store.canReopenLastActive, hub.displayedRunningProfiles == 0 {
+            // Never claim "nothing running" while a remote gateway has models up.
             reopenCard
         }
+    }
+
+    /// First remote gateway that currently shows a running/ready model, for the
+    /// hero strip when This Mac is idle.
+    private var remoteActiveSummary: (name: String, profile: ModelProfileStatus)? {
+        for runtime in hub.enabledRemoteRuntimes {
+            if let status = runtime.store.sortedStatuses.first(where: {
+                MenuBarContentView.isDisplayedRunning($0, in: runtime.store)
+            }) {
+                return (runtime.name, status)
+            }
+        }
+        return nil
+    }
+
+    private func remoteActiveCard(_ summary: (name: String, profile: ModelProfileStatus)) -> some View {
+        let profile = summary.profile
+        let label = profile.ready ? "ACTIVE ON \(summary.name.uppercased())" : "STARTING ON \(summary.name.uppercased())"
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(DashboardTheme.runningGreen)
+                    .frame(width: 6, height: 6)
+                    .shadow(color: DashboardTheme.runningGreen.opacity(0.6), radius: 3)
+                Text(label)
+                    .font(.system(size: 10, weight: .semibold))
+                    .kerning(0.8)
+                    .foregroundStyle(accent)
+            }
+            Text(profile.displayName)
+                .font(.system(size: 14, weight: .semibold))
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("\(profile.runtimeLabel ?? profile.runtime) · :\(profile.port) · \(summary.name)")
+                .font(.system(size: 10.5, design: .monospaced))
+                .foregroundStyle(theme.sub)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            LinearGradient(
+                colors: [accent.opacity(0.13), accent.opacity(0.05)],
+                startPoint: .top,
+                endPoint: .bottom
+            ),
+            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(accent.opacity(0.25), lineWidth: 1)
+        }
+        .padding(EdgeInsets(top: 8, leading: 10, bottom: 0, trailing: 10))
     }
 
     func heroCard(_ profile: ModelProfileStatus) -> some View {
@@ -202,27 +259,34 @@ extension MenuBarContentView {
 
     // MARK: - Model list
 
+    @ViewBuilder
     var modelListSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            DashboardSectionLabel(
-                text: heroProfile != nil ? "STANDBY · \(standbyProfiles.count)" : "MODELS · \(standbyProfiles.count)",
-                theme: theme
-            )
-            .padding(EdgeInsets(top: 6, leading: 4, bottom: 4, trailing: 4))
+        // Multi-gateway: if This Mac has no profiles at all, skip the empty
+        // "MODELS · 0" block — remote sections already carry the list.
+        if store.sortedStatuses.isEmpty && hub.hasRemoteGateways {
+            EmptyView()
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                DashboardSectionLabel(
+                    text: heroProfile != nil ? "STANDBY · \(standbyProfiles.count)" : "MODELS · \(standbyProfiles.count)",
+                    theme: theme
+                )
+                .padding(EdgeInsets(top: 6, leading: 4, bottom: 4, trailing: 4))
 
-            if standbyProfiles.isEmpty {
-                Text(localEmptyMessage)
-                    .font(.system(size: 11))
-                    .foregroundStyle(theme.sub)
-                    .padding(EdgeInsets(top: 2, leading: 4, bottom: 8, trailing: 4))
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
-                ForEach(standbyProfiles) { profile in
-                    profileRow(profile)
+                if standbyProfiles.isEmpty {
+                    Text(localEmptyMessage)
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.sub)
+                        .padding(EdgeInsets(top: 2, leading: 4, bottom: 8, trailing: 4))
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    ForEach(standbyProfiles) { profile in
+                        profileRow(profile)
+                    }
                 }
             }
+            .padding(EdgeInsets(top: 0, leading: 10, bottom: 6, trailing: 10))
         }
-        .padding(EdgeInsets(top: 0, leading: 10, bottom: 6, trailing: 10))
     }
 
 
