@@ -211,9 +211,7 @@ extension MenuBarContentView {
             .padding(EdgeInsets(top: 6, leading: 4, bottom: 4, trailing: 4))
 
             if standbyProfiles.isEmpty {
-                Text(store.sortedStatuses.isEmpty
-                    ? "No model profiles reported yet. Check the controller connection in Settings."
-                    : "No models match this filter.")
+                Text(localEmptyMessage)
                     .font(.system(size: 11))
                     .foregroundStyle(theme.sub)
                     .padding(EdgeInsets(top: 2, leading: 4, bottom: 8, trailing: 4))
@@ -225,6 +223,20 @@ extension MenuBarContentView {
             }
         }
         .padding(EdgeInsets(top: 0, leading: 10, bottom: 6, trailing: 10))
+    }
+
+
+    var localEmptyMessage: String {
+        if !store.sortedStatuses.isEmpty {
+            return "No models match this filter."
+        }
+        if hub.hasRemoteGateways {
+            if store.lastError != nil {
+                return "This Mac controller is offline. Remote gateways below still work."
+            }
+            return "No local model profiles. Remote gateways are listed below."
+        }
+        return "No model profiles reported yet. Check the controller connection in Settings."
     }
 
     func profileRow(_ profile: ModelProfileStatus) -> some View {

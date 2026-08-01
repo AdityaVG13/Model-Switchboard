@@ -80,7 +80,12 @@ struct ModelSwitchboardApp: App {
                     tokenSaveTask = Task {
                         try? await Task.sleep(for: .milliseconds(400))
                         guard !Task.isCancelled else { return }
-                        KeychainTokenStorage.shared.save(newValue)
+                        let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                        // Never delete a saved local token because the field was
+                        // briefly empty while editing.
+                        if !trimmed.isEmpty {
+                            KeychainTokenStorage.shared.save(trimmed)
+                        }
                         store.controllerAuthToken = newValue
                         await store.refresh()
                     }

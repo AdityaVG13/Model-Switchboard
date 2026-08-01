@@ -29,10 +29,19 @@ public final class KeychainTokenStorage: Sendable {
     }
 
     public func load() -> String? {
-        if let accessGroup, let value = load(accessGroup: accessGroup) {
+        // Prefer the non-group item first. Ad-hoc / local re-signs of the menu bar
+        // app cannot always read App Group keychain items, and a failed group
+        // probe used to surface as "token missing" so users re-pasted forever.
+        if let value = load(accessGroup: nil), !value.isEmpty {
             return value
         }
-        return load(accessGroup: nil)
+        if let accessGroup, let value = load(accessGroup: accessGroup), !value.isEmpty {
+            // Heal: mirror into the durable non-group slot so the next launch
+            // (and ad-hoc rebuilds) keep working without a keychain prompt.
+            _ = save(data: Data(value.utf8), accessGroup: nil)
+            return value
+        }
+        return nil
     }
 
     public func save(_ token: String) {
@@ -42,10 +51,13 @@ public final class KeychainTokenStorage: Sendable {
             return
         }
         let data = Data(trimmed.utf8)
-        if let accessGroup, save(data: data, accessGroup: accessGroup) == errSecSuccess {
-            return
-        }
+        // Always write the non-group item — this is what survives rebuilds of
+        // ad-hoc signed debug installs without re-authorizing keychain access.
         _ = save(data: data, accessGroup: nil)
+        // Best-effort App Group copy for the widget / shared suite.
+        if let accessGroup {
+            _ = save(data: data, accessGroup: accessGroup)
+        }
     }
 
     public func delete() {
@@ -66,19 +78,28 @@ public final class KeychainTokenStorage: Sendable {
     }
 
     private func save(data: Data, accessGroup: String?) -> OSStatus {
-        var query = baseQuery(accessGroup: accessGroup)
-        query[kSecValueData as String] = data
-        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        let status = SecItemAdd(query as CFDictionary, nil)
-        guard status == errSecDuplicateItem else { return status }
+        // Update-first: avoids duplicate-item races and keeps the existing
+        // keychain ACL so the user is not prompted again on every save.
         let update: [String: Any] = [
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
         ]
-        return SecItemUpdate(
+        let updateStatus = SecItemUpdate(
             baseQuery(accessGroup: accessGroup) as CFDictionary,
             update as CFDictionary
         )
+        if updateStatus == errSecSuccess {
+            return errSecSuccess
+        }
+        if updateStatus != errSecItemNotFound {
+            // Fall through to add only when the item is missing; other errors
+            // (auth failed, etc.) still try add after a delete.
+            _ = delete(accessGroup: accessGroup)
+        }
+        var query = baseQuery(accessGroup: accessGroup)
+        query[kSecValueData as String] = data
+        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        return SecItemAdd(query as CFDictionary, nil)
     }
 
     private func delete(accessGroup: String?) -> OSStatus {

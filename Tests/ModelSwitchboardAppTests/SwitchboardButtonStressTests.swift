@@ -160,6 +160,24 @@ import ModelSwitchboardTestSupport
 }
 
 @MainActor
+@Test func appTransportSecurityErrorIsMappedToShortCopy() {
+    let error = NSError(
+        domain: NSURLErrorDomain,
+        code: -1022,
+        userInfo: [NSLocalizedDescriptionKey: "The resource could not be loaded because the App Transport Security policy requires the use of a secure connection."]
+    )
+    let message = SwitchboardStore.userFacingErrorDescription(for: error)
+    #expect(message.contains("App Transport Security") || message.contains("plain HTTP"))
+    #expect(!message.contains("could not be loaded because"))
+}
+
+@MainActor
+@Test func gatewayHostUnreachableIsMapped() {
+    let message = SwitchboardStore.userFacingErrorDescription(for: URLError(.cannotConnectToHost))
+    #expect(message.contains("refused") || message.contains("agent"))
+}
+
+@MainActor
 @Test func failedBenchmarkStartDoesNotArmCooldown() async {
     let defaults = UserDefaults.standard
     let previousBenchmarkStartedAt = defaults.object(forKey: "modelswitchboard.last-benchmark-started-at")

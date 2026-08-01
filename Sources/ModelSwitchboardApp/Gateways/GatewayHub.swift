@@ -96,7 +96,12 @@ final class GatewayHub {
 
     func upsertGateway(_ config: GatewayConfig, token: String) {
         let storage = tokenStorageFactory(config.id)
-        storage.save(token)
+        let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Empty field means "leave the keychain token alone" — never wipe a
+        // saved token just because SecureField was blank on Save.
+        if !trimmed.isEmpty {
+            storage.save(trimmed)
+        }
         var configs = GatewayConfigStore.load(from: defaults)
         if let index = configs.firstIndex(where: { $0.id == config.id }) {
             configs[index] = config

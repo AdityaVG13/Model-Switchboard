@@ -62,7 +62,7 @@ extension MenuBarContentView {
                 }
             }
         }
-        .padding(EdgeInsets(top: 9, leading: 14, bottom: 9, trailing: 14))
+        .padding(EdgeInsets(top: 9, leading: 16, bottom: 9, trailing: 16))
     }
 
     var syncableIntegrations: [ControllerIntegration] {
@@ -107,15 +107,21 @@ extension MenuBarContentView {
     }
 
     func footerState(relativeTo now: Date) -> (label: String, color: Color)? {
-        switch store.statusFreshness(relativeTo: now) {
-        case .cached:
-            return ("CACHED", .orange)
-        case .stale:
-            return ("STALE", .orange)
-        case .error:
-            return ("ERROR", .red)
-        case .fresh:
+        // With remote gateways, a dead local controller must not paint the whole
+        // panel STALE while Spark (or another remote) is live.
+        let states = hub.allStores.map { $0.statusFreshness(relativeTo: now) }
+        if states.contains(.fresh) {
             return nil
         }
+        if states.contains(.cached) {
+            return ("CACHED", .orange)
+        }
+        if states.contains(.stale) {
+            return ("STALE", .orange)
+        }
+        if states.contains(.error) {
+            return ("ERROR", .red)
+        }
+        return nil
     }
 }

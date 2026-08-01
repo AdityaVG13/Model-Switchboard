@@ -4,8 +4,10 @@ import SwiftUI
 extension MenuBarContentView {
     var mainPanelCard: some View {
         mainPanel
-            .frame(width: mainPanelWidth, height: panelHeight)
+            .frame(width: mainPanelWidth, height: panelHeight, alignment: .topLeading)
             .background(theme.panelBg)
+            // continuous clip can nibble monospaced header digits on the leading edge
+            // if subviews draw flush against x=0; keep a hair of internal inset.
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -24,7 +26,7 @@ extension MenuBarContentView {
         VStack(alignment: .leading, spacing: 0) {
             header
             panelDivider
-            if let error = store.lastError {
+            if let error = localPanelError {
                 errorBanner(error)
             }
             ScrollView {
@@ -42,6 +44,16 @@ extension MenuBarContentView {
 
     var panelDivider: some View {
         theme.line.frame(height: 1)
+    }
+
+    /// Local-only banner. Remote gateway errors render in their section so a
+    /// downed Mac controller does not paint the whole multi-gateway panel red.
+    var localPanelError: String? {
+        guard let error = store.lastError, !error.isEmpty else { return nil }
+        if hub.hasRemoteGateways, store.sortedStatuses.isEmpty {
+            return nil
+        }
+        return error
     }
 
     func errorBanner(_ error: String) -> some View {

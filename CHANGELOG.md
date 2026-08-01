@@ -5,6 +5,8 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 ### Fixed
 
+- Direct/Tailscale remote gateways no longer fail under App Transport Security (plain HTTP on private networks allowed in Info.plist); transport errors map to short dashboard copy.
+- Dashboard header ready-count and refresh now span all gateways (not only local); footer STALE no longer fires when a remote feed is live.
 - Remote agent stop now reaps zombie/defunct model processes, treats them as not running, force-kills after a longer vLLM-friendly wait, and exposes `stop --force` / `kill-all`.
 - Tailscale agent binds require a bearer token by default (`--allow-unauthenticated` opt-out); installer generates and prints the token.
 - Watchdog no longer auto-starts a model after agent reboot from a leftover `active-profile` file (session-supervised crash recovery only).

@@ -197,11 +197,18 @@ struct GatewaySettingsSection: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("Bearer token (optional)")
+                Text("Bearer token")
                     .font(.system(size: 12.5))
-                SecureField("Stored in your keychain", text: $draftToken)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 11.5, design: .monospaced))
+                SecureField(
+                    tokenFieldPrompt,
+                    text: $draftToken
+                )
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 11.5, design: .monospaced))
+                Text(tokenFieldHelp)
+                    .font(.system(size: 10))
+                    .foregroundStyle(theme.sub)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if let validationMessage {
@@ -224,6 +231,25 @@ struct GatewaySettingsSection: View {
             }
         }
         .padding(EdgeInsets(top: 9, leading: 12, bottom: 9, trailing: 12))
+    }
+
+    private var hasStoredToken: Bool {
+        guard let id = draft?.id else { return false }
+        return !hub.authToken(forGateway: id).isEmpty
+    }
+
+    private var tokenFieldPrompt: String {
+        if draftIsNew || !hasStoredToken || !draftToken.isEmpty {
+            return "Paste token — stored in keychain"
+        }
+        return "••••••••  leave blank to keep saved token"
+    }
+
+    private var tokenFieldHelp: String {
+        if hasStoredToken, draftToken.isEmpty, !draftIsNew {
+            return "A token is already saved in the keychain for this gateway. Leave blank to keep it, or paste a new one to replace it."
+        }
+        return "Required for Tailscale/direct agents with auth. Saved once in the keychain — you should not need to re-paste after relaunch."
     }
 
     private func save() {

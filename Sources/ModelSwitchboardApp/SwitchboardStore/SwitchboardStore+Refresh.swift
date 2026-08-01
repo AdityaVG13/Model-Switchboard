@@ -58,7 +58,7 @@ extension SwitchboardStore {
                 lastError = bootstrapDiagnostic ?? "Controller unavailable. Showing cached state."
                 return
             }
-            lastError = bootstrapDiagnostic ?? error.localizedDescription
+            lastError = bootstrapDiagnostic ?? Self.userFacingErrorDescription(for: error)
         }
     }
 
@@ -74,7 +74,7 @@ extension SwitchboardStore {
             bootstrapDiagnostic = nil
         } catch {
             if isBenignCancellation(error) { return }
-            lastError = bootstrapDiagnostic ?? error.localizedDescription
+            lastError = bootstrapDiagnostic ?? Self.userFacingErrorDescription(for: error)
         }
     }
 

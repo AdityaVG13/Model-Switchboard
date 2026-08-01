@@ -7,9 +7,9 @@ extension MenuBarContentView {
             HStack(alignment: .firstTextBaseline) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     (
-                        Text("\(store.displayedReadyProfiles)")
+                        Text("\(hub.displayedReadyProfiles)")
                             .fontWeight(.bold)
-                        + Text("/\(store.summary.totalProfiles)")
+                        + Text("/\(hub.totalProfiles)")
                             .fontWeight(.medium)
                             .foregroundStyle(theme.faint)
                     )
@@ -19,17 +19,17 @@ extension MenuBarContentView {
                         .foregroundStyle(theme.sub)
                 }
                 .accessibilityElement(children: .combine)
-                .accessibilityLabel("\(store.displayedReadyProfiles) of \(store.summary.totalProfiles) models ready")
+                .accessibilityLabel("\(hub.displayedReadyProfiles) of \(hub.totalProfiles) models ready")
 
                 Spacer()
 
                 HStack(spacing: 8) {
-                    if store.isRefreshing {
+                    if hub.allStores.contains(where: \.isRefreshing) {
                         ProgressView()
                             .controlSize(.mini)
                     } else {
                         Button {
-                            Task { await store.refresh() }
+                            hub.refreshAll()
                         } label: {
                             Image(systemName: "arrow.clockwise")
                                 .font(.system(size: 10, weight: .semibold))
@@ -37,7 +37,7 @@ extension MenuBarContentView {
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Refresh")
-                        .help("Refresh status")
+                        .help("Refresh all gateways")
                     }
                     Text("v\(Self.appVersion)")
                         .font(.system(size: 11))
@@ -56,7 +56,7 @@ extension MenuBarContentView {
                 theme: theme
             )
         }
-        .padding(EdgeInsets(top: 14, leading: 14, bottom: 10, trailing: 14))
+        .padding(EdgeInsets(top: 14, leading: 16, bottom: 10, trailing: 16))
     }
 
     var utilizationGrid: some View {

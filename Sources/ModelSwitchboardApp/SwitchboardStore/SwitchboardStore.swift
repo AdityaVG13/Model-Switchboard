@@ -11,7 +11,7 @@ final class SwitchboardStore {
         static let lastActiveProfilesKey = "modelswitchboard.last-active-profiles"
         static let benchmarkCooldownKey = "modelswitchboard.last-benchmark-started-at"
         static let benchmarkCooldownSeconds: TimeInterval = 300
-        static let statusStaleThresholdSeconds: TimeInterval = 45
+        static let statusStaleThresholdSeconds: TimeInterval = 900 // > AutoRefreshPolicy.idleInterval (600)
         static let loopbackEndpointProbeFastIntervalSeconds: TimeInterval = 2
         static let loopbackEndpointProbeSteadyIntervalSeconds: TimeInterval = 5
         static let loopbackEndpointProbeIdleIntervalSeconds: TimeInterval = 15

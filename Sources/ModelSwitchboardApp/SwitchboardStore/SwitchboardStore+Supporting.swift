@@ -92,6 +92,9 @@ extension SwitchboardStore {
         status: ModelProfileStatus? = nil,
         diagnostic: ProfileDiagnostic? = nil
     ) -> String {
+        if let mapped = mapTransportError(error) {
+            return mapped
+        }
         guard isTimeout(error) else { return error.localizedDescription }
 
         let profileName = status?.displayName ?? diagnostic?.displayName
@@ -105,6 +108,46 @@ extension SwitchboardStore {
             message += " The model may still be launching; refresh after it finishes or run Controller Doctor."
         }
         return message
+    }
+
+    /// Map raw URLSession / ATS failures to short dashboard copy.
+    static func mapTransportError(_ error: Error) -> String? {
+        let nsError = error as NSError
+        var chain: [NSError] = [nsError]
+        var current: NSError? = nsError
+        while let next = current?.userInfo[NSUnderlyingErrorKey] as? NSError {
+            chain.append(next)
+            current = next
+        }
+        let joined = chain
+            .map { "\($0.localizedDescription)" }
+            .joined(separator: " ")
+            .lowercased()
+
+        // NSURLErrorAppTransportSecurityRequiresSecureConnection == -1022
+        let isATS = chain.contains {
+            $0.domain == NSURLErrorDomain && $0.code == -1022
+        } || joined.contains("app transport security") || joined.contains("secure connection")
+        if isATS {
+            return "Blocked plain HTTP to this gateway (App Transport Security). Rebuild the app with ATS exceptions, or switch the gateway to SSH tunnel."
+        }
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .notConnectedToInternet:
+                return "No network route to the gateway."
+            case .cannotFindHost, .dnsLookupFailed:
+                return "Gateway host not found. Check MagicDNS / hostname."
+            case .cannotConnectToHost:
+                return "Gateway refused the connection. Is the agent running?"
+            case .networkConnectionLost:
+                return "Connection to the gateway was lost."
+            case .userAuthenticationRequired, .userCancelledAuthentication:
+                return "Gateway rejected the request (auth). Check the bearer token in Settings."
+            default:
+                break
+            }
+        }
+        return nil
     }
 
     static func isTimeout(_ error: Error) -> Bool {
