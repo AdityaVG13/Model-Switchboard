@@ -899,13 +899,19 @@ class ProcessRssMbTests(unittest.TestCase):
 
 
 class ListListeningTcpTests(unittest.TestCase):
-    """list_listening_tcp: one ss/lsof parse; process_command once per unique pid."""
+    """list_listening_tcp: /proc then ss/lsof; process_command once per unique pid."""
 
     def setUp(self) -> None:
         agent.clear_listening_tcp_cache()
 
     def tearDown(self) -> None:
         agent.clear_listening_tcp_cache()
+
+    def _disable_proc_inventory(self):
+        """Force ss/lsof path (macOS + unit tests that mock subprocess)."""
+        return unittest.mock.patch.object(
+            agent, "_linux_proc_listening_endpoints", return_value=None
+        )
 
     def test_ss_path_resolves_cmdline_once_per_unique_pid(self) -> None:
         # Same PID on two ports (and a third line without pid): one process_command.
@@ -923,13 +929,14 @@ class ListListeningTcpTests(unittest.TestCase):
                 return unittest.mock.Mock(stdout=ss_out, returncode=0)
             return unittest.mock.Mock(stdout="", returncode=1)
 
-        with unittest.mock.patch.object(
-            agent.subprocess, "run", side_effect=run_side_effect
-        ) as run_mock:
+        with self._disable_proc_inventory():
             with unittest.mock.patch.object(
-                agent, "process_command", return_value="python -m server"
-            ) as cmd_mock:
-                rows = agent.list_listening_tcp()
+                agent.subprocess, "run", side_effect=run_side_effect
+            ) as run_mock:
+                with unittest.mock.patch.object(
+                    agent, "process_command", return_value="python -m server"
+                ) as cmd_mock:
+                    rows = agent.list_listening_tcp()
 
         # ss once; lsof must not run when ss yields listeners.
         ss_calls = [c for c in run_mock.call_args_list if c[0][0][0] == "ss"]
@@ -967,13 +974,14 @@ class ListListeningTcpTests(unittest.TestCase):
                 return unittest.mock.Mock(stdout=lsof_out, returncode=0)
             return unittest.mock.Mock(stdout="", returncode=1)
 
-        with unittest.mock.patch.object(
-            agent.subprocess, "run", side_effect=run_side_effect
-        ):
+        with self._disable_proc_inventory():
             with unittest.mock.patch.object(
-                agent, "process_command", return_value="/usr/bin/python3 app"
-            ) as cmd_mock:
-                rows = agent.list_listening_tcp()
+                agent.subprocess, "run", side_effect=run_side_effect
+            ):
+                with unittest.mock.patch.object(
+                    agent, "process_command", return_value="/usr/bin/python3 app"
+                ) as cmd_mock:
+                    rows = agent.list_listening_tcp()
 
         cmd_mock.assert_called_once_with(99)
         by_port = {row["port"]: row for row in rows}
@@ -997,13 +1005,14 @@ class ListListeningTcpTests(unittest.TestCase):
                 return unittest.mock.Mock(stdout=ss_out, returncode=0)
             return unittest.mock.Mock(stdout="", returncode=1)
 
-        with unittest.mock.patch.object(
-            agent.subprocess, "run", side_effect=run_side_effect
-        ):
+        with self._disable_proc_inventory():
             with unittest.mock.patch.object(
-                agent, "process_command", return_value="python -m vllm.entrypoints"
-            ) as cmd_mock:
-                rows = agent.list_listening_tcp()
+                agent.subprocess, "run", side_effect=run_side_effect
+            ):
+                with unittest.mock.patch.object(
+                    agent, "process_command", return_value="python -m vllm.entrypoints"
+                ) as cmd_mock:
+                    rows = agent.list_listening_tcp()
 
         cmd_mock.assert_called_once_with(4242)
         by_port = {row["port"]: row for row in rows}
@@ -1037,19 +1046,101 @@ class ListListeningTcpTests(unittest.TestCase):
                 return unittest.mock.Mock(stdout=ss_out, returncode=0)
             return unittest.mock.Mock(stdout="", returncode=1)
 
-        with unittest.mock.patch.object(
-            agent.subprocess, "run", side_effect=run_side_effect
-        ):
+        with self._disable_proc_inventory():
             with unittest.mock.patch.object(
-                agent, "process_command", return_value="python -m server"
-            ) as cmd_mock:
-                rows = agent.list_listening_tcp()
+                agent.subprocess, "run", side_effect=run_side_effect
+            ):
+                with unittest.mock.patch.object(
+                    agent, "process_command", return_value="python -m server"
+                ) as cmd_mock:
+                    rows = agent.list_listening_tcp()
 
         cmd_mock.assert_called_once_with(other_pid)
         by_port = {row["port"]: row for row in rows}
         self.assertEqual(by_port[agent.DEFAULT_PORT]["pid"], self_pid)
         self.assertIsNone(by_port[agent.DEFAULT_PORT]["command"])
         self.assertEqual(by_port[9000]["command"], "python -m server")
+
+
+    def test_proc_net_tcp_path_skips_ss_and_resolves_pid(self) -> None:
+        """Linux /proc inventory: no ss/lsof; cmdline once per unique pid."""
+        # Synthetic /proc tree: two LISTEN ports, same owner pid via socket inodes.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            net = root / "net"
+            net.mkdir(parents=True)
+            # 127.0.0.1:8080 and 127.0.0.1:8081, state 0A (LISTEN), inodes 111/222
+            # IP 7F000001 little-endian = 0100007F; ports 1F90=8080, 1F91=8081
+            (net / "tcp").write_text(
+                "  sl  local_address rem_address   st tx_queue rx_queue tr "
+                "tm->when retrnsmt   uid  timeout inode\n"
+                "   0: 0100007F:1F90 00000000:0000 0A 00000000:00000000 "
+                "00:00000000 00000000     0        0 111 1 0000000000000000 100 0 0 10 0\n"
+                "   1: 0100007F:1F91 00000000:0000 0A 00000000:00000000 "
+                "00:00000000 00000000     0        0 222 1 0000000000000000 100 0 0 10 0\n"
+                "   2: 0100007F:0050 00000000:0000 01 00000000:00000000 "
+                "00:00000000 00000000     0        0 333 1 0000000000000000 100 0 0 10 0\n",
+                encoding="utf-8",
+            )
+            (net / "tcp6").write_text(
+                "  sl  local_address                         "
+                "remote_address                        st tx_queue rx_queue\n",
+                encoding="utf-8",
+            )
+            fd_dir = root / "4242" / "fd"
+            fd_dir.mkdir(parents=True)
+            (fd_dir / "3").symlink_to("socket:[111]")
+            (fd_dir / "4").symlink_to("socket:[222]")
+
+            def run_boom(*args, **kwargs):  # type: ignore[no-untyped-def]
+                raise AssertionError("ss/lsof must not run when /proc inventory works")
+
+            real_proc = agent._linux_proc_listening_endpoints
+
+            def fake_proc(proc_root=None):  # type: ignore[no-untyped-def]
+                return real_proc(proc_root=root)
+
+            with unittest.mock.patch.object(
+                agent, "_linux_proc_listening_endpoints", side_effect=fake_proc
+            ):
+                with unittest.mock.patch.object(agent.subprocess, "run", side_effect=run_boom):
+                    with unittest.mock.patch.object(
+                        agent, "process_command", return_value="python -m vllm"
+                    ) as cmd_mock:
+                        rows = agent.list_listening_tcp()
+
+            cmd_mock.assert_called_once_with(4242)
+            by_port = {row["port"]: row for row in rows}
+            self.assertEqual(set(by_port), {8080, 8081})
+            self.assertEqual(by_port[8080]["pid"], 4242)
+            self.assertEqual(by_port[8080]["command"], "python -m vllm")
+            self.assertEqual(by_port[8080]["bind"], "127.0.0.1")
+            self.assertEqual(by_port[8081]["pid"], 4242)
+            self.assertEqual(by_port[8081]["command"], "python -m vllm")
+            for row in rows:
+                self.assertEqual(set(row), {"port", "pid", "command", "bind"})
+
+    def test_parse_proc_net_tcp_table_ipv4_and_skips_non_listen(self) -> None:
+        table = (
+            "  sl  local_address rem_address   st tx_queue rx_queue tr "
+            "tm->when retrnsmt   uid  timeout inode\n"
+            "   0: 00000000:0016 00000000:0000 0A 00000000:00000000 "
+            "00:00000000 00000000     0        0 99 1 0000000000000000 100 0 0 10 0\n"
+            "   1: 0100007F:1F90 00000000:0000 01 00000000:00000000 "
+            "00:00000000 00000000     0        0 100 1 0000000000000000 100 0 0 10 0\n"
+        )
+        rows = agent._parse_proc_net_tcp_table(table, ipv6=False)
+        self.assertEqual(len(rows), 1)
+        port, bind, inode = rows[0]
+        self.assertEqual(port, 22)
+        self.assertEqual(bind, "0.0.0.0")
+        self.assertEqual(inode, 99)
+
+    def test_linux_proc_unavailable_returns_none(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            missing = Path(tmp) / "no-such-proc"
+            self.assertIsNone(agent._linux_proc_listening_endpoints(proc_root=missing))
+
 
     def test_discover_live_skips_agent_self_by_pid_without_command(self) -> None:
         self_pid = os.getpid()
@@ -1088,19 +1179,20 @@ class ListListeningTcpTests(unittest.TestCase):
                 return unittest.mock.Mock(stdout=ss_out, returncode=0)
             return unittest.mock.Mock(stdout="", returncode=1)
 
-        with unittest.mock.patch.object(
-            agent.time, "monotonic", side_effect=lambda: clock["t"]
-        ):
+        with self._disable_proc_inventory():
             with unittest.mock.patch.object(
-                agent.subprocess, "run", side_effect=run_side_effect
-            ) as run_mock:
+                agent.time, "monotonic", side_effect=lambda: clock["t"]
+            ):
                 with unittest.mock.patch.object(
-                    agent, "process_command", return_value="python -m server"
-                ):
-                    first = agent.list_listening_tcp()
-                    # Still well inside LISTENING_TCP_CACHE_TTL_SECONDS (75ms).
-                    clock["t"] = 1000.0 + 0.05
-                    second = agent.list_listening_tcp()
+                    agent.subprocess, "run", side_effect=run_side_effect
+                ) as run_mock:
+                    with unittest.mock.patch.object(
+                        agent, "process_command", return_value="python -m server"
+                    ):
+                        first = agent.list_listening_tcp()
+                        # Still well inside LISTENING_TCP_CACHE_TTL_SECONDS (75ms).
+                        clock["t"] = 1000.0 + 0.05
+                        second = agent.list_listening_tcp()
 
         ss_calls = [c for c in run_mock.call_args_list if c[0][0][0] == "ss"]
         self.assertEqual(len(ss_calls), 1)
@@ -1121,18 +1213,19 @@ class ListListeningTcpTests(unittest.TestCase):
                 return unittest.mock.Mock(stdout=ss_out, returncode=0)
             return unittest.mock.Mock(stdout="", returncode=1)
 
-        with unittest.mock.patch.object(
-            agent.time, "monotonic", side_effect=lambda: clock["t"]
-        ):
+        with self._disable_proc_inventory():
             with unittest.mock.patch.object(
-                agent.subprocess, "run", side_effect=run_side_effect
-            ) as run_mock:
+                agent.time, "monotonic", side_effect=lambda: clock["t"]
+            ):
                 with unittest.mock.patch.object(
-                    agent, "process_command", return_value="python -m server"
-                ):
-                    agent.list_listening_tcp()
-                    clock["t"] = 1000.0 + agent.LISTENING_TCP_CACHE_TTL_SECONDS + 0.001
-                    agent.list_listening_tcp()
+                    agent.subprocess, "run", side_effect=run_side_effect
+                ) as run_mock:
+                    with unittest.mock.patch.object(
+                        agent, "process_command", return_value="python -m server"
+                    ):
+                        agent.list_listening_tcp()
+                        clock["t"] = 1000.0 + agent.LISTENING_TCP_CACHE_TTL_SECONDS + 0.001
+                        agent.list_listening_tcp()
 
         ss_calls = [c for c in run_mock.call_args_list if c[0][0][0] == "ss"]
         self.assertEqual(len(ss_calls), 2)

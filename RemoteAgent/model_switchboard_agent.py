@@ -1071,19 +1071,24 @@ def clear_listening_tcp_cache() -> None:
 def list_listening_tcp() -> list[dict[str, Any]]:
     """Inventory local TCP listeners with pid/command when available.
 
-    Mirrors the Ports.app idea: port + owning process + command line. Cross
-    platform via `ss` (Linux) then `lsof` (macOS/Linux).
+    Mirrors the Ports.app idea: port + owning process + command line.
 
-    One `ss` (or, if empty, one `lsof`) parse per uncached call. Command lines
-    are resolved once per unique PID via process_command within that inventory
-    -- no longer-lived process_command cache. Ports in SKIP_LISTEN_PORTS and
-    the agent self listener (DEFAULT_PORT + own pid) skip cmdline resolution;
-    command may be None for those rows. Same pid on a non-skip port still
-    resolves when that row is seen.
+    Order per uncached call:
+      1. Linux `/proc/net/tcp` + `/proc/net/tcp6` (no spawn; inode→pid via
+         `/proc/*/fd`) when `/proc/net/tcp` is readable.
+      2. `ss -lntupH` (Linux) when /proc path is unavailable.
+      3. `lsof` when still empty (macOS / sparse ss).
+
+    Command lines are resolved once per unique PID via process_command within
+    that inventory -- no longer-lived process_command cache. Ports in
+    SKIP_LISTEN_PORTS and the agent self listener (DEFAULT_PORT + own pid) skip
+    cmdline resolution; command may be None for those rows. Same pid on a
+    non-skip port still resolves when that row is seen.
 
     Module-level cache (LISTENING_TCP_CACHE_TTL_SECONDS, default 75ms) so
     concurrent or back-to-back status/ports polls in the same process skip
-    re-running ss. Results may lag ≤TTL -- intentional for poll coalescing.
+    re-running inventory. Results may lag ≤TTL -- intentional for poll
+    coalescing.
     """
     global _listening_tcp_cache
     now = time.monotonic()
@@ -1094,6 +1099,161 @@ def list_listening_tcp() -> list[dict[str, Any]]:
         result = _list_listening_tcp_uncached()
         _listening_tcp_cache = (now, result)
         return result
+
+
+# /proc/net/tcp{,6} connection state: TCP_LISTEN
+_PROC_TCP_LISTEN_STATE = "0A"
+
+
+def _decode_proc_net_ip(addr_hex: str, *, ipv6: bool) -> str:
+    """Decode a /proc/net/tcp{,6} local address field to a presentation string."""
+    if not ipv6:
+        try:
+            value = int(addr_hex, 16)
+        except ValueError:
+            return addr_hex
+        # Little-endian 32-bit host word → dotted IPv4.
+        return (
+            f"{value & 0xFF}."
+            f"{(value >> 8) & 0xFF}."
+            f"{(value >> 16) & 0xFF}."
+            f"{(value >> 24) & 0xFF}"
+        )
+    # IPv6: eight-hex-digit words, each little-endian on the host.
+    cleaned = addr_hex.strip()
+    if len(cleaned) != 32:
+        return cleaned
+    try:
+        words: list[str] = []
+        for index in range(0, 32, 8):
+            word = cleaned[index : index + 8]
+            # Reverse byte pairs within the 32-bit word.
+            words.append("".join(word[j : j + 2] for j in range(6, -1, -2)))
+        packed = bytes.fromhex("".join(words))
+        return socket.inet_ntop(socket.AF_INET6, packed)
+    except (ValueError, OSError):
+        return cleaned
+
+
+def _parse_proc_net_tcp_table(
+    text: str, *, ipv6: bool = False
+) -> list[tuple[int, str, int]]:
+    """Parse /proc/net/tcp or tcp6 into (port, bind, inode) LISTEN rows."""
+    rows: list[tuple[int, str, int]] = []
+    lines = text.splitlines()
+    if len(lines) < 2:
+        return rows
+    for line in lines[1:]:
+        parts = line.split()
+        # sl local_address rem_address st ... inode (index 9)
+        if len(parts) < 10:
+            continue
+        if parts[3] != _PROC_TCP_LISTEN_STATE:
+            continue
+        local = parts[1]
+        if ":" not in local:
+            continue
+        ip_hex, port_hex = local.rsplit(":", 1)
+        try:
+            port = int(port_hex, 16)
+            inode = int(parts[9])
+        except ValueError:
+            continue
+        if port <= 0 or port > 65535:
+            continue
+        bind = _decode_proc_net_ip(ip_hex, ipv6=ipv6)
+        rows.append((port, bind, inode))
+    return rows
+
+
+def _socket_inodes_to_pids(
+    proc_root: Path, needed: set[int] | None = None
+) -> dict[int, int]:
+    """Map socket inode → owning pid by reading ``proc_root/*/fd`` symlinks.
+
+    When *needed* is provided, stop once every requested inode is resolved
+    (typical: only the LISTEN sockets from /proc/net/tcp — far fewer than all
+    open sockets on the box).
+    """
+    mapping: dict[int, int] = {}
+    remaining: set[int] | None = set(needed) if needed is not None else None
+    try:
+        entries = os.listdir(proc_root)
+    except OSError:
+        return mapping
+    for name in entries:
+        if remaining is not None and not remaining:
+            break
+        if not name.isdigit():
+            continue
+        pid = int(name)
+        fd_dir = proc_root / name / "fd"
+        try:
+            fds = os.listdir(fd_dir)
+        except OSError:
+            continue
+        for fd_name in fds:
+            try:
+                target = os.readlink(fd_dir / fd_name)
+            except OSError:
+                continue
+            if not (target.startswith("socket:[") and target.endswith("]")):
+                continue
+            try:
+                inode = int(target[8:-1])
+            except ValueError:
+                continue
+            if remaining is not None and inode not in remaining:
+                continue
+            # First owner wins (matches typical ss "one pid" presentation).
+            if inode not in mapping:
+                mapping[inode] = pid
+                if remaining is not None:
+                    remaining.discard(inode)
+                    if not remaining:
+                        break
+    return mapping
+
+
+def _linux_proc_listening_endpoints(
+    proc_root: Path | None = None,
+) -> list[tuple[int, int | None, str]] | None:
+    """Linux /proc inventory of TCP listeners as (port, pid, bind).
+
+    Returns None when ``/proc/net/tcp`` is not readable so callers fall back to
+    ss/lsof (macOS, restricted containers). An empty list means the table was
+    readable and there are simply no LISTEN sockets.
+    """
+    root = proc_root if proc_root is not None else Path("/proc")
+    tcp_path = root / "net" / "tcp"
+    try:
+        tcp_text = tcp_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+    table = _parse_proc_net_tcp_table(tcp_text, ipv6=False)
+    tcp6_path = root / "net" / "tcp6"
+    try:
+        table.extend(
+            _parse_proc_net_tcp_table(
+                tcp6_path.read_text(encoding="utf-8"), ipv6=True
+            )
+        )
+    except OSError:
+        pass
+
+    need_inodes = {inode for _, _, inode in table if inode > 0}
+    inode_to_pid = (
+        _socket_inodes_to_pids(root, needed=need_inodes) if need_inodes else {}
+    )
+
+    endpoints: list[tuple[int, int | None, str]] = []
+    for port, bind, inode in table:
+        pid: int | None = None
+        if inode > 0:
+            pid = inode_to_pid.get(inode)
+        endpoints.append((port, pid, bind))
+    return endpoints
 
 
 def _list_listening_tcp_uncached() -> list[dict[str, Any]]:
@@ -1131,6 +1291,13 @@ def _list_listening_tcp_uncached() -> list[dict[str, Any]]:
             existing["command"] = command
         if bind and bind not in (existing.get("bind") or ""):
             existing["bind"] = bind
+
+    # Prefer pure /proc on Linux -- avoids ss spawn (rank-1 after ps→/proc).
+    proc_endpoints = _linux_proc_listening_endpoints()
+    if proc_endpoints is not None:
+        for port, pid, bind in proc_endpoints:
+            note(port, pid, cmdline(pid, port=port), bind)
+        return [by_port[key] for key in sorted(by_port)]
 
     # Linux ss: State Recv-Q Send-Q Local Address:Port Peer Address:Port Process
     try:
