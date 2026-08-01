@@ -1316,6 +1316,15 @@ def roots_hinted_by_commands(commands: list[str | None]) -> list[Path]:
     return found
 
 
+def _normalize_scan_root(root: Path) -> Path:
+    """Expand ~ and resolve once for stable identity (symlink prefixes, '..').
+
+    Root count is tiny vs dirent work; resolve is kept so macOS /var vs
+    /private/var and overlapping roots share one path key.
+    """
+    return root.expanduser().resolve()
+
+
 def scan_port_claim_directories(
     roots: list[Path] | None = None,
     *,
@@ -1333,7 +1342,11 @@ def scan_port_claim_directories(
       • explicit `roots` argument
       • MODEL_SWITCHBOARD_SCAN_ROOTS / config.json scan_roots
       • paths embedded in live process commands / profile START_COMMANDs
-      • $HOME (shallow only — developer homes are huge)
+      • $HOME shallow fallback only when primary roots yield no claims
+        (developer homes are huge -- avoid re-walking when primary already hit)
+
+    Dirent work is bounded within one call: remaining-depth visit map skips
+    re-iterdir when roots overlap; is_dir is memoized for the scan.
     """
     hinted: list[Path] = []
     try:
@@ -1344,24 +1357,47 @@ def scan_port_claim_directories(
     except Exception:
         pass
 
+    # Per-scan is_dir memo (root admission + walk); paths reappear under overlap.
+    is_dir_memo: dict[Path, bool] = {}
+
+    def path_is_dir(path: Path) -> bool:
+        cached = is_dir_memo.get(path)
+        if cached is not None:
+            return cached
+        try:
+            ok = path.is_dir()
+        except OSError:
+            ok = False
+        is_dir_memo[path] = ok
+        return ok
+
     primary: list[Path] = []
+    primary_set: set[Path] = set()
     for root in (roots or []) + _configured_scan_roots(agent_root) + hinted:
         try:
-            resolved = root.expanduser().resolve()
+            resolved = _normalize_scan_root(root)
         except OSError:
             continue
-        if resolved not in primary and resolved.is_dir():
+        if resolved in primary_set:
+            continue
+        if path_is_dir(resolved):
+            primary_set.add(resolved)
             primary.append(resolved)
+
+    # Parents first so a higher remaining budget covers nested sibling roots.
+    primary.sort(key=lambda p: (len(p.parts), str(p)))
 
     home_roots: list[Path] = []
     try:
-        home = Path.home().resolve()
-        if home.is_dir() and home not in primary:
+        home = _normalize_scan_root(Path.home())
+        if path_is_dir(home) and home not in primary_set:
             home_roots.append(home)
     except OSError:
         pass
 
     claims: dict[int, dict[str, Any]] = {}
+    # directory -> best remaining depth already walked (skip re-iterdir on overlap)
+    walked_remaining: dict[Path, int] = {}
 
     def consider_claim(directory: Path) -> None:
         if len(claims) >= limit:
@@ -1446,7 +1482,14 @@ def scan_port_claim_directories(
     def walk(directory: Path, depth: int, depth_limit: int) -> None:
         if depth > depth_limit or len(claims) >= limit:
             return
+        remaining = depth_limit - depth
+        prior = walked_remaining.get(directory)
+        if prior is not None and prior >= remaining:
+            return
+        walked_remaining[directory] = remaining
         consider_claim(directory)
+        if remaining == 0:
+            return
         try:
             entries = list(directory.iterdir())
         except OSError:
@@ -1454,20 +1497,19 @@ def scan_port_claim_directories(
         for entry in entries:
             if entry.name in PROFILE_SCAN_SKIP_DIRS or entry.name.startswith("."):
                 continue
-            try:
-                if entry.is_dir():
-                    walk(entry, depth + 1, depth_limit)
-            except OSError:
-                continue
+            if path_is_dir(entry):
+                walk(entry, depth + 1, depth_limit)
 
     for root in primary:
         walk(root, 0, max_depth)
         if len(claims) >= limit:
             break
-    for root in home_roots:
-        walk(root, 0, home_depth)
-        if len(claims) >= limit:
-            break
+    # $HOME is a costly shallow fallback -- only when primary found nothing.
+    if not claims:
+        for root in home_roots:
+            walk(root, 0, home_depth)
+            if len(claims) >= limit:
+                break
 
     return [claims[key] for key in sorted(claims)]
 

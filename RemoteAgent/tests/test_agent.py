@@ -1437,6 +1437,59 @@ class DiscoveryTests(unittest.TestCase):
             self.assertIn("custom.gguf", item["model_hint"])
             self.assertEqual(item["path"], str(claim.resolve()))
 
+    def test_scan_overlapping_roots_still_discovers_claim(self) -> None:
+        """Parent + nested roots must not drop claims when visit map dedupes."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            claim = root / "a" / "b" / "9222"
+            claim.mkdir(parents=True)
+            (claim / "flags.env").write_text(
+                'PORT="${PORT:-9222}"\nMODEL="${MODEL:-/w/overlap.gguf}"\n',
+                encoding="utf-8",
+            )
+            (claim / "launch.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+            (claim / "launch.sh").chmod(0o755)
+            found = agent.scan_port_claim_directories(
+                roots=[root, root / "a", root / "a" / "b"],
+                max_depth=3,
+                listeners=[],
+            )
+            ports = {item["port"] for item in found}
+            self.assertIn(9222, ports)
+
+    def test_scan_skips_home_when_primary_yields_claims(self) -> None:
+        """$HOME is a costly fallback -- skip when configured roots already hit."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            primary = root / "configured"
+            claim = primary / "9333"
+            claim.mkdir(parents=True)
+            (claim / "flags.env").write_text(
+                'PORT="${PORT:-9333}"\n',
+                encoding="utf-8",
+            )
+            (claim / "launch.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+            (claim / "launch.sh").chmod(0o755)
+            home = root / "fake-home"
+            home_claim = home / "9444"
+            home_claim.mkdir(parents=True)
+            (home_claim / "flags.env").write_text(
+                'PORT="${PORT:-9444}"\n',
+                encoding="utf-8",
+            )
+            (home_claim / "launch.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+            (home_claim / "launch.sh").chmod(0o755)
+            with unittest.mock.patch.object(Path, "home", return_value=home):
+                found = agent.scan_port_claim_directories(
+                    roots=[primary],
+                    max_depth=2,
+                    home_depth=2,
+                    listeners=[],
+                )
+            ports = {item["port"] for item in found}
+            self.assertIn(9333, ports)
+            self.assertNotIn(9444, ports)
+
     def test_status_merges_claims_without_inventing_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
