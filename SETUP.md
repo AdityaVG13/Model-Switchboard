@@ -84,7 +84,7 @@ Typical fields:
 - `SERVER_MODEL_ID`
 
 ### `mlx`
-Best when you have an MLX-native converted model and want strong Apple-local throughput.
+Best for MLX-native converted models on Apple Silicon.
 
 Typical fields:
 
@@ -107,7 +107,7 @@ Typical fields:
 - `SERVER_MODEL_ID`
 
 ### `vllm-mlx`
-Best current speed lane for MLX model directories on Apple Silicon.
+Best for high-throughput MLX model directories on Apple Silicon.
 
 Typical fields:
 
@@ -374,7 +374,7 @@ APP_VARIANT=plus ./Scripts/build-dmg.sh   # Plus DMG
 ./Scripts/verify-installed-app.sh
 ```
 
-Source installs use the workmanship-hardened installer:
+Source installs use the hardened installer:
 
 ```bash
 ./Scripts/install.sh --variant base

@@ -18,7 +18,7 @@ All notable changes to this project are documented in this file.
 - Single-file, stdlib-only Python remote agent (`RemoteAgent/`) speaking the exact controller HTTP contract, with launch templates for vLLM, llama.cpp, SGLang, and TGI plus `START_COMMAND` for any other runtime; validated by a cross-implementation conformance suite driven by the app's own `ControllerClient`.
 - One-click agent deployment over SSH from Settings (nothing downloaded on the remote host), `modelswitchboard-gateway://` pairing codes (`model-switchboard-agent link`), and a `curl | bash` installer fallback.
 - App-managed SSH tunnels using the user's own keys (`BatchMode`), with jittered reconnect backoff, classified failure messages, and automatic same-port forwarding of running models' endpoints.
-- Tailscale mode: `--tailscale` binds the agent to the host's tailnet address only, and pairing codes carry `mode=direct` so the Mac connects tunnel-lessly via MagicDNS.
+- Tailscale mode: `--tailscale` binds the agent to the host's tailnet address only, and pairing codes carry `mode=direct` so the Mac connects via MagicDNS without a tunnel.
 - Per-gateway bearer tokens in the keychain; non-loopback agent binds outside a tailnet require `--unsafe-bind` plus a ≥16-byte token, mirroring the local controller.
 - Profiles-folder discovery: default `~/model-profiles/` on remotes; `model-switchboard-agent link` scans `$HOME` for existing launch `.env`/`.json` files (e.g. `model.env`), confirms or accepts a pasted path, and persists it (`--profiles-dir` / `MODEL_SWITCHBOARD_PROFILES_DIR`). Mac controller gains matching `--profiles-dir` + `config.json` support.
 

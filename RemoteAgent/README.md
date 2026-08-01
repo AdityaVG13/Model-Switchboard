@@ -5,7 +5,7 @@ workstation, a home server) from the Model Switchboard menu bar app on your
 Mac.
 
 The agent is a **single Python file with zero dependencies** (Python 3.10+,
-stdlib only). It speaks the exact same HTTP contract as the macOS controller,
+stdlib only). It speaks the same HTTP contract as the macOS controller,
 reads the same `model-profiles/*.env|*.json` profile format, and is what the
 app's **remote gateways** feature talks to.
 
@@ -76,7 +76,8 @@ gateway's models then appear in the main panel under its own named section.
   opens `ssh -N -L` to it using your existing SSH keys/agent (`BatchMode`;
   passwords are never handled; connect once from Terminal first so the host
   key is trusted). Running models' ports are forwarded automatically, so
-  copied endpoint URLs work directly on the Mac. Zero ports exposed.
+  copied endpoint URLs work directly on the Mac. The agent does not open
+  ports on the network.
 - **Tailscale.** If both machines are on your tailnet, skip tunnels entirely:
 
   ```bash

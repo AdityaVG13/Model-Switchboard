@@ -7,7 +7,7 @@
 
 <p>
   <em><strong>Flip between local LLM runtimes from your menu bar.</strong></em><br/>
-  <strong>Activate one runtime, or stop everything, from the menu bar.</strong>
+  <strong>Activate one runtime, or stop everything.</strong>
 </p>
 
 <p>
@@ -69,7 +69,7 @@ Click **Activate**. Every other model stops. The one you picked comes up at an O
 
 ## What's in the panel
 
-**`Activate` stops every other profile and brings the chosen one up.** A previous large process does not stay loaded when you switch. Profiles are marked **ready** after a successful `/v1/models` probe (or your custom HTTP check). The UI is **SwiftUI** with `MenuBarExtra`. The app does not ship Electron, a bundled inference engine, or a resident background worker that keeps the CPU busy when idle.
+**`Activate` stops every other profile and brings the chosen one up.** The previous process is stopped on switch, not left loaded. Profiles are marked **ready** after a successful `/v1/models` probe (or your custom HTTP check). The UI is **SwiftUI** with `MenuBarExtra`. The app does not ship Electron, a bundled inference engine, or a resident background worker that keeps the CPU busy when idle.
 
 <table>
 <tr>
@@ -113,7 +113,7 @@ Remote hosts -- a DGX box, lab workstation, or home server -- show up in the sam
 - **Tailscale-native.** Tick *Tailscale mode* on install (or run the agent with `--tailscale`). The gateway connects directly over your tailnet -- WireGuard-encrypted, no tunnel process, MagicDNS names in endpoint URLs.
 - **Or direct LAN**, guarded the same way as the local controller. Non-loopback binds demand a ≥16-byte bearer token, stored in your keychain.
 - **Any runtime.** Launch templates cover vLLM, llama.cpp, SGLang, and TGI. Use `START_COMMAND` for anything else (same profile files as local models). Live rows show which model is serving on which port, with the URL as reachable *from your Mac*.
-- **Profiles folder.** Default is `~/model-profiles/` on the remote (Mac controller can use `--profiles-dir` too). `link` scans for existing `.env` launch files and lets you confirm or paste the folder AI/you already use.
+- **Profiles folder.** Default is `~/model-profiles/` on the remote (Mac controller can use `--profiles-dir` too). `link` scans for existing `.env` launch files and lets you confirm or paste a folder you already use.
 - **Everything aggregates.** Each gateway gets its own named section in the panel. The menu bar ready-count spans every gateway. `Stop Everything` sweeps them all.
 
 Setup lives in [RemoteAgent/README.md](RemoteAgent/README.md) and the [SETUP.md remote gateways chapter](SETUP.md#remote-gateways).
@@ -172,7 +172,7 @@ cd Model-Switchboard
 
 The installer places a fresh build under `~/Applications/` and installs `model-switchboardctl` to `~/.local/bin`. It writes bash/zsh/fish completions and registers the app with Launch Services. It also forces a Spotlight import so Raycast and Alfred pick it up. Use `./Scripts/install.sh --help` for quiet mode, custom install paths, `--verify`, and `--skip-open`.
 
-Agent-facing CLI entrypoints are built in. Use `model-switchboardctl capabilities`, `robot-docs guide`, `triage`, and `doctor --json` for machine-readable contracts, paste-ready guidance, one-call health triage, and structured diagnostics. Mutating commands (`start`, `stop`, `restart`, `switch`/`activate`, `stop-all`) accept `--dry-run`/`--plan`. Add `--json` for a structured result envelope.
+Agent-facing CLI entrypoints: `model-switchboardctl capabilities`, `robot-docs guide`, `triage`, and `doctor --json` for machine-readable contracts, paste-ready guidance, one-call health triage, and structured diagnostics. Mutating commands (`start`, `stop`, `restart`, `switch`/`activate`, `stop-all`) accept `--dry-run`/`--plan`. Add `--json` for a structured result envelope.
 
 ---
 
@@ -271,7 +271,7 @@ See **[CHANGELOG.md](CHANGELOG.md)** for release-by-release detail and **[Releas
 
 ## Deep docs
 
-All the deeper material lives in one place so this README stays skimmable:
+Deeper material:
 
 > **[SETUP.md](SETUP.md)**: profile formats, supported runtimes, health checks, controller API contract, build-from-source flow, release pipeline, Raycast power-user notes, troubleshooting, and known limitations.
 > **[Controller/RUNTIME_SUPPORT.md](Controller/RUNTIME_SUPPORT.md)**: canonical runtime table, launch modes, profile templates, readiness modes.
