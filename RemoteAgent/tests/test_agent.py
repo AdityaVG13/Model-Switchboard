@@ -879,6 +879,100 @@ class ListListeningTcpTests(unittest.TestCase):
         self.assertEqual(by_port[9000]["command"], "/usr/bin/python3 app")
         self.assertEqual(by_port[9001]["command"], "/usr/bin/python3 app")
 
+    def test_skips_process_command_for_skip_listen_ports(self) -> None:
+        # ssh (22) is in SKIP_LISTEN_PORTS: still record pid/port/bind, no cmdline.
+        ss_out = "\n".join(
+            [
+                "LISTEN 0 128 0.0.0.0:22 0.0.0.0:* users:((\"sshd\",pid=1,fd=3))",
+                "LISTEN 0 128 127.0.0.1:53 0.0.0.0:* users:((\"dns\",pid=2,fd=4))",
+                "LISTEN 0 128 127.0.0.1:8080 0.0.0.0:* users:((\"vllm\",pid=4242,fd=5))",
+                "",
+            ]
+        )
+
+        def run_side_effect(cmd, *args, **kwargs):  # type: ignore[no-untyped-def]
+            if cmd and cmd[0] == "ss":
+                return unittest.mock.Mock(stdout=ss_out, returncode=0)
+            return unittest.mock.Mock(stdout="", returncode=1)
+
+        with unittest.mock.patch.object(
+            agent.subprocess, "run", side_effect=run_side_effect
+        ):
+            with unittest.mock.patch.object(
+                agent, "process_command", return_value="python -m vllm.entrypoints"
+            ) as cmd_mock:
+                rows = agent.list_listening_tcp()
+
+        cmd_mock.assert_called_once_with(4242)
+        by_port = {row["port"]: row for row in rows}
+        self.assertEqual(set(by_port), {22, 53, 8080})
+        self.assertEqual(by_port[22]["pid"], 1)
+        self.assertIsNone(by_port[22]["command"])
+        self.assertEqual(by_port[53]["pid"], 2)
+        self.assertIsNone(by_port[53]["command"])
+        self.assertEqual(by_port[8080]["pid"], 4242)
+        self.assertEqual(by_port[8080]["command"], "python -m vllm.entrypoints")
+
+    def test_skips_process_command_for_agent_self_port(self) -> None:
+        self_pid = os.getpid()
+        other_pid = self_pid + 99999
+        ss_out = "\n".join(
+            [
+                (
+                    f"LISTEN 0 128 127.0.0.1:{agent.DEFAULT_PORT} 0.0.0.0:* "
+                    f"users:((\"agent\",pid={self_pid},fd=3))"
+                ),
+                (
+                    f"LISTEN 0 128 127.0.0.1:9000 0.0.0.0:* "
+                    f"users:((\"srv\",pid={other_pid},fd=4))"
+                ),
+                "",
+            ]
+        )
+
+        def run_side_effect(cmd, *args, **kwargs):  # type: ignore[no-untyped-def]
+            if cmd and cmd[0] == "ss":
+                return unittest.mock.Mock(stdout=ss_out, returncode=0)
+            return unittest.mock.Mock(stdout="", returncode=1)
+
+        with unittest.mock.patch.object(
+            agent.subprocess, "run", side_effect=run_side_effect
+        ):
+            with unittest.mock.patch.object(
+                agent, "process_command", return_value="python -m server"
+            ) as cmd_mock:
+                rows = agent.list_listening_tcp()
+
+        cmd_mock.assert_called_once_with(other_pid)
+        by_port = {row["port"]: row for row in rows}
+        self.assertEqual(by_port[agent.DEFAULT_PORT]["pid"], self_pid)
+        self.assertIsNone(by_port[agent.DEFAULT_PORT]["command"])
+        self.assertEqual(by_port[9000]["command"], "python -m server")
+
+    def test_discover_live_skips_agent_self_by_pid_without_command(self) -> None:
+        self_pid = os.getpid()
+        listeners = [
+            {
+                "port": agent.DEFAULT_PORT,
+                "pid": self_pid,
+                "command": None,
+                "bind": "127.0.0.1",
+            },
+            {
+                "port": 9000,
+                "pid": 99,
+                "command": "python -m vllm.entrypoints.openai.api_server",
+                "bind": "127.0.0.1",
+            },
+        ]
+        with unittest.mock.patch.object(
+            agent, "port_is_listening", return_value=False
+        ):
+            found = agent.discover_live_model_endpoints(listeners=listeners)
+        ports = {item["port"] for item in found}
+        self.assertNotIn(agent.DEFAULT_PORT, ports)
+        self.assertIn(9000, ports)
+
 
 class ConfigurationTests(unittest.TestCase):
     def test_non_loopback_bind_requires_unsafe_flag_and_token(self) -> None:

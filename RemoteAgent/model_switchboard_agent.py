@@ -976,15 +976,23 @@ def list_listening_tcp() -> list[dict[str, Any]]:
     platform via `ss` (Linux) then `lsof` (macOS/Linux).
 
     One `ss` (or, if empty, one `lsof`) parse. Command lines are resolved once
-    per unique PID via process_command -- no cross-request cache.
+    per unique PID via process_command -- no cross-request cache. Ports in
+    SKIP_LISTEN_PORTS and the agent self listener (DEFAULT_PORT + own pid)
+    skip cmdline resolution; command may be None for those rows. Same pid on a
+    non-skip port still resolves when that row is seen.
     """
     by_port: dict[int, dict[str, Any]] = {}
     # Same PID often owns several binds (IPv4+IPv6, multi-port). Resolve once.
     cmd_by_pid: dict[int, str | None] = {}
+    self_pid = os.getpid()
 
-    def cmdline(pid: int | None) -> str | None:
+    def cmdline(pid: int | None, *, port: int) -> str | None:
         if not pid:
             return None
+        # System / clearly non-model ports and this agent: no /proc|ps.
+        # Do not cache a miss for skip ports -- same pid may need resolve later.
+        if port in SKIP_LISTEN_PORTS or (port == DEFAULT_PORT and pid == self_pid):
+            return cmd_by_pid.get(pid)
         if pid not in cmd_by_pid:
             cmd_by_pid[pid] = process_command(pid)
         return cmd_by_pid[pid]
@@ -1034,7 +1042,7 @@ def list_listening_tcp() -> list[dict[str, Any]]:
             pid_match = re.search(r"pid=(\d+)", line)
             if pid_match:
                 pid = int(pid_match.group(1))
-            note(port, pid, cmdline(pid), bind)
+            note(port, pid, cmdline(pid, port=port), bind)
     except (OSError, subprocess.TimeoutExpired):
         pass
 
@@ -1060,7 +1068,7 @@ def list_listening_tcp() -> list[dict[str, Any]]:
                 if port is None:
                     continue
                 bind = name.rsplit(":", 1)[0].strip("[]") if ":" in name else name
-                note(port, pid, cmdline(pid), bind)
+                note(port, pid, cmdline(pid, port=port), bind)
         except (OSError, subprocess.TimeoutExpired):
             pass
 
@@ -1417,11 +1425,20 @@ def discover_live_model_endpoints(
     discovered: list[dict[str, Any]] = []
     probes_left = DISCOVERY_PROBE_BUDGET
 
+    self_pid = os.getpid()
     for listener in (listeners if listeners is not None else list_listening_tcp()):
         port = int(listener["port"])
         if port in SKIP_LISTEN_PORTS:
             continue
-        # Skip the agent itself.
+        # Skip the agent itself: prefer pid (works without cmdline resolution).
+        listener_pid = listener.get("pid")
+        if (
+            port == DEFAULT_PORT
+            and listener_pid is not None
+            and int(listener_pid) == self_pid
+        ):
+            continue
+        # Fallback when pid missing: cmdline name (if list_listening resolved it).
         if port == DEFAULT_PORT and command_looks_like_model_server(
             listener.get("command") or ""
         ) is False:
