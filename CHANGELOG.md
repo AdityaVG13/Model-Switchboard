@@ -6,7 +6,7 @@ All notable changes to this project are documented in this file.
 ### Fixed
 
 - Direct/Tailscale remote gateways no longer fail under App Transport Security (plain HTTP on private networks allowed in Info.plist); transport errors map to short dashboard copy.
-- Dashboard header ready-count and refresh now span all gateways (not only local); footer STALE no longer fires when a remote feed is live.
+- Dashboard header ready-count and refresh now span all gateways, including remotes; footer STALE no longer fires when a remote feed is live.
 - Multi-gateway dashboard polish: no false "NOTHING RUNNING" when remotes are active; hide empty local MODELS when only remotes exist; online status dots for connected gateways.
 - Remote agent stop now reaps zombie/defunct model processes, treats them as not running, force-kills after a longer vLLM-friendly wait, and exposes `stop --force` / `kill-all`.
 - Tailscale agent binds require a bearer token by default (`--allow-unauthenticated` opt-out); installer generates and prints the token.
@@ -23,7 +23,7 @@ All notable changes to this project are documented in this file.
 - Profiles-folder discovery: default `~/model-profiles/` on remotes; `model-switchboard-agent link` scans `$HOME` for existing launch `.env`/`.json` files (e.g. `model.env`), confirms or accepts a pasted path, and persists it (`--profiles-dir` / `MODEL_SWITCHBOARD_PROFILES_DIR`). Mac controller gains matching `--profiles-dir` + `config.json` support.
 
 ### Fixed
-- Keychain token saves now update existing items; previously edits to a saved controller token were silently discarded (`SecItemAdd` duplicate). Token edits are also debounced instead of saved per keystroke.
+- Keychain token saves now update existing items; previously edits to a saved controller token were silently discarded (`SecItemAdd` duplicate). Token edits are debounced, not saved per keystroke.
 - Remote gateway thermos follow-ups: token-only gateway edits sync the live store; direct/Tailscale rows no longer advertise dead loopback rewrites; SSH destinations are option-terminated and reject leading `-`; ControlMaster sockets are per-tunnel-instance; embedded RemoteAgent files are verified at pack time.
 
 ## [1.3.0] - 2026-07-29
@@ -48,7 +48,7 @@ All notable changes to this project are documented in this file.
 - Aligned the menu-bar RAM readout with Activity Monitor by counting used memory as active + wired + compressed pages, so inactive file cache is no longer reported as used and the percentage no longer drifts from other stats apps.
 - Kept the footer status badge inline (no wrapping) with a line limit and fixed-size layout, so it stays on one line in both fresh and stale controller states.
 - Activated Finder as the frontmost app (`activateFileViewerSelecting`) when revealing the Profiles Folder from Settings, so the folder no longer opens behind the menu bar panel.
-- Pinned controller-root resolution to the canonical `~/Library/Application Support/ModelSwitchboard/Controller` path, so "Open Profiles Folder" always reveals the single intended folder rather than a stale or relocated root.
+- Pinned controller-root resolution to the canonical `~/Library/Application Support/ModelSwitchboard/Controller` path so "Open Profiles Folder" reveals that folder, not a stale or relocated root.
 - Stored the detached controller `Process` strongly for its lifetime so the embedded controller service is not prematurely deallocated and torn down while the app is running.
 - Serialized start/stop/switch/benchmark mutations with a process-wide lock so concurrent HTTP workers cannot interleave lifecycle actions.
 - Cleared the active-profile marker and suppressed the crash-recovery watchdog at the start of Stop so intentional stops are not undone mid-flight.
@@ -84,7 +84,7 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 - Hardened the app and controller installers with help flags, quiet/no-gum modes, preflight checks, atomic locks, install verification, and final uninstall guidance.
-- `model-switchboardctl --json` output for mutating commands now uses structured result envelopes instead of passing through raw controller responses.
+- `model-switchboardctl --json` output for mutating commands uses structured result envelopes, not raw controller pass-through.
 
 ### Fixed
 - Added a launchd `PATH` to the controller LaunchAgent so runtime tools installed in `~/.local/bin`, Homebrew, and system locations can be found without per-profile overrides.
@@ -98,7 +98,7 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 - Redesigned the README hero and gallery around the current Base, Plus, benchmark, and controller workflows.
-- Hardened controller profile parsing so `.env` profiles are treated as declarative key/value data instead of shell scripts, with explicit validation shared by the CLI and launcher.
+- Hardened controller profile parsing so `.env` profiles are declarative key/value data (not shell scripts), with explicit validation shared by the CLI and launcher.
 
 ### Fixed
 - Preserved llama.cpp chat template arguments and launcher start timeouts when generating managed runtime commands.
@@ -107,13 +107,13 @@ All notable changes to this project are documented in this file.
 ## [1.1.5] - 2026-05-02
 
 ### Fixed
-- Verified Stop and Stop All results from the app after controller responses so lingering model processes are surfaced as errors instead of being hidden by optimistic UI state.
+- Verified Stop and Stop All results from the app after controller responses so lingering model processes surface as errors, not optimistic UI success.
 
 ## [1.1.4] - 2026-05-02
 
 ### Fixed
 - Kept the dashboard open after model action clicks so users can see profiles transition through starting, stopping, and running states.
-- Hardened controller shutdown so Stop and Stop All terminate child processes, process groups, and stale profile port listeners instead of leaving model-serving Python processes resident.
+- Hardened controller shutdown so Stop and Stop All terminate child processes, process groups, and stale profile port listeners; model-serving Python processes no longer stay resident.
 
 ## [1.1.3] - 2026-05-02
 
@@ -142,7 +142,7 @@ All notable changes to this project are documented in this file.
 - Added first-class runtime labels and tags for current OpenAI-compatible local launchers including Mistral.rs, MLC-LLM, LightLLM, FastChat, OpenLLM, Nexa, MLX Omni Server, MLX Serve, LiteLLM, TensorRT-LLM, and ONNX Runtime GenAI.
 
 ### Fixed
-- Added explicit dashboard edge resize handles so resizing works from the left side of the menu window as well as the right.
+- Added explicit dashboard edge resize handles so resizing works from the left and right sides of the menu window.
 - Preferred local model directories and files before remote model IDs when a profile provides both, avoiding accidental network fetches for adapter-based launchers.
 - Preserved runtime labels, tags, and launch mode through Swift status mutations so profile cards keep displaying the controller's real runtime metadata.
 
@@ -176,27 +176,27 @@ All notable changes to this project are documented in this file.
 ## [1.0.6] - 2026-04-23
 
 ### Added
-- Added app regression coverage for fresh, stale, and cached controller snapshots so the menu bar state stays honest when localhost models stop out of band.
+- Added app regression coverage for fresh, stale, and cached controller snapshots so the menu bar does not show live state when localhost models stop out of band.
 
 ### Changed
-- Kept controller auto-refresh running for the lifetime of the app instead of only while the menu is open.
+- Kept controller auto-refresh running for the lifetime of the app, including when the menu is closed.
 - Tightened active-runtime refresh cadence from 30 seconds to 10 seconds and documented the always-resident lightweight polling model in `SETUP.md`.
 
 ### Fixed
 - Stopped stale or cached localhost status from showing live running and ready counts in the menu bar.
-- Marked stale running profiles as `STALE` instead of `RUNNING` until the next successful refresh, and updated the status-item tooltip to match.
+- Marked stale running profiles as `STALE`, not `RUNNING`, until the next successful refresh, and updated the status-item tooltip to match.
 
 ## [1.0.5] - 2026-04-20
 
 ### Added
-- Added `Scripts/bump-version.py` plus release-automation tests so version bumps update the repo consistently instead of hand-editing release files.
+- Added `Scripts/bump-version.py` plus release-automation tests so version bumps update the repo consistently without hand-editing release files.
 
 ### Changed
 - Updated `.github/workflows/release.yml` so a version bump pushed to `main` now builds, notarizes, and publishes the GitHub release automatically, while preserving manual and tag-driven releases.
 - Documented the automated maintainer release flow in `README.md` and `SETUP.md`.
 
 ### Fixed
-- Fixed local llama.cpp profile resolution so `MODEL_FILE` now works with `MODEL_ROOT_HINT`, `~/AI/models`, and `../models` fallbacks instead of requiring `MODEL_ROOT`.
+- Fixed local llama.cpp profile resolution so `MODEL_FILE` works with `MODEL_ROOT_HINT`, `~/AI/models`, and `../models` fallbacks without requiring `MODEL_ROOT`.
 - Passed through llama.cpp `CHAT_TEMPLATE_KWARGS` and `CACHE_RAM`, which restores Qwen no-think setups without forcing `RUNTIME=custom`.
 - Added `--root` support to the controller installer so LaunchAgent installs can target any controller checkout without plist hand-edits.
 
@@ -221,7 +221,7 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 - Sorted profile cards deterministically by live state first, then local endpoint order for inactive profiles, so the app no longer reshuffles idle models across refreshes.
-- Reformatted benchmark timestamps into readable local date/time output instead of exposing raw ISO strings in the panel.
+- Reformatted benchmark timestamps into readable local date/time output, not raw ISO strings in the panel.
 
 ### Fixed
 - Fixed the side-panel lifecycle so closing Benchmark, Settings, or Help no longer requires defocusing the app before reopening another panel.
