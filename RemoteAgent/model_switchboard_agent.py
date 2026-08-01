@@ -678,6 +678,7 @@ def process_stat_state(pid: int) -> str | None:
 
 
 def process_ps_state(pid: int) -> str | None:
+    """Single-letter state via `ps` (non-Linux /proc miss fallback only)."""
     try:
         result = subprocess.run(
             ["ps", "-o", "state=", "-p", str(pid)],
@@ -689,10 +690,32 @@ def process_ps_state(pid: int) -> str | None:
     return state[:1] if state else None
 
 
+def _proc_stat_table_available() -> bool:
+    """True when Linux-style /proc/<pid>/stat is the process table.
+
+    When True, a missing /proc/<pid>/stat means the pid is gone — no need for
+    `ps` or kill(0). When False (macOS, restricted mounts), fall back.
+    """
+    try:
+        return Path("/proc/self/stat").is_file()
+    except OSError:
+        return False
+
+
 def process_is_zombie(pid: int | None) -> bool:
+    """True if *pid* is a defunct/zombie process.
+
+    Linux: one /proc/<pid>/stat read. Missing entry with /proc present ⇒ not a
+    zombie (gone). Otherwise `ps -o state=` fallback.
+    """
     if not pid or pid <= 0:
         return False
-    state = process_stat_state(pid) or process_ps_state(pid)
+    state = process_stat_state(pid)
+    if state is not None:
+        return state.upper().startswith("Z")
+    if _proc_stat_table_available():
+        return False
+    state = process_ps_state(pid)
     if state is None:
         return False
     return state.upper().startswith("Z")
@@ -714,26 +737,33 @@ def process_is_alive(pid: int | None) -> bool:
 
     Defunct/zombie PIDs are treated as dead: they hold no GPU/CPU work and
     must not keep status.running true or block stop.
+
+    Linux: one /proc/<pid>/stat read decides existence + zombie without kill/ps.
+    Other platforms (or no /proc): ps state, then kill(0) existence probe.
     """
     if not pid or pid <= 0:
         return False
-    # Reap our own children first so kill(pid, 0) does not keep seeing zombies.
+    # Reap our own children first so unreaped zombies do not linger.
     if reap_child(pid):
         return False
-    if process_is_zombie(pid):
-        # Foreign zombies (or ones we cannot wait on) still exist in the table
-        # but are not "running" for switchboard purposes.
+    state = process_stat_state(pid)
+    if state is not None:
+        # Authoritative on Linux: Z is not "running"; any other letter is live.
+        return not state.upper().startswith("Z")
+    if _proc_stat_table_available():
+        # /proc is the process table and this pid has no entry ⇒ dead.
         return False
+    # No /proc (macOS, etc.): ps state, then kill(0).
+    state = process_ps_state(pid)
+    if state is not None:
+        return not state.upper().startswith("Z")
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
     except PermissionError:
-        # Exists but we cannot signal it; still count as alive unless zombie.
-        return not process_is_zombie(pid)
-    # kill(0) succeeds for zombies on Linux; double-check after the signal probe.
-    if process_is_zombie(pid):
-        return False
+        # Exists but we cannot signal it; state probes already failed.
+        return True
     return True
 
 

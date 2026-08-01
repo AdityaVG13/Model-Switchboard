@@ -706,6 +706,102 @@ class ProcessLifecycleTests(unittest.TestCase):
             self.assertFalse(status["running"])
 
 
+class ProcessAliveZombieTests(unittest.TestCase):
+    """process_is_alive / process_is_zombie: /proc state first, then ps/kill."""
+
+    def test_rejects_missing_pid(self) -> None:
+        self.assertFalse(agent.process_is_alive(None))
+        self.assertFalse(agent.process_is_alive(0))
+        self.assertFalse(agent.process_is_alive(-1))
+        self.assertFalse(agent.process_is_zombie(None))
+        self.assertFalse(agent.process_is_zombie(0))
+
+    def test_self_is_alive_not_zombie(self) -> None:
+        pid = os.getpid()
+        self.assertTrue(agent.process_is_alive(pid))
+        self.assertFalse(agent.process_is_zombie(pid))
+
+    def test_proc_state_live_skips_ps_and_kill(self) -> None:
+        """Linux path: non-Z /proc state is authoritative; no ps or kill."""
+        fake_stat = "4242 (python) S 1 1 1 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 0 0 0\n"
+        with unittest.mock.patch.object(agent, "Path") as mock_path:
+            # /proc/<pid>/stat content for process_stat_state
+            mock_path.return_value.read_text.return_value = fake_stat
+            with unittest.mock.patch.object(agent, "reap_child", return_value=False):
+                with unittest.mock.patch.object(agent.subprocess, "run") as run_mock:
+                    with unittest.mock.patch.object(agent.os, "kill") as kill_mock:
+                        alive = agent.process_is_alive(4242)
+                        zombie = agent.process_is_zombie(4242)
+        self.assertTrue(alive)
+        self.assertFalse(zombie)
+        run_mock.assert_not_called()
+        kill_mock.assert_not_called()
+
+    def test_proc_state_zombie_skips_ps_and_kill(self) -> None:
+        fake_stat = "99 (defunct) Z 1 1 1 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 0 0 0\n"
+        with unittest.mock.patch.object(agent, "Path") as mock_path:
+            mock_path.return_value.read_text.return_value = fake_stat
+            with unittest.mock.patch.object(agent, "reap_child", return_value=False):
+                with unittest.mock.patch.object(agent.subprocess, "run") as run_mock:
+                    with unittest.mock.patch.object(agent.os, "kill") as kill_mock:
+                        alive = agent.process_is_alive(99)
+                        zombie = agent.process_is_zombie(99)
+        self.assertFalse(alive)
+        self.assertTrue(zombie)
+        run_mock.assert_not_called()
+        kill_mock.assert_not_called()
+
+    def test_proc_table_missing_pid_is_dead_without_ps(self) -> None:
+        """When /proc is the process table and pid has no stat, skip ps/kill."""
+        with unittest.mock.patch.object(agent, "Path") as mock_path:
+            # process_stat_state → OSError; _proc_stat_table_available → True
+            def path_side_effect(arg):  # type: ignore[no-untyped-def]
+                m = unittest.mock.MagicMock()
+                path_str = str(arg)
+                if path_str == "/proc/self/stat":
+                    m.is_file.return_value = True
+                else:
+                    m.read_text.side_effect = OSError("no such process")
+                return m
+
+            mock_path.side_effect = path_side_effect
+            with unittest.mock.patch.object(agent, "reap_child", return_value=False):
+                with unittest.mock.patch.object(agent.subprocess, "run") as run_mock:
+                    with unittest.mock.patch.object(agent.os, "kill") as kill_mock:
+                        self.assertFalse(agent.process_is_alive(404))
+                        self.assertFalse(agent.process_is_zombie(404))
+        run_mock.assert_not_called()
+        kill_mock.assert_not_called()
+
+    def test_no_proc_falls_back_to_ps_state(self) -> None:
+        """macOS-style: no /proc table → ps state decides alive/zombie."""
+        with unittest.mock.patch.object(agent, "Path") as mock_path:
+            mock_path.return_value.read_text.side_effect = OSError("no /proc")
+            mock_path.return_value.is_file.return_value = False
+            with unittest.mock.patch.object(agent, "reap_child", return_value=False):
+                with unittest.mock.patch.object(agent.subprocess, "run") as run_mock:
+                    run_mock.return_value = unittest.mock.Mock(stdout="S\n")
+                    with unittest.mock.patch.object(agent.os, "kill") as kill_mock:
+                        self.assertTrue(agent.process_is_alive(77))
+                        self.assertFalse(agent.process_is_zombie(77))
+        run_mock.assert_called()
+        args = run_mock.call_args[0][0]
+        self.assertEqual(args[:3], ["ps", "-o", "state="])
+        kill_mock.assert_not_called()
+
+    def test_no_proc_ps_zombie(self) -> None:
+        with unittest.mock.patch.object(agent, "Path") as mock_path:
+            mock_path.return_value.read_text.side_effect = OSError("no /proc")
+            mock_path.return_value.is_file.return_value = False
+            with unittest.mock.patch.object(agent, "reap_child", return_value=False):
+                with unittest.mock.patch.object(agent.subprocess, "run") as run_mock:
+                    run_mock.return_value = unittest.mock.Mock(stdout="Z\n")
+                    with unittest.mock.patch.object(agent.os, "kill") as kill_mock:
+                        self.assertFalse(agent.process_is_alive(77))
+                        self.assertTrue(agent.process_is_zombie(77))
+        kill_mock.assert_not_called()
+
+
 class ProcessCommandTests(unittest.TestCase):
     """process_command: Linux /proc cmdline first, ps fallback elsewhere."""
 
