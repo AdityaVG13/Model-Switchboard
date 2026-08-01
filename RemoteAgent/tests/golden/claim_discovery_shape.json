@@ -1,0 +1,5 @@
+{
+  "must_include_profile": "port-9555",
+  "must_include_port": "9555",
+  "log_paths_all_str": true
+}
