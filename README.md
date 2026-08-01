@@ -69,7 +69,7 @@ Running local models on an Apple Silicon Mac usually means a sprawl of terminal 
 
 ## What's in the panel
 
-**`Activate` stops every other profile and brings the chosen one up.** No more forgetting to `kill -9` a 24 GB process before starting the next one. Profiles are marked **ready** *only* after a real `/v1/models` probe (or your custom HTTP check) passes — *if it says green, it means green.* Built with **SwiftUI** and `MenuBarExtra`: no Electron, no bundled inference engine, no resident background worker pegging your CPU.
+**`Activate` stops every other profile and brings the chosen one up.** No more forgetting to `kill -9` a 24 GB process before starting the next one. Profiles are marked **ready** *only* after a real `/v1/models` probe (or your custom HTTP check) passes. *If it says green, it means green.* Built with **SwiftUI** and `MenuBarExtra`: no Electron, no bundled inference engine, no resident background worker pegging your CPU.
 
 <table>
 <tr>
@@ -106,13 +106,13 @@ Use `RUNTIME_TAGS` for model-level traits such as `coding`, `q8`, `long-context`
 
 ## Remote gateways
 
-**Your DGX box, lab workstation, or home server — in the same menu bar panel.** Launching a model server used to mean SSH-ing in, finding the tmux pane, and pasting a `vllm serve` incantation. Now: drop a profile file on the remote host, click `Activate` on your Mac.
+**Your DGX box, lab workstation, or home server lives in the same menu bar panel.** Launching a model server used to mean SSH-ing in, finding the tmux pane, and pasting a `vllm serve` incantation. Now: drop a profile file on the remote host, click `Activate` on your Mac.
 
 - **Nothing to install on the remote by hand.** Enter `user` + `host` in *Settings → Remote Gateways*, click **Install Agent on Host**, and the app pushes its bundled single-file agent (stdlib-only Python, [RemoteAgent/](RemoteAgent/)) over your own SSH connection and sets up its service. Or use the printed pairing code / `curl | bash` one-liner from an existing SSH session.
-- **SSH tunnels, your keys.** The agent binds loopback only; the app opens the tunnel with your existing SSH config and agent (`BatchMode` — it never touches passwords). Running models' ports are forwarded automatically, so `Copy Endpoint URL` gives you a URL that works on your Mac.
-- **Tailscale-native.** Tick *Tailscale mode* on install (or run the agent with `--tailscale`) and the gateway connects directly over your tailnet — WireGuard-encrypted, no tunnel process, MagicDNS names in your endpoint URLs.
+- **SSH tunnels, your keys.** The agent binds loopback only; the app opens the tunnel with your existing SSH config and agent (`BatchMode`; it never touches passwords). Running models' ports are forwarded automatically, so `Copy Endpoint URL` gives you a URL that works on your Mac.
+- **Tailscale-native.** Tick *Tailscale mode* on install (or run the agent with `--tailscale`) and the gateway connects directly over your tailnet: WireGuard-encrypted, no tunnel process, MagicDNS names in your endpoint URLs.
 - **Or direct LAN**, guarded the same way as the local controller: non-loopback binds demand a ≥16-byte bearer token, stored in your keychain.
-- **Any runtime.** Launch templates for vLLM, llama.cpp, SGLang, and TGI, plus `START_COMMAND` for anything else — same profile files as local models. Live rows show exactly which model is serving on which port, with the URL as reachable *from your Mac*.
+- **Any runtime.** Launch templates for vLLM, llama.cpp, SGLang, and TGI, plus `START_COMMAND` for anything else (same profile files as local models). Live rows show exactly which model is serving on which port, with the URL as reachable *from your Mac*.
 - **Profiles folder, not a flag wizard.** Default `~/model-profiles/` on the remote (Mac controller can use `--profiles-dir` too). `link` scans for existing `.env` launch files and lets you confirm or paste the folder AI/you already use.
 - **Everything aggregates.** Each gateway gets its own named section in the panel; the menu bar ready-count spans every gateway; `Stop Everything` sweeps them all.
 
@@ -206,7 +206,7 @@ Every profile must resolve to a unique endpoint. Reusing the same `HOST:PORT` or
 > Using your own runtime or launcher? Any OpenAI-compatible endpoint works. The controller has adapters and tags for MLX, Ollama, vLLM, SGLang, TGI, llama-cpp-python, rVLLM MLX, vLLM-MLX, DDTree MLX, TurboQuant, Mistral.rs, MLC-LLM, LightLLM, FastChat, OpenLLM, Nexa, ExLlamaV2, Aphrodite, LMDeploy, LiteLLM, external endpoints, and generic binaries. See [runtime support](Controller/RUNTIME_SUPPORT.md).
 
 <details>
-<summary><strong>I already downloaded the app — set up the controller for me</strong></summary>
+<summary><strong>I already downloaded the app; set up the controller for me</strong></summary>
 
 <br/>
 
@@ -263,9 +263,9 @@ See **[CHANGELOG.md](CHANGELOG.md)** for release-by-release detail and **[Releas
 
 ## Integrations
 
-- **Raycast** — extension scripts under [`Integrations/Raycast/`](Integrations/Raycast/) call the same controller API the menu bar uses.
-- **SwiftBar** — drop-in plugin at [`Controller/swiftbar/local-models.15s.sh`](Controller/swiftbar/local-models.15s.sh) renders the same status, start, stop, and restart actions in any SwiftBar-friendly menu.
-- **Factory Droid** — `Sync Droid` (Plus only) pushes managed profiles into Droid's custom-model settings. First of several planned sync adapters.
+- **Raycast**: extension scripts under [`Integrations/Raycast/`](Integrations/Raycast/) call the same controller API the menu bar uses.
+- **SwiftBar**: drop-in plugin at [`Controller/swiftbar/local-models.15s.sh`](Controller/swiftbar/local-models.15s.sh) renders the same status, start, stop, and restart actions in any SwiftBar-friendly menu.
+- **Factory Droid**: `Sync Droid` (Plus only) pushes managed profiles into Droid's custom-model settings. First of several planned sync adapters.
 
 ---
 
@@ -273,9 +273,9 @@ See **[CHANGELOG.md](CHANGELOG.md)** for release-by-release detail and **[Releas
 
 All the deeper material lives in one place so this README stays skimmable:
 
-> **[SETUP.md](SETUP.md)** — profile formats, supported runtimes, health checks, controller API contract, build-from-source flow, release pipeline, Raycast power-user notes, troubleshooting, and known limitations.
-> **[Controller/RUNTIME_SUPPORT.md](Controller/RUNTIME_SUPPORT.md)** — canonical runtime table, launch modes, profile templates, readiness modes.
-> **[CHANGELOG.md](CHANGELOG.md)** — release-by-release changes and distribution hardening notes.
+> **[SETUP.md](SETUP.md)**: profile formats, supported runtimes, health checks, controller API contract, build-from-source flow, release pipeline, Raycast power-user notes, troubleshooting, and known limitations.
+> **[Controller/RUNTIME_SUPPORT.md](Controller/RUNTIME_SUPPORT.md)**: canonical runtime table, launch modes, profile templates, readiness modes.
+> **[CHANGELOG.md](CHANGELOG.md)**: release-by-release changes and distribution hardening notes.
 
 *The app's **Help** button opens the same doc.*
 
