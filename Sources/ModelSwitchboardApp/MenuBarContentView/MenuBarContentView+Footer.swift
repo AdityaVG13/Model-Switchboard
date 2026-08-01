@@ -4,8 +4,9 @@ import ModelSwitchboardCore
 
 extension MenuBarContentView {
     var footer: some View {
-        HStack(spacing: 12) {
-            HStack(spacing: 12) {
+        HStack(alignment: .center, spacing: 0) {
+            // Left actions compress first when space is tight.
+            HStack(spacing: 10) {
                 if features.supportsBenchmarks {
                     footerTextButton("Benchmarks") {
                         let nextPanel = inspectorCoordinator.toggle(.benchmarks)
@@ -26,42 +27,35 @@ extension MenuBarContentView {
                 }
 
                 footerTextButton(
-                    hub.hasRemoteGateways ? "Stop Everything" : "Stop All",
+                    stopButtonTitle,
                     color: hasAnythingToStop ? DashboardTheme.stopRed : theme.faint,
                     isBusy: hub.isStopEverythingBusy,
                     disabled: !hasAnythingToStop
                 ) {
                     Task { await hub.stopEverything() }
                 }
-                .help(
-                    hasAnythingToStop
-                        ? (hub.hasRemoteGateways
-                            ? "Stop every running model on this Mac and all remotes"
-                            : "Stop every running local model")
-                        : "Nothing is running"
-                )
+                .help(stopButtonHelp)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .layoutPriority(0)
-
-            Spacer(minLength: 8)
 
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 if let footerState = footerState(relativeTo: context.date) {
                     Text(footerState.label)
                         .font(.system(size: 9, weight: .bold))
                         .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(footerState.color.opacity(0.16), in: Capsule())
                         .foregroundStyle(footerState.color)
                         .help(hub.menuBarHelp)
+                        .padding(.horizontal, 6)
                 }
             }
 
-            // Fixed-width icon rail so the trailing quit control never sits
-            // under the continuous corner clip of the panel.
-            HStack(spacing: 4) {
+            // Trailing icon rail: fixed size, always fully inside the panel
+            // corner radius (continuous clip eats ~12pt at the bottom-right).
+            HStack(spacing: 2) {
                 footerIconButton("questionmark.circle", label: "Help") {
                     let nextPanel = inspectorCoordinator.toggle(.help)
                     synchronizeInspectorWindow(panel: nextPanel)
@@ -76,9 +70,24 @@ extension MenuBarContentView {
             }
             .layoutPriority(1)
         }
-        // Extra trailing inset: continuous corner radius (~12) eats the bottom-
-        // right glyph if icons are only 16pt from the edge.
-        .padding(EdgeInsets(top: 9, leading: 16, bottom: 10, trailing: 20))
+        .padding(.top, 8)
+        .padding(.bottom, 10)
+        .padding(.leading, 14)
+        .padding(.trailing, 14)
+    }
+
+    private var stopButtonTitle: String {
+        hub.hasRemoteGateways ? "Stop Everything" : "Stop All"
+    }
+
+    private var stopButtonHelp: String {
+        if !hasAnythingToStop {
+            return "Nothing is running"
+        }
+        if hub.hasRemoteGateways {
+            return "Stop every running model on this Mac and all remotes"
+        }
+        return "Stop every running local model"
     }
 
     /// True when any gateway (local or remote) still has a running process.
@@ -86,7 +95,7 @@ extension MenuBarContentView {
         if hub.isStopEverythingBusy { return true }
         return hub.allStores.contains { store in
             store.statuses.contains(where: \.running)
-                || store.pendingProfileActions.values.contains { !$0.isEmpty }
+                || !store.pendingProfileActions.isEmpty
         }
     }
 
@@ -110,7 +119,7 @@ extension MenuBarContentView {
                 Text(title)
                     .font(.system(size: 11.5))
                     .lineLimit(1)
-                    .minimumScaleFactor(0.85)
+                    .minimumScaleFactor(0.8)
                     .allowsTightening(true)
             }
             .contentShape(Rectangle())
@@ -118,7 +127,7 @@ extension MenuBarContentView {
         .buttonStyle(.plain)
         .foregroundStyle(color ?? theme.btnFg)
         .disabled(isBusy || disabled)
-        .opacity(disabled && !isBusy ? 0.45 : 1)
+        .opacity(disabled && !isBusy ? 0.4 : 1)
         .accessibilityLabel(title)
         .accessibilityHint(disabled ? "Nothing is running" : "")
     }
@@ -128,7 +137,9 @@ extension MenuBarContentView {
             Image(systemName: systemName)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(theme.faint)
-                .frame(width: 28, height: 28)
+                // Square hit target keeps the glyph centered away from the
+                // continuous corner clip at the panel's bottom-right.
+                .frame(width: 26, height: 26, alignment: .center)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

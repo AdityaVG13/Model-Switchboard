@@ -58,7 +58,7 @@ struct MenuBarContentView: View {
     }
 
     @AppStorage("menuPanelWidth")
-    var storedMainPanelWidth: Double = 372
+    var storedMainPanelWidth: Double = 400
 
     @AppStorage(DashboardAppearanceKeys.theme)
     var themePreferenceRaw: String = DashboardThemePreference.system.rawValue
@@ -71,7 +71,7 @@ struct MenuBarContentView: View {
 
     @Environment(\.colorScheme) var systemColorScheme
 
-    let minMainPanelWidth: Double = 372
+    let minMainPanelWidth: Double = 400
     let maxMainPanelWidth: Double = 620
     let inspectorPanelWidth: CGFloat = 372
     let panelHeight: CGFloat = 620
