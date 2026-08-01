@@ -7,7 +7,7 @@
 
 <p>
   <em><strong>Flip between local LLM runtimes from your menu bar.</strong></em><br/>
-  <strong>One click to activate. One click to stop everything.</strong>
+  <strong>Activate one runtime, or stop everything, from the menu bar.</strong>
 </p>
 
 <p>
@@ -42,24 +42,22 @@
 
 ---
 
-Running local models on an Apple Silicon Mac usually means a sprawl of terminal windows, half-remembered launch scripts, and no clean way to see **what's actually running.** Model Switchboard puts `llama.cpp`, MLX, Ollama, vLLM, SGLang, TGI, MLC-LLM, Mistral.rs, oMLX, vLLM-MLX, rVLLM MLX, LM Studio, Jan, and named command launchers behind **one menu bar panel.** Click **Activate**, every other model stops, and the one you picked comes up at an OpenAI-compatible endpoint.
-
-*No terminals. No orphan processes. No "green dot" lies.*
+Running local models on an Apple Silicon Mac often means juggling terminal windows, ad-hoc launch scripts, and no single view of **what's actually running.** Model Switchboard puts `llama.cpp`, MLX, Ollama, vLLM, SGLang, TGI, MLC-LLM, Mistral.rs, oMLX, vLLM-MLX, rVLLM MLX, LM Studio, Jan, and named command launchers behind **one menu bar panel.** Click **Activate**, every other model stops, and the one you picked comes up at an OpenAI-compatible endpoint. Readiness comes from health probes, not process presence alone.
 
 ---
 
 <table>
 <tr>
 <td align="center" width="33%" valign="top">
-<h3>One-click activate</h3>
+<h3>Activate</h3>
 <p>Pick a profile. Click <strong>Activate</strong>. Every other model stops. The chosen runtime comes up at an OpenAI-compatible endpoint, and the menu bar reflects the state in real time.</p>
 </td>
 <td align="center" width="33%" valign="top">
-<h3>Health checks, not vibes</h3>
-<p>Profiles go green <strong>only</strong> after a real <code>/v1/models</code> probe (or your custom HTTP check) passes. If a managed runtime crashes overnight, the controller restarts it automatically.</p>
+<h3>Probe-based readiness</h3>
+<p>A profile is marked ready when a real <code>/v1/models</code> probe (or your custom HTTP check) succeeds. If a managed runtime crashes overnight, the controller restarts it automatically.</p>
 </td>
 <td align="center" width="33%" valign="top">
-<h3>35+ runtimes, one contract</h3>
+<h3>35+ runtimes under one contract</h3>
 <p>Native adapters for <code>llama.cpp</code>, MLX, vLLM-MLX, rVLLM MLX, Ollama, vLLM, SGLang, TGI. Named launchers and external endpoints round out the rest. See <a href="Controller/RUNTIME_SUPPORT.md">RUNTIME_SUPPORT</a>.</p>
 </td>
 </tr>
@@ -69,7 +67,7 @@ Running local models on an Apple Silicon Mac usually means a sprawl of terminal 
 
 ## What's in the panel
 
-**`Activate` stops every other profile and brings the chosen one up.** No more forgetting to `kill -9` a 24 GB process before starting the next one. Profiles are marked **ready** *only* after a real `/v1/models` probe (or your custom HTTP check) passes. *If it says green, it means green.* Built with **SwiftUI** and `MenuBarExtra`: no Electron, no bundled inference engine, no resident background worker pegging your CPU.
+**`Activate` stops every other profile and brings the chosen one up**, so a previous large process does not stay loaded when you switch. Profiles are marked **ready** after a successful `/v1/models` probe (or your custom HTTP check). Built with **SwiftUI** and `MenuBarExtra`. The app does not ship Electron, a bundled inference engine, or a resident background worker that keeps the CPU busy when idle.
 
 <table>
 <tr>
@@ -231,7 +229,7 @@ Rules:
 End state:
 - Model Switchboard opens with valid profiles visible
 - `Activate` works
-- health checks go green only when the endpoint is actually ready
+- health checks report ready when the endpoint responds successfully
 - nothing is tied to one specific Mac beyond what is truly installed here
 ```
 
