@@ -3,6 +3,12 @@
 All notable changes to this project are documented in this file.
 
 ## [Unreleased]
+### Fixed
+
+- Remote agent stop now reaps zombie/defunct model processes, treats them as not running, force-kills after a longer vLLM-friendly wait, and exposes `stop --force` / `kill-all`.
+- Tailscale agent binds require a bearer token by default (`--allow-unauthenticated` opt-out); installer generates and prints the token.
+- Watchdog no longer auto-starts a model after agent reboot from a leftover `active-profile` file (session-supervised crash recovery only).
+
 
 ### Added
 - **Remote gateways**: launch, monitor, and stop model servers on other machines (DGX boxes, Linux workstations, servers) from the same menu bar panel, in both Base and Plus. Each gateway renders as its own named section; the menu bar count and Stop Everything span all gateways.

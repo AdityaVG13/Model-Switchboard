@@ -45,8 +45,10 @@ MINIMUM_TOKEN_BYTES = 16
 MAXIMUM_BODY_BYTES = 64 * 1024
 WATCHDOG_INTERVAL_SECONDS = 30.0
 WATCHDOG_SUPPRESSION_SECONDS = 45.0
-STOP_WAIT_SECONDS = 8.0
-TERMINATE_TIMEOUT_SECONDS = 12.0
+# Large model servers (vLLM, etc.) can take a long time to unload GPU memory.
+STOP_WAIT_SECONDS = 90.0
+TERMINATE_TIMEOUT_SECONDS = 20.0
+FORCE_TERMINATE_TIMEOUT_SECONDS = 3.0
 HEALTH_TIMEOUT_SECONDS = 1.5
 PROFILES_DIR_ENV = "MODEL_SWITCHBOARD_PROFILES_DIR"
 # Keys that make a .env/.json look like a Switchboard (or AI-authored) launch profile.
@@ -610,25 +612,97 @@ def build_start_command(profile: Profile) -> str:
 # --------------------------------------------------------------------------
 
 
-def process_is_alive(pid: int | None) -> bool:
+def process_stat_state(pid: int) -> str | None:
+    """Return the single-letter process state from /proc, or None if missing.
+
+    Linux: R/S/D/T/Z/...  Z means zombie (defunct). macOS has no /proc; callers
+    fall back to `ps` via process_ps_state.
+    """
+    try:
+        raw = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+    except OSError:
+        return None
+    # comm may contain spaces/parens; state is the field after the closing ')'.
+    close = raw.rfind(")")
+    if close < 0:
+        return None
+    parts = raw[close + 1 :].split()
+    return parts[0] if parts else None
+
+
+def process_ps_state(pid: int) -> str | None:
+    try:
+        result = subprocess.run(
+            ["ps", "-o", "state=", "-p", str(pid)],
+            capture_output=True, text=True, timeout=5, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    state = result.stdout.strip()
+    return state[:1] if state else None
+
+
+def process_is_zombie(pid: int | None) -> bool:
     if not pid or pid <= 0:
         return False
+    state = process_stat_state(pid) or process_ps_state(pid)
+    if state is None:
+        return False
+    return state.upper().startswith("Z")
+
+
+def reap_child(pid: int) -> bool:
+    """Reap *pid* if it is our zombie/exited child. True if reaped or gone."""
     try:
-        # Launched servers are direct children of the agent; reap them here so
-        # an exited server does not linger as a zombie that kill(pid, 0) still
-        # reports as alive (which would make every stop time out).
         reaped, _ = os.waitpid(pid, os.WNOHANG)
-        if reaped == pid:
-            return False
-    except (ChildProcessError, OSError):
-        pass
+        return reaped == pid
+    except ChildProcessError:
+        return False
+    except OSError:
+        return False
+
+
+def process_is_alive(pid: int | None) -> bool:
+    """True only for a live (non-zombie) process.
+
+    Defunct/zombie PIDs are treated as dead: they hold no GPU/CPU work and
+    must not keep status.running true or block stop.
+    """
+    if not pid or pid <= 0:
+        return False
+    # Reap our own children first so kill(pid, 0) does not keep seeing zombies.
+    if reap_child(pid):
+        return False
+    if process_is_zombie(pid):
+        # Foreign zombies (or ones we cannot wait on) still exist in the table
+        # but are not "running" for switchboard purposes.
+        return False
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
     except PermissionError:
-        return True
+        # Exists but we cannot signal it; still count as alive unless zombie.
+        return not process_is_zombie(pid)
+    # kill(0) succeeds for zombies on Linux; double-check after the signal probe.
+    if process_is_zombie(pid):
+        return False
     return True
+
+
+def process_lifecycle_state(pid: int | None, *, ready: bool = False) -> str:
+    """Coarse lifecycle for status payloads: ready|running|zombie|dead."""
+    if ready:
+        return "ready"
+    if not pid or pid <= 0:
+        return "dead"
+    if reap_child(pid):
+        return "dead"
+    if process_is_zombie(pid):
+        return "zombie"
+    if process_is_alive(pid):
+        return "running"
+    return "dead"
 
 
 def _signal_process_tree(pid: int, signal_number: int) -> None:
@@ -647,13 +721,34 @@ def _signal_process_tree(pid: int, signal_number: int) -> None:
         pass
 
 
-def terminate_process_tree(pid: int, timeout: float = TERMINATE_TIMEOUT_SECONDS) -> None:
+def terminate_process_tree(
+    pid: int,
+    timeout: float = TERMINATE_TIMEOUT_SECONDS,
+    *,
+    force: bool = False,
+) -> None:
+    """SIGTERM process group, wait, then SIGKILL. Always attempt to reap."""
+    if force:
+        _signal_process_tree(pid, signal.SIGKILL)
+        deadline = time.monotonic() + min(timeout, FORCE_TERMINATE_TIMEOUT_SECONDS)
+        while time.monotonic() < deadline and process_is_alive(pid):
+            reap_child(pid)
+            time.sleep(0.1)
+        reap_child(pid)
+        return
+
     _signal_process_tree(pid, signal.SIGTERM)
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline and process_is_alive(pid):
+        reap_child(pid)
         time.sleep(0.2)
     if process_is_alive(pid):
         _signal_process_tree(pid, signal.SIGKILL)
+        kill_deadline = time.monotonic() + FORCE_TERMINATE_TIMEOUT_SECONDS
+        while time.monotonic() < kill_deadline and process_is_alive(pid):
+            reap_child(pid)
+            time.sleep(0.1)
+    reap_child(pid)
 
 
 def process_command(pid: int | None) -> str | None:
@@ -1003,6 +1098,8 @@ class AgentConfiguration:
     auth_token: str | None = None
     unsafe_bind: bool = False
     tailscale_bind: bool = False
+    # Tailscale binds require a token unless this is set (personal tailnet opt-out).
+    allow_unauthenticated: bool = False
     profiles_dir: Path | None = None
 
     def __post_init__(self) -> None:
@@ -1015,10 +1112,14 @@ class AgentConfiguration:
             raise InvalidConfigurationError(
                 f"--tailscale bind resolved a non-Tailscale address: {self.host}"
             )
+        if self.tailscale_bind and not token and not self.allow_unauthenticated:
+            raise InvalidConfigurationError(
+                "--tailscale requires a bearer auth token "
+                "(--auth-token / --auth-token-file), or pass "
+                "--allow-unauthenticated for a personal tailnet"
+            )
         if not is_loopback(self.host) and not self.tailscale_bind:
-            # A tailnet is a private, WireGuard-encrypted network, so the
-            # Tailscale bind skips the unsafe-bind gate; a token stays
-            # recommended for shared tailnets.
+            # Plain LAN / non-loopback: unsafe-bind + token always required.
             if not self.unsafe_bind:
                 raise InvalidConfigurationError(
                     f"non-loopback agent bind requires --unsafe-bind: {self.host}"
@@ -1056,6 +1157,9 @@ class AgentService:
         self._mutation_lock = threading.RLock()
         self._watchdog_suppressed_until = 0.0
         self._watchdog_timer: threading.Timer | None = None
+        # Profiles started by *this* agent process. Crash-recovery restarts only
+        # these — an agent reboot / login never spontaneously loads a model.
+        self._supervised: set[str] = set()
 
     # -- status ------------------------------------------------------------
 
@@ -1095,14 +1199,26 @@ class AgentService:
     def status(self, profile: Profile, allow_port_fallback: bool = True) -> dict[str, Any]:
         ready, server_ids = self._probe_health(profile)
         pid = self._read_pid(profile.name)
+        zombie = bool(pid and process_is_zombie(pid))
         if pid is not None and not process_is_alive(pid):
-            self._pid_file(profile.name).unlink(missing_ok=True)
-            pid = None
+            # Clear pid file for dead *and* zombie children once reaped/known.
+            if not zombie:
+                self._pid_file(profile.name).unlink(missing_ok=True)
+                pid = None
+            else:
+                # Still show the defunct pid once so operators can see it, but
+                # running stays false; next successful stop clears the file.
+                pass
         if pid is None and allow_port_fallback:
             listener = listener_pid(profile.endpoint_port)
             if listener is not None and self._process_matches(listener, profile):
                 pid = listener
+                zombie = process_is_zombie(pid)
         label, _, launch_mode = profile.runtime_spec
+        alive = process_is_alive(pid)
+        state = process_lifecycle_state(pid, ready=ready and alive)
+        if zombie and not alive:
+            state = "zombie"
         return {
             "profile": profile.name,
             "display_name": profile.display_name,
@@ -1115,12 +1231,13 @@ class AgentService:
             "base_url": profile.base_url,
             "request_model": profile.request_model,
             "server_model_id": profile.server_model_id,
-            "pid": pid,
-            "running": process_is_alive(pid),
-            "ready": ready,
-            "server_ids": server_ids,
-            "rss_mb": process_rss_mb(pid),
-            "command": process_command(pid),
+            "pid": pid if (alive or zombie) else None,
+            "running": alive,
+            "state": state,
+            "ready": ready and alive,
+            "server_ids": server_ids if alive else [],
+            "rss_mb": process_rss_mb(pid) if alive else None,
+            "command": process_command(pid) if (alive or zombie) else None,
             "log_path": profile.log_path,
         }
 
@@ -1162,17 +1279,20 @@ class AgentService:
             finally:
                 log_handle.close()
             self._pid_file(name).write_text(f"{process.pid}\n", encoding="utf-8")
+            self._supervised.add(name)
 
-    def stop(self, name: str) -> None:
+    def stop(self, name: str, force: bool = False) -> None:
         with self._mutation_lock:
             self._suppress_watchdog()
+            self._supervised.discard(name)
             self._clear_active_profile(if_matching=name)
             profile = self.profiles.profile(name)
             current = self.status(profile)
+            primary_pid = current.get("pid")
             stop_error: Exception | None = None
 
             stop_command = (profile.get("STOP_COMMAND") or "").strip()
-            if stop_command:
+            if stop_command and not force:
                 environment = dict(os.environ)
                 environment.update(profile.values)
                 try:
@@ -1187,14 +1307,29 @@ class AgentService:
                 except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as error:
                     stop_error = error
 
-            if profile.get("STOP_COMMAND_ONLY") != "1":
-                self._terminate_profile_processes(profile, current.get("pid"))
-                if not self._wait_until_stopped(profile, current.get("pid")):
+            if profile.get("STOP_COMMAND_ONLY") != "1" or force:
+                self._terminate_profile_processes(
+                    profile, primary_pid, force=force
+                )
+                wait_ok = self._wait_until_stopped(
+                    profile,
+                    primary_pid,
+                    timeout=FORCE_TERMINATE_TIMEOUT_SECONDS * 3 if force else STOP_WAIT_SECONDS,
+                )
+                if not wait_ok:
+                    # Last-chance SIGKILL of anything still matching the port.
+                    self._terminate_profile_processes(profile, primary_pid, force=True)
+                    wait_ok = self._wait_until_stopped(
+                        profile,
+                        primary_pid,
+                        timeout=FORCE_TERMINATE_TIMEOUT_SECONDS * 2,
+                    )
+                if not wait_ok:
                     raise OperationFailedError(
                         f"failed to stop {name}: endpoint or process is still alive"
                     )
             self._pid_file(name).unlink(missing_ok=True)
-            if stop_error is not None:
+            if stop_error is not None and not force:
                 raise OperationFailedError(f"STOP_COMMAND failed for {name}: {stop_error}")
 
     def restart(self, name: str) -> None:
@@ -1219,14 +1354,18 @@ class AgentService:
             self.configuration.run_directory.mkdir(parents=True, exist_ok=True)
             self.configuration.active_profile_file.write_text(f"{name}\n", encoding="utf-8")
 
-    def stop_all(self) -> None:
+    def stop_all(self, force: bool = False) -> None:
         with self._mutation_lock:
             failures: list[str] = []
             for name in sorted(self.profiles.load().keys()):
                 try:
-                    self.stop(name)
+                    # Nested stop also takes the mutation lock (RLock).
+                    self.stop(name, force=force)
                 except AgentError as error:
                     failures.append(f"{name}: {error.message}")
+            # Clear any leftover active marker so a later watchdog cannot revive.
+            self.configuration.active_profile_file.unlink(missing_ok=True)
+            self._supervised.clear()
             if failures:
                 raise OperationFailedError("Failed to stop profiles: " + "; ".join(failures))
 
@@ -1265,21 +1404,23 @@ class AgentService:
     # -- watchdog ----------------------------------------------------------
 
     def watchdog_tick(self) -> None:
+        """Restart supervised profiles that crashed mid-session only.
+
+        Does *not* read active-profile from disk: that would reload a model on
+        every agent/login boot after a prior `switch`. Session supervision is
+        the only source of truth for auto-restart.
+        """
         if time.monotonic() < self._watchdog_suppressed_until:
             return
-        try:
-            name = self.configuration.active_profile_file.read_text(encoding="utf-8").strip()
-        except OSError:
-            return
-        if not name:
-            return
-        try:
-            profile = self.profiles.profile(name)
-        except AgentError:
-            self.configuration.active_profile_file.unlink(missing_ok=True)
-            return
-        current = self.status(profile)
-        if not current["ready"] and not current["running"]:
+        for name in list(self._supervised):
+            try:
+                profile = self.profiles.profile(name)
+            except AgentError:
+                self._supervised.discard(name)
+                continue
+            current = self.status(profile)
+            if current["ready"] or current["running"]:
+                continue
             try:
                 self.start(name)
             except AgentError:
@@ -1355,27 +1496,65 @@ class AgentService:
         expected = profile.get("HEALTHCHECK_EXPECT_ID") or profile.server_model_id
         return (bool(ids) if not expected else expected in ids), ids
 
-    def _terminate_profile_processes(self, profile: Profile, primary_pid: int | None) -> None:
+    def _terminate_profile_processes(
+        self,
+        profile: Profile,
+        primary_pid: int | None,
+        *,
+        force: bool = False,
+    ) -> None:
         if primary_pid:
-            terminate_process_tree(primary_pid)
+            if process_is_zombie(primary_pid):
+                reap_child(primary_pid)
+            else:
+                terminate_process_tree(primary_pid, force=force)
+        # Always re-check the listen port: vLLM may leave EngineCore on the
+        # port under a different pid after the launcher shell exits.
         listener = listener_pid(profile.endpoint_port)
-        if listener and listener != primary_pid and self._process_matches(listener, profile):
-            terminate_process_tree(listener)
+        if listener and listener != primary_pid:
+            if force or self._process_matches(listener, profile):
+                if process_is_zombie(listener):
+                    reap_child(listener)
+                else:
+                    terminate_process_tree(listener, force=force)
 
-    def _wait_until_stopped(self, profile: Profile, primary_pid: int | None) -> bool:
-        deadline = time.monotonic() + STOP_WAIT_SECONDS
+    def _wait_until_stopped(
+        self,
+        profile: Profile,
+        primary_pid: int | None,
+        timeout: float = STOP_WAIT_SECONDS,
+    ) -> bool:
+        deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            if not process_is_alive(primary_pid):
+            if primary_pid:
+                reap_child(primary_pid)
+            primary_gone = not process_is_alive(primary_pid)
+            if primary_gone:
                 if not port_is_listening(profile.endpoint_port):
                     return True
                 listener = listener_pid(profile.endpoint_port)
-                listener_alive = listener is not None and (
-                    listener == primary_pid or self._process_matches(listener, profile)
-                )
-                if not listener_alive:
+                if listener is None:
+                    return True
+                # Port held by an unrelated process — not our problem for stop.
+                if listener != primary_pid and not self._process_matches(listener, profile):
+                    return True
+                # Our listener is a zombie → treat as stopped for status.
+                if process_is_zombie(listener):
+                    reap_child(listener)
                     return True
             time.sleep(0.2)
-        return False
+        # Final assessment: zombies / free ports count as stopped.
+        if process_is_alive(primary_pid):
+            return False
+        if not port_is_listening(profile.endpoint_port):
+            return True
+        listener = listener_pid(profile.endpoint_port)
+        if listener is None:
+            return True
+        if process_is_zombie(listener):
+            reap_child(listener)
+            return True
+        return not self._process_matches(listener, profile)
 
     def _suppress_watchdog(self) -> None:
         self._watchdog_suppressed_until = time.monotonic() + WATCHDOG_SUPPRESSION_SECONDS
@@ -1514,13 +1693,13 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
             if path == "/api/start":
                 return self._profile_action(service.start)
             if path == "/api/stop":
-                return self._profile_action(service.stop)
+                return self._stop_action(service)
             if path == "/api/restart":
                 return self._profile_action(service.restart)
             if path == "/api/switch":
                 return self._profile_action(service.switch_profile)
             if path == "/api/stop-all":
-                return self._plain_action(service.stop_all)
+                return self._stop_all_action(service)
             if path == "/api/integrations/run":
                 def run_integration(payload: dict[str, Any]) -> dict[str, Any]:
                     service.run_integration(
@@ -1542,6 +1721,24 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
         def handle(payload: dict[str, Any]) -> dict[str, Any]:
             action(self._required_string(payload, "profile"))
             return self.service.action_response()
+        return handle
+
+    def _stop_action(
+        self, service: "AgentService"
+    ) -> Callable[[dict[str, Any]], dict[str, Any]]:
+        def handle(payload: dict[str, Any]) -> dict[str, Any]:
+            force = bool(payload.get("force"))
+            service.stop(self._required_string(payload, "profile"), force=force)
+            return service.action_response()
+        return handle
+
+    def _stop_all_action(
+        self, service: "AgentService"
+    ) -> Callable[[dict[str, Any]], dict[str, Any]]:
+        def handle(payload: dict[str, Any]) -> dict[str, Any]:
+            force = bool(payload.get("force"))
+            service.stop_all(force=force)
+            return service.action_response()
         return handle
 
     def _plain_action(
@@ -1641,6 +1838,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"bind port (default {DEFAULT_PORT})")
     parser.add_argument("--auth-token", default=None, help="bearer token (>= 16 bytes)")
     parser.add_argument("--auth-token-file", type=Path, default=None, help="file containing the bearer token")
+    parser.add_argument(
+        "--allow-unauthenticated",
+        action="store_true",
+        help="allow --tailscale without a bearer token (personal tailnet only)",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="with stop/stop-all: SIGKILL immediately and clear state",
+    )
     parser.add_argument("--json", action="store_true", help="print machine-readable output for CLI commands")
     parser.add_argument("--verbose", action="store_true", help="log HTTP requests to stderr")
     parser.add_argument(
@@ -1662,6 +1869,7 @@ def build_parser() -> argparse.ArgumentParser:
             "switch",
             "activate",
             "stop-all",
+            "kill-all",
             "link",
             "scan-profiles",
         ],
@@ -1699,6 +1907,7 @@ def build_configuration(args: argparse.Namespace) -> AgentConfiguration:
         auth_token=token,
         unsafe_bind=unsafe,
         tailscale_bind=tailscale,
+        allow_unauthenticated=bool(getattr(args, "allow_unauthenticated", False)),
         profiles_dir=explicit_profiles,
     )
 
@@ -1769,8 +1978,9 @@ def main(argv: list[str] | None = None) -> int:
             service.start_watchdog()
             if configuration.tailscale_bind and configuration.auth_token is None:
                 sys.stderr.write(
-                    "note: serving on the tailnet without a bearer token; "
-                    "add --auth-token-file if other people share this tailnet\n"
+                    "warning: serving on the tailnet without a bearer token "
+                    "(--allow-unauthenticated); anyone on the tailnet can "
+                    "start/stop models\n"
                 )
             print(f"controller=http://{configuration.host}:{configuration.port}", flush=True)
             print(f"profiles_dir={configuration.profiles_directory}", flush=True)
@@ -1823,7 +2033,10 @@ def main(argv: list[str] | None = None) -> int:
             if names == ["all"]:
                 names = sorted(service.profiles.load().keys())
             for name in names:
-                getattr(service, args.command)(name)
+                if args.command == "stop":
+                    service.stop(name, force=bool(args.force))
+                else:
+                    getattr(service, args.command)(name)
             _print_json(service.action_response())
             return 0
         if args.command in ("switch", "activate"):
@@ -1832,8 +2045,10 @@ def main(argv: list[str] | None = None) -> int:
             service.switch_profile(args.profiles[0])
             _print_json(service.action_response())
             return 0
-        if args.command == "stop-all":
-            service.stop_all()
+        if args.command in ("stop-all", "kill-all"):
+            # kill-all is the nuclear one-liner: always force.
+            force = bool(args.force) or args.command == "kill-all"
+            service.stop_all(force=force)
             _print_json(service.action_response())
             return 0
         if args.command == "link":

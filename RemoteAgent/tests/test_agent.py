@@ -95,7 +95,7 @@ class AgentHarness:
 
     def close(self) -> None:
         try:
-            self.service.stop_all()
+            self.service.stop_all(force=True)
         except agent.AgentError:
             pass
         self.server.shutdown()
@@ -556,11 +556,29 @@ class TailscaleTests(unittest.TestCase):
         self.assertFalse(agent.is_tailscale_ip("10.0.0.1"))
         self.assertFalse(agent.is_tailscale_ip("not-an-ip"))
 
-    def test_tailscale_bind_allows_cgnat_without_token(self) -> None:
+    def test_tailscale_bind_requires_token_by_default(self) -> None:
+        with self.assertRaises(agent.InvalidConfigurationError):
+            agent.AgentConfiguration(
+                root=Path("/tmp/x"), host="100.101.102.103", tailscale_bind=True
+            )
+
+    def test_tailscale_bind_allows_cgnat_with_token(self) -> None:
         configuration = agent.AgentConfiguration(
-            root=Path("/tmp/x"), host="100.101.102.103", tailscale_bind=True
+            root=Path("/tmp/x"),
+            host="100.101.102.103",
+            tailscale_bind=True,
+            auth_token=CONFORMANCE_TOKEN,
         )
         self.assertEqual(configuration.host, "100.101.102.103")
+        self.assertEqual(configuration.auth_token, CONFORMANCE_TOKEN)
+
+    def test_tailscale_bind_allows_unauthenticated_opt_out(self) -> None:
+        configuration = agent.AgentConfiguration(
+            root=Path("/tmp/x"),
+            host="100.101.102.103",
+            tailscale_bind=True,
+            allow_unauthenticated=True,
+        )
         self.assertIsNone(configuration.auth_token)
 
     def test_tailscale_bind_rejects_non_cgnat_host(self) -> None:
@@ -594,6 +612,97 @@ class TailscaleTests(unittest.TestCase):
         self.assertIn("mode=direct", info["link"])
         self.assertIn("spark.tail1234.ts.net", info["link"])
         self.assertNotIn("@", info["link"].split("://", 1)[1].split("?")[0])
+
+
+
+class ProcessLifecycleTests(unittest.TestCase):
+    def test_zombie_pid_is_not_running(self) -> None:
+        """Defunct children must not count as running (spark handoff regression)."""
+        child = subprocess.Popen(["/bin/bash", "-c", "exit 0"])
+        deadline = time.time() + 2.0
+        while time.time() < deadline and child.poll() is None:
+            time.sleep(0.05)
+        self.assertIsNotNone(child.poll())
+        # Unreaped exited child is a zombie of this process; still not "alive".
+        self.assertFalse(agent.process_is_alive(child.pid))
+        state = agent.process_lifecycle_state(child.pid)
+        self.assertIn(state, ("dead", "zombie"))
+        try:
+            child.wait(timeout=1)
+        except Exception:
+            pass
+
+    def test_force_stop_and_status_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            port = free_port()
+            write_profile(
+                root,
+                "stub",
+                {
+                    "REQUEST_MODEL": "stub-model",
+                    "SERVER_MODEL_ID": "stub-model",
+                    "PORT": str(port),
+                    "START_COMMAND": (
+                        f"exec {sys.executable} -c "
+                        f"\"import http.server,socketserver; "
+                        f"socketserver.TCPServer(('127.0.0.1',{port}),"
+                        f"http.server.BaseHTTPRequestHandler).serve_forever()\""
+                    ),
+                    "HEALTHCHECK_MODE": "disabled",
+                },
+            )
+            harness = AgentHarness(root)
+            try:
+                harness.service.start("stub")
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    st = harness.service.status(harness.service.profiles.profile("stub"))
+                    if st["running"]:
+                        break
+                    time.sleep(0.1)
+                self.assertTrue(st["running"])
+                self.assertEqual(st["state"], "running")
+
+                status, payload = harness.json_request(
+                    "POST", "/api/stop", {"profile": "stub", "force": True}
+                )
+                self.assertEqual(status, 200, payload)
+                stopped = next(s for s in payload["statuses"] if s["profile"] == "stub")
+                self.assertFalse(stopped["running"])
+                self.assertEqual(stopped["state"], "dead")
+            finally:
+                try:
+                    harness.service.stop_all(force=True)
+                except agent.AgentError:
+                    pass
+                harness.close()
+
+    def test_watchdog_does_not_restore_from_disk_alone(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profiles = root / "model-profiles"
+            profiles.mkdir()
+            (root / "run").mkdir()
+            (root / "run" / "active-profile").write_text("ghost\n", encoding="utf-8")
+            write_profile(
+                root,
+                "ghost",
+                {
+                    "REQUEST_MODEL": "g",
+                    "PORT": "19999",
+                    "RUNTIME": "command",
+                    "START_COMMAND": "true",
+                    "HEALTHCHECK_MODE": "disabled",
+                },
+            )
+            service = agent.AgentService(
+                agent.AgentConfiguration(root=root, profiles_dir=profiles)
+            )
+            service.watchdog_tick()
+            self.assertEqual(service._supervised, set())
+            status = service.status(service.profiles.profile("ghost"))
+            self.assertFalse(status["running"])
 
 
 class ConfigurationTests(unittest.TestCase):

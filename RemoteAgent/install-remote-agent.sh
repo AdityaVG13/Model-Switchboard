@@ -4,19 +4,22 @@
 # Run ON the remote host (DGX, workstation, server):
 #   ./install-remote-agent.sh                # loopback bind, port 8877
 #   ./install-remote-agent.sh --port 9000
-#   ./install-remote-agent.sh --tailscale    # bind the tailnet address instead
+#   ./install-remote-agent.sh --tailscale    # bind the tailnet address + require token
+#   ./install-remote-agent.sh --tailscale --allow-unauthenticated
 #   ./install-remote-agent.sh --uninstall
 #
 # Default: the agent binds 127.0.0.1 only; pair it with the app's SSH tunnel
 # so no ports are exposed. --tailscale binds the host's Tailscale address so
-# the Mac connects directly over the tailnet (no tunnel; token recommended on
-# shared tailnets). For plain LAN mode, run the agent manually with
-# --unsafe-bind and --auth-token-file (see RemoteAgent/README.md).
+# the Mac connects directly over the tailnet (no tunnel) and generates a
+# bearer token unless --allow-unauthenticated is set. For plain LAN mode, run
+# the agent manually with --unsafe-bind and --auth-token-file (see README).
 set -euo pipefail
 
 PORT=8877
 UNINSTALL=0
 TAILSCALE=0
+ALLOW_UNAUTH=0
+AUTH_TOKEN_FILE="${MODEL_SWITCHBOARD_AUTH_TOKEN_FILE:-$HOME/.config/model-switchboard-agent.token}"
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -24,6 +27,10 @@ while [ $# -gt 0 ]; do
             PORT="$2"; shift 2 ;;
         --tailscale)
             TAILSCALE=1; shift ;;
+        --allow-unauthenticated)
+            ALLOW_UNAUTH=1; shift ;;
+        --auth-token-file)
+            AUTH_TOKEN_FILE="$2"; shift 2 ;;
         --uninstall)
             UNINSTALL=1; shift ;;
         -h|--help)
@@ -160,6 +167,24 @@ log "Launcher: $BIN_PATH"
 SERVE_FLAGS="--port $PORT"
 if [ "$TAILSCALE" = "1" ]; then
     SERVE_FLAGS="$SERVE_FLAGS --tailscale"
+    if [ "$ALLOW_UNAUTH" = "1" ]; then
+        SERVE_FLAGS="$SERVE_FLAGS --allow-unauthenticated"
+        log "Tailscale bind without auth (--allow-unauthenticated)."
+    else
+        mkdir -p "$(dirname "$AUTH_TOKEN_FILE")"
+        if [ ! -s "$AUTH_TOKEN_FILE" ]; then
+            if command -v openssl >/dev/null 2>&1; then
+                openssl rand -hex 24 > "$AUTH_TOKEN_FILE"
+            else
+                python3 -c 'import secrets; print(secrets.token_hex(24))' > "$AUTH_TOKEN_FILE"
+            fi
+            chmod 600 "$AUTH_TOKEN_FILE"
+            log "Generated bearer token at $AUTH_TOKEN_FILE"
+        else
+            log "Using existing bearer token at $AUTH_TOKEN_FILE"
+        fi
+        SERVE_FLAGS="$SERVE_FLAGS --auth-token-file $AUTH_TOKEN_FILE"
+    fi
 fi
 
 if has_systemd; then
@@ -199,7 +224,17 @@ log "Next: put one .env/.json per model in $PROFILES_DIR (or re-run link to"
 log "point at a folder that already has them), then pair your Mac:"
 echo
 if [ "$TAILSCALE" = "1" ]; then
-    "$BIN_PATH" --port "$PORT" --yes link --tailscale
+    if [ "$ALLOW_UNAUTH" = "1" ]; then
+        "$BIN_PATH" --port "$PORT" --allow-unauthenticated --yes link --tailscale
+    else
+        "$BIN_PATH" --port "$PORT" --auth-token-file "$AUTH_TOKEN_FILE" --yes link --tailscale
+        echo
+        log "Paste this bearer token into the Mac gateway settings (keychain):"
+        echo
+        echo "  $(cat "$AUTH_TOKEN_FILE")"
+        echo
+        log "Token file: $AUTH_TOKEN_FILE"
+    fi
 else
     "$BIN_PATH" --port "$PORT" --yes link
 fi

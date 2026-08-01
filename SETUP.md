@@ -314,11 +314,13 @@ The moving parts:
      from the Mac. Tunnels reconnect with backoff and surface SSH failures
      (missing agent key, changed host key, unreachable host) in the panel.
    - **Tailscale**: install the agent with `--tailscale` (or run
-     `serve --tailscale`) and it binds only the host's tailnet address —
-     WireGuard-encrypted, invisible to the open LAN. The pairing code then
-     carries `mode=direct` with the MagicDNS name, so pasting it creates a
-     Direct URL gateway with no SSH tunnel at all. Token optional on a
-     personal tailnet, recommended on shared ones. Profiles whose model
+     `serve --tailscale --auth-token-file …`) and it binds only the host's
+     tailnet address — WireGuard-encrypted, invisible to the open LAN. A
+     **bearer token is required by default** (installer generates one and
+     prints it; paste it into the gateway token field on the Mac). Opt out
+     only on a personal tailnet with `--allow-unauthenticated`. The pairing
+     code carries `mode=direct` with the MagicDNS name, so pasting it
+     creates a Direct URL gateway with no SSH tunnel. Profiles whose model
      endpoints you want to call from the Mac should bind `HOST=0.0.0.0` or
      the Tailscale IP (no tunnel exists to forward remote loopback ports).
    - **Direct URL (plain LAN)**: point the gateway at `http://host:8877` on a

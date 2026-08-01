@@ -81,17 +81,25 @@ gateway's models then appear in the main panel under its own named section.
 
   ```bash
   ./install-remote-agent.sh --tailscale
-  # or: model-switchboard-agent serve --tailscale
+  # or: model-switchboard-agent serve --tailscale --auth-token-file ~/.config/model-switchboard-agent.token
   ```
 
   The agent binds only the host's Tailscale address (WireGuard-encrypted,
-  tailnet-only — never the open LAN) and prints a **direct** pairing code
-  using its MagicDNS name (`modelswitchboard-gateway://spark.tail1234.ts.net?…&mode=direct`).
-  Paste it on the Mac and you're connected as a Direct URL gateway — no SSH
-  involved. A bearer token is optional on a personal tailnet and recommended
-  on shared ones (`--auth-token-file`). Model server ports follow the same
-  rule: set `HOST=0.0.0.0` (or the Tailscale IP) in profiles you want to
-  reach from the Mac, since there is no tunnel to forward loopback ports.
+  tailnet-only — never the open LAN), **requires a bearer token by default**,
+  and prints a **direct** pairing code using its MagicDNS name
+  (`modelswitchboard-gateway://spark.tail1234.ts.net?…&mode=direct`).
+  Paste the link **and** the generated token into the Mac gateway form — you
+  are connected as a Direct URL gateway with no SSH involved.
+
+  Personal tailnet opt-out (anyone on the tailnet can start/stop models):
+
+  ```bash
+  ./install-remote-agent.sh --tailscale --allow-unauthenticated
+  ```
+
+  Model server ports follow the same rule: set `HOST=0.0.0.0` (or the
+  Tailscale IP) in profiles you want to reach from the Mac, since there is no
+  tunnel to forward loopback ports.
 
 - **Direct URL (plain LAN).** For a trusted LAN without Tailscale, run the
   agent bound to the network — this **requires** a bearer token of at least
@@ -116,6 +124,22 @@ model-switchboard-agent list
 model-switchboard-agent status --json
 model-switchboard-agent switch llama31-8b
 model-switchboard-agent stop-all
+model-switchboard-agent stop-all --force   # SIGKILL if a graceful stop stalls
+model-switchboard-agent kill-all          # nuclear: force-stop every profile
+```
+
+### Models vs the agent
+
+The **agent** is an always-on controller (systemd user unit). A **model** is a
+child process the agent launched (vLLM, llama.cpp, …). Closing a terminal or
+logging out does **not** stop models — only `stop` / `stop-all` / `kill-all`
+does. After a successful stop, `nvidia-smi` should show no model process (large
+vLLM unloads can take up to ~90s; use `--force` / `kill-all` if it hangs).
+
+One-liner to free the GPU from models managed by switchboard:
+
+```bash
+model-switchboard-agent kill-all
 ```
 
 ## Contract
