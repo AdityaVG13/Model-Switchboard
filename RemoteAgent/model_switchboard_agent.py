@@ -129,6 +129,9 @@ SKIP_LISTEN_PORTS = frozenset({
 })
 DISCOVERY_PROBE_BUDGET = 24
 DISCOVERY_PROBE_TIMEOUT = 0.6
+# Short TTL so concurrent/back-to-back status polls skip re-running ss.
+# Results may lag ≤TTL for concurrent callers -- intentional.
+LISTENING_TCP_CACHE_TTL_SECONDS = 0.075
 
 PROFILE_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 SHELL_DEFAULT_RE = re.compile(
@@ -999,18 +1002,48 @@ def parse_loose_env_assignments(file: Path) -> dict[str, str]:
     return values
 
 
+# Short-TTL inventory cache: (monotonic_ts, rows). Thread-safe for
+# ThreadingHTTPServer; concurrent callers may share a snapshot that lags ≤TTL.
+_listening_tcp_cache_lock = threading.Lock()
+_listening_tcp_cache: tuple[float, list[dict[str, Any]]] | None = None
+
+
+def clear_listening_tcp_cache() -> None:
+    """Drop the short-TTL list_listening_tcp cache (tests / forced refresh)."""
+    global _listening_tcp_cache
+    with _listening_tcp_cache_lock:
+        _listening_tcp_cache = None
+
+
 def list_listening_tcp() -> list[dict[str, Any]]:
     """Inventory local TCP listeners with pid/command when available.
 
     Mirrors the Ports.app idea: port + owning process + command line. Cross
     platform via `ss` (Linux) then `lsof` (macOS/Linux).
 
-    One `ss` (or, if empty, one `lsof`) parse. Command lines are resolved once
-    per unique PID via process_command -- no cross-request cache. Ports in
-    SKIP_LISTEN_PORTS and the agent self listener (DEFAULT_PORT + own pid)
-    skip cmdline resolution; command may be None for those rows. Same pid on a
-    non-skip port still resolves when that row is seen.
+    One `ss` (or, if empty, one `lsof`) parse per uncached call. Command lines
+    are resolved once per unique PID via process_command within that inventory
+    -- no longer-lived process_command cache. Ports in SKIP_LISTEN_PORTS and
+    the agent self listener (DEFAULT_PORT + own pid) skip cmdline resolution;
+    command may be None for those rows. Same pid on a non-skip port still
+    resolves when that row is seen.
+
+    Module-level cache (LISTENING_TCP_CACHE_TTL_SECONDS, default 75ms) so
+    concurrent or back-to-back status/ports polls in the same process skip
+    re-running ss. Results may lag ≤TTL -- intentional for poll coalescing.
     """
+    global _listening_tcp_cache
+    now = time.monotonic()
+    with _listening_tcp_cache_lock:
+        cached = _listening_tcp_cache
+        if cached is not None and (now - cached[0]) < LISTENING_TCP_CACHE_TTL_SECONDS:
+            return cached[1]
+        result = _list_listening_tcp_uncached()
+        _listening_tcp_cache = (now, result)
+        return result
+
+
+def _list_listening_tcp_uncached() -> list[dict[str, Any]]:
     by_port: dict[int, dict[str, Any]] = {}
     # Same PID often owns several binds (IPv4+IPv6, multi-port). Resolve once.
     cmd_by_pid: dict[int, str | None] = {}

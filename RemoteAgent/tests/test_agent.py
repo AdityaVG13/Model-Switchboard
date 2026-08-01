@@ -901,6 +901,12 @@ class ProcessRssMbTests(unittest.TestCase):
 class ListListeningTcpTests(unittest.TestCase):
     """list_listening_tcp: one ss/lsof parse; process_command once per unique pid."""
 
+    def setUp(self) -> None:
+        agent.clear_listening_tcp_cache()
+
+    def tearDown(self) -> None:
+        agent.clear_listening_tcp_cache()
+
     def test_ss_path_resolves_cmdline_once_per_unique_pid(self) -> None:
         # Same PID on two ports (and a third line without pid): one process_command.
         ss_out = "\n".join(
@@ -1068,6 +1074,68 @@ class ListListeningTcpTests(unittest.TestCase):
         ports = {item["port"] for item in found}
         self.assertNotIn(agent.DEFAULT_PORT, ports)
         self.assertIn(9000, ports)
+
+    def test_second_call_within_ttl_skips_ss(self) -> None:
+        """Back-to-back polls reuse the short-TTL inventory (no second ss)."""
+        ss_out = (
+            "LISTEN 0 128 127.0.0.1:8080 0.0.0.0:* "
+            'users:(("py",pid=4242,fd=3))\n'
+        )
+        clock = {"t": 1000.0}
+
+        def run_side_effect(cmd, *args, **kwargs):  # type: ignore[no-untyped-def]
+            if cmd and cmd[0] == "ss":
+                return unittest.mock.Mock(stdout=ss_out, returncode=0)
+            return unittest.mock.Mock(stdout="", returncode=1)
+
+        with unittest.mock.patch.object(
+            agent.time, "monotonic", side_effect=lambda: clock["t"]
+        ):
+            with unittest.mock.patch.object(
+                agent.subprocess, "run", side_effect=run_side_effect
+            ) as run_mock:
+                with unittest.mock.patch.object(
+                    agent, "process_command", return_value="python -m server"
+                ):
+                    first = agent.list_listening_tcp()
+                    # Still well inside LISTENING_TCP_CACHE_TTL_SECONDS (75ms).
+                    clock["t"] = 1000.0 + 0.05
+                    second = agent.list_listening_tcp()
+
+        ss_calls = [c for c in run_mock.call_args_list if c[0][0][0] == "ss"]
+        self.assertEqual(len(ss_calls), 1)
+        self.assertEqual(first, second)
+        self.assertIs(first, second)
+        self.assertEqual(first[0]["port"], 8080)
+
+    def test_call_after_ttl_reinvokes_ss(self) -> None:
+        """Past TTL the inventory is refreshed (ss runs again)."""
+        ss_out = (
+            "LISTEN 0 128 127.0.0.1:8080 0.0.0.0:* "
+            'users:(("py",pid=4242,fd=3))\n'
+        )
+        clock = {"t": 1000.0}
+
+        def run_side_effect(cmd, *args, **kwargs):  # type: ignore[no-untyped-def]
+            if cmd and cmd[0] == "ss":
+                return unittest.mock.Mock(stdout=ss_out, returncode=0)
+            return unittest.mock.Mock(stdout="", returncode=1)
+
+        with unittest.mock.patch.object(
+            agent.time, "monotonic", side_effect=lambda: clock["t"]
+        ):
+            with unittest.mock.patch.object(
+                agent.subprocess, "run", side_effect=run_side_effect
+            ) as run_mock:
+                with unittest.mock.patch.object(
+                    agent, "process_command", return_value="python -m server"
+                ):
+                    agent.list_listening_tcp()
+                    clock["t"] = 1000.0 + agent.LISTENING_TCP_CACHE_TTL_SECONDS + 0.001
+                    agent.list_listening_tcp()
+
+        ss_calls = [c for c in run_mock.call_args_list if c[0][0][0] == "ss"]
+        self.assertEqual(len(ss_calls), 2)
 
 
 class ListeningInventoryOnceTests(unittest.TestCase):
