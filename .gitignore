@@ -40,6 +40,15 @@ venv/
 # Local agent/run artifacts
 .code-upgrade/
 .doctor/
+
+# ZeroStack / CodeMode local engine state (machine-local caches, never ship)
+.fszero/
+.graphzero/
+.tokenzero/
+**/.tokenzero/
+codedb.snapshot
+*.sqlite3
+*.sqlite3-*
 agent_ergonomics_audit/
 refactor/artifacts/
 .skill-loop-progress.md
