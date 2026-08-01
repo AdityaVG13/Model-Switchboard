@@ -86,3 +86,28 @@ import ModelSwitchboardTestSupport
     let switchURL = ControllerClient.apiURL(baseURL: base, path: "api/switch")
     #expect(switchURL.path == "/api/switch")
 }
+
+@Test func nullLogPathDecodesToEmptyString() throws {
+    let json = """
+    {
+      "profile": "port-1",
+      "display_name": "Demo",
+      "runtime": "llama.cpp",
+      "host": "127.0.0.1",
+      "port": "1",
+      "base_url": "http://127.0.0.1:1/v1",
+      "request_model": "demo",
+      "server_model_id": "demo",
+      "pid": null,
+      "running": false,
+      "ready": false,
+      "server_ids": [],
+      "rss_mb": null,
+      "command": null,
+      "log_path": null
+    }
+    """
+    let status = try JSONDecoder().decode(ModelProfileStatus.self, from: Data(json.utf8))
+    #expect(status.logPath == "")
+    #expect(status.profile == "port-1")
+}

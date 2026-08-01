@@ -930,6 +930,38 @@ class DiscoveryTests(unittest.TestCase):
             self.assertEqual(claim_status["discovery_source"], "claim")
             self.assertIsInstance(claim_status["log_path"], str)
 
+
+    def test_resolve_profile_uses_claim_start_command(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profiles = root / "model-profiles"
+            profiles.mkdir()
+            claim = root / "my-stack" / "9777"
+            claim.mkdir(parents=True)
+            (claim / "flags.env").write_text(
+                'MODEL="${MODEL:-/models/x.gguf}"\nPORT="${PORT:-9777}"\n',
+                encoding="utf-8",
+            )
+            launch = claim / "launch.sh"
+            launch.write_text("#!/bin/sh\necho hi\n", encoding="utf-8")
+            launch.chmod(0o755)
+            configuration = agent.AgentConfiguration(
+                root=root, host="127.0.0.1", port=18878, profiles_dir=profiles
+            )
+            service = agent.AgentService(configuration)
+            old = os.environ.get(agent.SCAN_ROOTS_ENV)
+            os.environ[agent.SCAN_ROOTS_ENV] = str(root / "my-stack")
+            try:
+                profile = service.resolve_profile("port-9777")
+            finally:
+                if old is None:
+                    os.environ.pop(agent.SCAN_ROOTS_ENV, None)
+                else:
+                    os.environ[agent.SCAN_ROOTS_ENV] = old
+            self.assertEqual(profile.endpoint_port, "9777")
+            cmd = agent.build_start_command(profile)
+            self.assertIn("launch.sh", cmd)
+
     def test_discovered_status_log_path_is_string(self) -> None:
         """Mac Codable requires log_path: String — null breaks the gateway UI."""
         status = agent.status_dict_from_discovery(

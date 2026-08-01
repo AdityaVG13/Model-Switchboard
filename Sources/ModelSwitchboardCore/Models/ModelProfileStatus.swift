@@ -82,6 +82,34 @@ public struct ModelProfileStatus: Codable, Identifiable, Equatable, Sendable {
         case command
         case logPath = "log_path"
     }
+
+    /// Tolerant decode: remote agents may omit or null `log_path` (discovery rows).
+    /// Never fail the whole gateway status payload for a cosmetic field.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        profile = try container.decode(String.self, forKey: .profile)
+        displayName = try container.decode(String.self, forKey: .displayName)
+        runtime = try container.decode(String.self, forKey: .runtime)
+        runtimeLabel = try container.decodeIfPresent(String.self, forKey: .runtimeLabel)
+        runtimeTags = try container.decodeIfPresent([String].self, forKey: .runtimeTags)
+        launchMode = try container.decodeIfPresent(String.self, forKey: .launchMode)
+        host = try container.decode(String.self, forKey: .host)
+        port = try container.decode(String.self, forKey: .port)
+        baseURL = try container.decode(String.self, forKey: .baseURL)
+        requestModel = try container.decode(String.self, forKey: .requestModel)
+        serverModelID = try container.decode(String.self, forKey: .serverModelID)
+        pid = try container.decodeIfPresent(Int.self, forKey: .pid)
+        running = try container.decode(Bool.self, forKey: .running)
+        ready = try container.decode(Bool.self, forKey: .ready)
+        serverIDs = try container.decodeIfPresent([String].self, forKey: .serverIDs) ?? []
+        rssMB = try container.decodeIfPresent(Double.self, forKey: .rssMB)
+        command = try container.decodeIfPresent(String.self, forKey: .command)
+        if let path = try container.decodeIfPresent(String.self, forKey: .logPath) {
+            logPath = path
+        } else {
+            logPath = ""
+        }
+    }
 }
 
 public extension ModelProfileStatus {

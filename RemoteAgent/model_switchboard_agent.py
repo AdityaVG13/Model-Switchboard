@@ -39,7 +39,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
 
-AGENT_VERSION = "1.1.1"
+AGENT_VERSION = "1.1.2"
 DEFAULT_PORT = 8877
 MINIMUM_TOKEN_BYTES = 16
 MAXIMUM_BODY_BYTES = 64 * 1024
@@ -599,6 +599,10 @@ def build_start_command(profile: Profile) -> str:
     explicit = (profile.get("START_COMMAND") or "").strip()
     if explicit:
         return explicit
+    if (profile.get("LAUNCH_MODE") or "").lower() == "external":
+        raise UnsupportedError(
+            f"{profile.name}: externally managed endpoint; set START_COMMAND or a launch claim to start"
+        )
 
     runtime = profile.runtime
     host = profile.get("HOST") or "127.0.0.1"
@@ -1508,6 +1512,56 @@ def status_dict_from_discovery(
     }
 
 
+def profile_from_claim(claim: dict[str, Any]) -> Profile:
+    """Build a manage-able Profile from a claimed port folder (no invented flags)."""
+    port = str(claim.get("port") or "")
+    if not port:
+        raise InvalidProfileError("claim missing port")
+    name = f"port-{port}"
+    claim_path = claim.get("path") or ""
+    request = claim.get("model_hint") or f"port-{port}"
+    request_s = str(request)
+    flags = claim.get("flags") if isinstance(claim.get("flags"), dict) else {}
+    start = (claim.get("start_command") or "").strip()
+    stop = ""
+    if claim_path:
+        directory = Path(claim_path)
+        ctrl = directory / "ctrl.sh"
+        launch = directory / "launch.sh"
+        if ctrl.is_file() and os.access(ctrl, os.X_OK):
+            start = start or f"{shlex.quote(str(ctrl))} start"
+            stop = f"{shlex.quote(str(ctrl))} stop"
+        elif launch.is_file() and os.access(launch, os.X_OK):
+            start = start or shlex.quote(str(launch))
+    display = claim.get("display_name") or Path(request_s).name or name
+    values: dict[str, str] = {
+        "DISPLAY_NAME": str(display),
+        "RUNTIME": "command",
+        "REQUEST_MODEL": request_s,
+        "SERVER_MODEL_ID": Path(request_s).name if ("/" in request_s or request_s.endswith(".gguf")) else request_s,
+        "PORT": port,
+        "HOST": str(claim.get("host") or "127.0.0.1"),
+        "START_COMMAND": start,
+        "WORKING_DIRECTORY": claim_path,
+        "LOG_ALIAS": f"launch-{port}",
+        "MODEL_PATH": str(flags.get("MODEL") or flags.get("MODEL_PATH") or request_s),
+        "MODEL_FILE": str(
+            flags.get("MODEL_FILE")
+            or flags.get("MODEL")
+            or (request_s if request_s.endswith(".gguf") else "")
+        ),
+        "MODEL_REPO": str(flags.get("MODEL_REPO") or flags.get("MODEL_DIR") or ""),
+        "RUNTIME_TAGS": "claimed,launch-folder",
+    }
+    if stop:
+        values["STOP_COMMAND"] = stop
+    if not start:
+        # Still construct for status/stop-by-port; start() will raise clearly.
+        values["LAUNCH_MODE"] = "external"
+    return Profile(name=name, values=values)
+
+
+
 # --------------------------------------------------------------------------
 # Profiles directory resolution + home scan
 # --------------------------------------------------------------------------
@@ -1848,6 +1902,57 @@ class AgentService:
         # these — an agent reboot / login never spontaneously loads a model.
         self._supervised: set[str] = set()
 
+    def resolve_profile(self, name: str) -> Profile:
+        """Profiles folder first; then claimed port folders (port-N); never invent."""
+        loaded = self.profiles.load()
+        if name in loaded:
+            return loaded[name]
+        port: int | None = None
+        if name.startswith("port-"):
+            try:
+                port = int(name.removeprefix("port-"))
+            except ValueError:
+                port = None
+        elif name.startswith("discovered-"):
+            try:
+                port = int(name.removeprefix("discovered-"))
+            except ValueError:
+                port = None
+        if port is not None:
+            claims = scan_port_claim_directories(agent_root=self.configuration.root)
+            for claim in claims:
+                try:
+                    if int(claim["port"]) == port:
+                        return profile_from_claim(claim)
+                except (KeyError, TypeError, ValueError):
+                    continue
+            live = discover_live_model_endpoints(
+                profile_ports=set(),
+                claim_ports={port},
+            )
+            for item in live:
+                try:
+                    if int(item["port"]) != port:
+                        continue
+                except (KeyError, TypeError, ValueError):
+                    continue
+                request = str(item.get("request_model") or f"port-{port}")
+                return Profile(
+                    name=name,
+                    values={
+                        "DISPLAY_NAME": str(item.get("display_name") or request),
+                        "RUNTIME": str(item.get("runtime") or "unknown"),
+                        "REQUEST_MODEL": request,
+                        "SERVER_MODEL_ID": request,
+                        "PORT": str(port),
+                        "HOST": "127.0.0.1",
+                        "LAUNCH_MODE": "external",
+                        "START_COMMAND": "",
+                        "LOG_ALIAS": f"discovered-{port}",
+                    },
+                )
+        raise ProfileNotFoundError(name)
+
     # -- status ------------------------------------------------------------
 
     def status_payload(self, selected: list[str] | None = None) -> dict[str, Any]:
@@ -2111,11 +2216,16 @@ class AgentService:
 
     def start(self, name: str) -> None:
         with self._mutation_lock:
+            profile = self.resolve_profile(name)
+            if not (profile.get("START_COMMAND") or "").strip() and profile.runtime_spec[2] == "external":
+                raise UnsupportedError(
+                    f"{name}: discovered endpoint has no launch claim; cannot start from Switchboard"
+                )
             loaded = self.profiles.load()
-            if name not in loaded:
-                raise ProfileNotFoundError(name)
-            self.profiles.ensure_unique(name, "start", loaded)
-            profile = loaded[name]
+            # Include synthetic claim profile for conflict checks on the port.
+            loaded = dict(loaded)
+            loaded[profile.name] = profile
+            self.profiles.ensure_unique(profile.name, "start", loaded)
             command = build_start_command(profile)
 
             environment = dict(os.environ)
@@ -2152,7 +2262,7 @@ class AgentService:
             self._suppress_watchdog()
             self._supervised.discard(name)
             self._clear_active_profile(if_matching=name)
-            profile = self.profiles.profile(name)
+            profile = self.resolve_profile(name)
             current = self.status(profile)
             primary_pid = current.get("pid")
             stop_error: Exception | None = None
@@ -2200,19 +2310,19 @@ class AgentService:
 
     def restart(self, name: str) -> None:
         with self._mutation_lock:
-            loaded = self.profiles.load()
-            if name not in loaded:
-                raise ProfileNotFoundError(name)
-            self.profiles.ensure_unique(name, "restart", loaded)
+            profile = self.resolve_profile(name)
+            loaded = dict(self.profiles.load())
+            loaded[profile.name] = profile
+            self.profiles.ensure_unique(profile.name, "restart", loaded)
             self.stop(name)
             self.start(name)
 
     def switch_profile(self, name: str) -> None:
         with self._mutation_lock:
-            loaded = self.profiles.load()
-            if name not in loaded:
-                raise ProfileNotFoundError(name)
-            self.profiles.ensure_unique(name, "activate", loaded)
+            profile = self.resolve_profile(name)
+            loaded = dict(self.profiles.load())
+            loaded[profile.name] = profile
+            self.profiles.ensure_unique(profile.name, "activate", loaded)
             for item in self.status_payload()["statuses"]:
                 if item["profile"] != name and item["running"]:
                     self.stop(item["profile"])
@@ -2280,7 +2390,7 @@ class AgentService:
             return
         for name in list(self._supervised):
             try:
-                profile = self.profiles.profile(name)
+                profile = self.resolve_profile(name)
             except AgentError:
                 self._supervised.discard(name)
                 continue
