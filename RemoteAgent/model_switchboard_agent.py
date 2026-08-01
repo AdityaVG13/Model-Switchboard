@@ -2011,7 +2011,12 @@ class AgentService:
             except ValueError:
                 port = None
         if port is not None:
-            claims = scan_port_claim_directories(agent_root=self.configuration.root)
+            # One inventory for claim scan + live discovery (no second ss/lsof).
+            listeners = list_listening_tcp()
+            claims = scan_port_claim_directories(
+                agent_root=self.configuration.root,
+                listeners=listeners,
+            )
             for claim in claims:
                 try:
                     if int(claim["port"]) == port:
@@ -2021,6 +2026,7 @@ class AgentService:
             live = discover_live_model_endpoints(
                 profile_ports=set(),
                 claim_ports={port},
+                listeners=listeners,
             )
             for item in live:
                 try:
@@ -2067,14 +2073,14 @@ class AgentService:
         listening: list[dict[str, Any]] = []
         # Full inventory only when listing everything — targeted status stays profile-only.
         if selected is None:
+            # Capture listeners once; scan + discover reuse (no second inventory).
             listeners = list_listening_tcp()
             start_cmds = [
                 profile.get("START_COMMAND")
                 for profile in loaded.values()
             ]
-            claim_roots = roots_hinted_by_commands(
-                start_cmds + [item.get("command") for item in listeners]
-            )
+            # START_COMMAND path hints only; scan re-hints from listeners=.
+            claim_roots = roots_hinted_by_commands(start_cmds)
             claims = scan_port_claim_directories(
                 roots=claim_roots or None,
                 agent_root=self.configuration.root,
@@ -2176,6 +2182,7 @@ class AgentService:
                 profile_ports.add(int(profile.endpoint_port))
             except (TypeError, ValueError):
                 pass
+        # One inventory shared with claim scan + live discovery.
         listeners = list_listening_tcp()
         claims = scan_port_claim_directories(
             agent_root=self.configuration.root,

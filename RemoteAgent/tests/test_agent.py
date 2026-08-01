@@ -1070,6 +1070,122 @@ class ListListeningTcpTests(unittest.TestCase):
         self.assertIn(9000, ports)
 
 
+class ListeningInventoryOnceTests(unittest.TestCase):
+    """status/ports/scan share one list_listening_tcp per request path."""
+
+    def _service(self, root: Path) -> agent.AgentService:
+        profiles = root / "model-profiles"
+        profiles.mkdir(parents=True, exist_ok=True)
+        configuration = agent.AgentConfiguration(
+            root=root,
+            host="127.0.0.1",
+            port=18880,
+            profiles_dir=profiles,
+        )
+        return agent.AgentService(configuration)
+
+    def test_scan_with_listeners_does_not_reinventory(self) -> None:
+        fake = [{"port": 8080, "pid": 1, "command": "/tmp/x", "bind": "127.0.0.1"}]
+        with unittest.mock.patch.object(
+            agent, "list_listening_tcp", side_effect=AssertionError("should not inventory")
+        ) as inv:
+            found = agent.scan_port_claim_directories(
+                roots=[],
+                listeners=fake,
+                max_depth=1,
+            )
+        inv.assert_not_called()
+        self.assertIsInstance(found, list)
+
+    def test_status_payload_inventories_once(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            service = self._service(Path(tmp))
+            fake = [
+                {
+                    "port": 8080,
+                    "pid": 42,
+                    "command": "python -m vllm.entrypoints.openai.api_server",
+                    "bind": "127.0.0.1",
+                }
+            ]
+            with unittest.mock.patch.object(
+                agent, "list_listening_tcp", return_value=fake
+            ) as inv:
+                with unittest.mock.patch.object(
+                    agent, "discover_live_model_endpoints", return_value=[]
+                ) as disc:
+                    with unittest.mock.patch.object(
+                        agent, "scan_port_claim_directories", return_value=[]
+                    ) as scan:
+                        service.status_payload()
+            inv.assert_called_once_with()
+            # Downstream helpers must receive the shared snapshot.
+            self.assertEqual(scan.call_args.kwargs.get("listeners"), fake)
+            self.assertEqual(disc.call_args.kwargs.get("listeners"), fake)
+
+    def test_ports_payload_inventories_once(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            service = self._service(Path(tmp))
+            fake = [
+                {
+                    "port": 9000,
+                    "pid": 7,
+                    "command": "llama-server --port 9000",
+                    "bind": "127.0.0.1",
+                }
+            ]
+            with unittest.mock.patch.object(
+                agent, "list_listening_tcp", return_value=fake
+            ) as inv:
+                with unittest.mock.patch.object(
+                    agent, "discover_live_model_endpoints", return_value=[]
+                ) as disc:
+                    with unittest.mock.patch.object(
+                        agent, "scan_port_claim_directories", return_value=[]
+                    ) as scan:
+                        service.ports_payload()
+            inv.assert_called_once_with()
+            self.assertEqual(scan.call_args.kwargs.get("listeners"), fake)
+            self.assertEqual(disc.call_args.kwargs.get("listeners"), fake)
+
+    def test_resolve_profile_shares_listeners_across_scan_and_discover(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            service = self._service(Path(tmp))
+            fake = [
+                {
+                    "port": 9666,
+                    "pid": 3,
+                    "command": "python -m vllm.entrypoints.openai.api_server --port 9666",
+                    "bind": "127.0.0.1",
+                }
+            ]
+            live_row = {
+                "port": 9666,
+                "pid": 3,
+                "command": fake[0]["command"],
+                "ready": True,
+                "request_model": "demo",
+                "display_name": "demo",
+                "runtime": "vllm",
+            }
+            with unittest.mock.patch.object(
+                agent, "list_listening_tcp", return_value=fake
+            ) as inv:
+                with unittest.mock.patch.object(
+                    agent, "scan_port_claim_directories", return_value=[]
+                ) as scan:
+                    with unittest.mock.patch.object(
+                        agent,
+                        "discover_live_model_endpoints",
+                        return_value=[live_row],
+                    ) as disc:
+                        profile = service.resolve_profile("discovered-9666")
+            inv.assert_called_once_with()
+            self.assertEqual(scan.call_args.kwargs.get("listeners"), fake)
+            self.assertEqual(disc.call_args.kwargs.get("listeners"), fake)
+            self.assertEqual(profile.endpoint_port, "9666")
+
+
 class ConfigurationTests(unittest.TestCase):
     def test_non_loopback_bind_requires_unsafe_flag_and_token(self) -> None:
         with self.assertRaises(agent.InvalidConfigurationError):
