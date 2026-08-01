@@ -42,7 +42,9 @@
 
 ---
 
-Running local models on an Apple Silicon Mac often means juggling terminal windows, ad-hoc launch scripts, and no single view of **what's actually running.** Model Switchboard puts `llama.cpp`, MLX, Ollama, vLLM, SGLang, TGI, MLC-LLM, Mistral.rs, oMLX, vLLM-MLX, rVLLM MLX, LM Studio, Jan, and named command launchers behind **one menu bar panel.** Click **Activate**, every other model stops, and the one you picked comes up at an OpenAI-compatible endpoint. Readiness comes from health probes, not process presence alone.
+Running local models on an Apple Silicon Mac often means juggling terminal windows and ad-hoc launch scripts, with no single view of **what's actually running.** Model Switchboard puts common local runtimes -- `llama.cpp`, MLX, Ollama, vLLM, SGLang, TGI, MLC-LLM, Mistral.rs, oMLX, vLLM-MLX, rVLLM MLX, LM Studio, Jan, and named command launchers -- behind **one menu bar panel.**
+
+Click **Activate**. Every other model stops. The one you picked comes up at an OpenAI-compatible endpoint. Readiness comes from health probes, not process presence alone.
 
 ---
 
@@ -67,7 +69,7 @@ Running local models on an Apple Silicon Mac often means juggling terminal windo
 
 ## What's in the panel
 
-**`Activate` stops every other profile and brings the chosen one up**, so a previous large process does not stay loaded when you switch. Profiles are marked **ready** after a successful `/v1/models` probe (or your custom HTTP check). Built with **SwiftUI** and `MenuBarExtra`. The app does not ship Electron, a bundled inference engine, or a resident background worker that keeps the CPU busy when idle.
+**`Activate` stops every other profile and brings the chosen one up.** A previous large process does not stay loaded when you switch. Profiles are marked **ready** after a successful `/v1/models` probe (or your custom HTTP check). The UI is **SwiftUI** with `MenuBarExtra`. The app does not ship Electron, a bundled inference engine, or a resident background worker that keeps the CPU busy when idle.
 
 <table>
 <tr>
@@ -90,7 +92,7 @@ Running local models on an Apple Silicon Mac often means juggling terminal windo
 
 ## Runtimes supported
 
-Model Switchboard keys off the runtime: if that runtime exposes an OpenAI-compatible endpoint, the app can track it, health-check it, switch it, and tag it. Qwen, Gemma, Llama, Mistral, GLM, DeepSeek, and other local models are supported through whichever backend serves them.
+Model Switchboard keys off the runtime. Any backend that exposes an OpenAI-compatible endpoint can be health-checked, switched, and tagged. Qwen, Gemma, Llama, Mistral, GLM, DeepSeek, and other local models work through whichever backend serves them.
 
 | Support level | Runtimes and providers |
 |---|---|
@@ -104,15 +106,15 @@ Use `RUNTIME_TAGS` for model-level traits such as `coding`, `q8`, `long-context`
 
 ## Remote gateways
 
-**Your DGX box, lab workstation, or home server lives in the same menu bar panel.** Launching a model server used to mean SSH-ing in, finding the tmux pane, and pasting a `vllm serve` incantation. Now: drop a profile file on the remote host, click `Activate` on your Mac.
+Remote hosts -- a DGX box, lab workstation, or home server -- show up in the same menu bar panel. You drop a profile file on the remote host, then click `Activate` on your Mac. No SSH session hunting for a tmux pane or pasting a `vllm serve` line by hand.
 
-- **Nothing to install on the remote by hand.** Enter `user` + `host` in *Settings → Remote Gateways*, click **Install Agent on Host**, and the app pushes its bundled single-file agent (stdlib-only Python, [RemoteAgent/](RemoteAgent/)) over your own SSH connection and sets up its service. Or use the printed pairing code / `curl | bash` one-liner from an existing SSH session.
-- **SSH tunnels, your keys.** The agent binds loopback only; the app opens the tunnel with your existing SSH config and agent (`BatchMode`; it never touches passwords). Running models' ports are forwarded automatically, so `Copy Endpoint URL` gives you a URL that works on your Mac.
-- **Tailscale-native.** Tick *Tailscale mode* on install (or run the agent with `--tailscale`) and the gateway connects directly over your tailnet: WireGuard-encrypted, no tunnel process, MagicDNS names in your endpoint URLs.
-- **Or direct LAN**, guarded the same way as the local controller: non-loopback binds demand a ≥16-byte bearer token, stored in your keychain.
-- **Any runtime.** Launch templates for vLLM, llama.cpp, SGLang, and TGI, plus `START_COMMAND` for anything else (same profile files as local models). Live rows show exactly which model is serving on which port, with the URL as reachable *from your Mac*.
-- **Profiles folder.** Default `~/model-profiles/` on the remote (Mac controller can use `--profiles-dir` too). `link` scans for existing `.env` launch files and lets you confirm or paste the folder AI/you already use.
-- **Everything aggregates.** Each gateway gets its own named section in the panel; the menu bar ready-count spans every gateway; `Stop Everything` sweeps them all.
+- **Nothing to install on the remote by hand.** Enter `user` + `host` in *Settings → Remote Gateways*, then click **Install Agent on Host**. The app pushes its bundled single-file agent (stdlib-only Python, [RemoteAgent/](RemoteAgent/)) over your own SSH connection and sets up its service. You can also use the printed pairing code or a `curl | bash` one-liner from an existing SSH session.
+- **SSH tunnels, your keys.** The agent binds loopback only. The app opens the tunnel with your existing SSH config and agent (`BatchMode`; it never touches passwords). Running models' ports are forwarded automatically, so `Copy Endpoint URL` gives you a URL that works on your Mac.
+- **Tailscale-native.** Tick *Tailscale mode* on install (or run the agent with `--tailscale`). The gateway connects directly over your tailnet -- WireGuard-encrypted, no tunnel process, MagicDNS names in endpoint URLs.
+- **Or direct LAN**, guarded the same way as the local controller. Non-loopback binds demand a ≥16-byte bearer token, stored in your keychain.
+- **Any runtime.** Launch templates cover vLLM, llama.cpp, SGLang, and TGI. Use `START_COMMAND` for anything else (same profile files as local models). Live rows show which model is serving on which port, with the URL as reachable *from your Mac*.
+- **Profiles folder.** Default is `~/model-profiles/` on the remote (Mac controller can use `--profiles-dir` too). `link` scans for existing `.env` launch files and lets you confirm or paste the folder AI/you already use.
+- **Everything aggregates.** Each gateway gets its own named section in the panel. The menu bar ready-count spans every gateway. `Stop Everything` sweeps them all.
 
 Setup lives in [RemoteAgent/README.md](RemoteAgent/README.md) and the [SETUP.md remote gateways chapter](SETUP.md#remote-gateways).
 
@@ -122,7 +124,7 @@ Setup lives in [RemoteAgent/README.md](RemoteAgent/README.md) and the [SETUP.md 
 
 *Same codebase, two apps.* Pick at install time. They live side by side as **Model Switchboard.app** and **Model Switchboard Plus.app** under `~/Applications/`.
 
-The controller contract, profile discovery, runtime tags, and launcher support are shared by both editions. Plus adds the extra operator UI: live utilization badges, benchmarks, reopen-last, and integrations.
+Both editions share the controller contract, profile discovery, runtime tags, and launcher support. Plus adds operator UI on top: live utilization badges, benchmarks, reopen-last, and integrations.
 
 <div align="center">
 
@@ -168,9 +170,9 @@ cd Model-Switchboard
 ./Scripts/install.sh --variant plus    # Plus
 ```
 
-The installer places a fresh build under `~/Applications/`, installs `model-switchboardctl` to `~/.local/bin`, writes bash/zsh/fish completions, registers the app with Launch Services, and forces a Spotlight import so Raycast and Alfred pick it up immediately. Use `./Scripts/install.sh --help` for quiet mode, custom install paths, `--verify`, and `--skip-open`.
+The installer places a fresh build under `~/Applications/` and installs `model-switchboardctl` to `~/.local/bin`. It writes bash/zsh/fish completions and registers the app with Launch Services. It also forces a Spotlight import so Raycast and Alfred pick it up. Use `./Scripts/install.sh --help` for quiet mode, custom install paths, `--verify`, and `--skip-open`.
 
-Agent-facing CLI entrypoints are built in: `model-switchboardctl capabilities`, `model-switchboardctl robot-docs guide`, `model-switchboardctl triage`, and `model-switchboardctl doctor --json` expose machine-readable contracts, paste-ready guidance, one-call health triage, and structured diagnostics. Mutating commands such as `start`, `stop`, `restart`, `switch`/`activate`, and `stop-all` accept `--dry-run`/`--plan`; add `--json` for a structured result envelope.
+Agent-facing CLI entrypoints are built in. Use `model-switchboardctl capabilities`, `robot-docs guide`, `triage`, and `doctor --json` for machine-readable contracts, paste-ready guidance, one-call health triage, and structured diagnostics. Mutating commands (`start`, `stop`, `restart`, `switch`/`activate`, `stop-all`) accept `--dry-run`/`--plan`. Add `--json` for a structured result envelope.
 
 ---
 
@@ -186,7 +188,7 @@ Agent-facing CLI entrypoints are built in: `model-switchboardctl capabilities`, 
 
 The controller exposes its API at `http://127.0.0.1:8877` under a per-user LaunchAgent. Use `--root`, `--host`, `--port`, `--no-start`, or `--verify` when installing a dedicated controller checkout.
 
-**2. Drop a profile manifest** into the controller's `model-profiles/` folder *(the exact path is shown in `Settings`).* If you run the reference controller in this repo, that is `Controller/model-profiles/`; if you keep a dedicated controller root, it is `<controller-root>/model-profiles/`. A minimal `llama.cpp` example:
+**2. Drop a profile manifest** into the controller's `model-profiles/` folder *(the exact path is shown in `Settings`).* With the reference controller in this repo, that is `Controller/model-profiles/`. With a dedicated controller root, it is `<controller-root>/model-profiles/`. A minimal `llama.cpp` example:
 
 ```env
 DISPLAY_NAME=Qwen 3.5 35B Local
@@ -199,7 +201,7 @@ SERVER_MODEL_ID=qwen35-local
 
 **3. Open the menu bar icon.** Your profile appears. Click **`Activate`**.
 
-Every profile must resolve to a unique endpoint. Reusing the same `HOST:PORT` or `BASE_URL` across two profiles is a configuration error, and the controller doctor will flag it.
+Every profile must resolve to a unique endpoint. Reusing the same `HOST:PORT` or `BASE_URL` across two profiles is a configuration error. The controller doctor will flag it.
 
 > Using your own runtime or launcher? Any OpenAI-compatible endpoint works. The controller has adapters and tags for MLX, Ollama, vLLM, SGLang, TGI, llama-cpp-python, rVLLM MLX, vLLM-MLX, DDTree MLX, TurboQuant, Mistral.rs, MLC-LLM, LightLLM, FastChat, OpenLLM, Nexa, ExLlamaV2, Aphrodite, LMDeploy, LiteLLM, external endpoints, and generic binaries. See [runtime support](Controller/RUNTIME_SUPPORT.md).
 
@@ -262,7 +264,7 @@ See **[CHANGELOG.md](CHANGELOG.md)** for release-by-release detail and **[Releas
 ## Integrations
 
 - **Raycast**: extension scripts under [`Integrations/Raycast/`](Integrations/Raycast/) call the same controller API the menu bar uses.
-- **SwiftBar**: drop-in plugin at [`Controller/swiftbar/local-models.15s.sh`](Controller/swiftbar/local-models.15s.sh) renders the same status, start, stop, and restart actions in any SwiftBar-friendly menu.
+- **SwiftBar**: drop-in plugin at [`Controller/swiftbar/local-models.15s.sh`](Controller/swiftbar/local-models.15s.sh). It renders the same status, start, stop, and restart actions in any SwiftBar-friendly menu.
 - **Factory Droid**: `Sync Droid` (Plus only) pushes managed profiles into Droid's custom-model settings. First of several planned sync adapters.
 
 ---
@@ -288,9 +290,9 @@ PRs, issues, and profile recipes are welcome. A few ground rules that keep the p
 - External tools stay **optional integrations**, never required features.
 - Ship a runnable example with any new adapter.
 
-**`Sync Droid` is currently Factory-Droid-specific** because that's the agent I run. The integration slot is generic, but the adapter is not. **PRs that add sync adapters for other local-model terminals or agentic tools are very welcome**, including but not limited to **Cursor**, **Windsurf**, **OpenAI Codex CLI**, **Zed**, **Continue**, **Aider**, **LM Studio**, **Ollama chat frontends**, or any **OpenAI-compatible consumer**.
+**`Sync Droid` is currently Factory-Droid-specific** because that's the agent I run. The integration slot is generic; the adapter is not. **PRs that add sync adapters for other local-model terminals or agentic tools are welcome** -- for example **Cursor**, **Windsurf**, **OpenAI Codex CLI**, **Zed**, **Continue**, **Aider**, **LM Studio**, **Ollama chat frontends**, or any **OpenAI-compatible consumer**.
 
-If you build one, implement the adapter in `ModelSwitchboardControllerCore` and register it with the native integration service so it appears in the Plus menu automatically. Full contributor guidance lives in [SETUP.md](SETUP.md).
+If you build one, implement the adapter in `ModelSwitchboardControllerCore` and register it with the native integration service. It then appears in the Plus menu automatically. Full contributor guidance lives in [SETUP.md](SETUP.md).
 
 Before opening a PR:
 

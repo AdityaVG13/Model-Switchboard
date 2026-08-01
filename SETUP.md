@@ -67,7 +67,7 @@ Use `.env` for shell-style configuration. Use `.json` for structured, tool-agnos
 
 Strict example manifests live under `Controller/model-profiles/examples/`.
 
-Every profile must resolve to a unique endpoint. If two profiles share the same `HOST:PORT` or `BASE_URL`, activation and status attribution become ambiguous, so the controller doctor treats that as a profile error.
+Every profile must resolve to a unique endpoint. If two profiles share the same `HOST:PORT` or `BASE_URL`, activation and status attribution become ambiguous. The controller doctor treats that as a profile error.
 
 ## Supported runtime styles
 
@@ -128,9 +128,9 @@ Model Switchboard uses three launch modes:
 - `command`: profile-owned `START_COMMAND`, optional `STOP_COMMAND`, and readiness.
 - `external`: an already-running OpenAI-compatible endpoint such as LM Studio, Jan, LocalAI, or a manually launched server.
 
-Named command and generic-binary profiles can still use runtime ids such as `ddtree-mlx`, `turboquant`, `mlx-vlm`, `mlx-omni-server`, `mistral.rs`, `mlc-llm`, `lightllm`, `fastchat`, `openllm`, `nexa`, `exllamav2`, `aphrodite`, and `lmdeploy`; they retain their real runtime label instead of displaying as custom. Use `LAUNCH_MODE=external` when a named runtime is already running outside Model Switchboard. Every profile status includes `runtime_label`, `runtime_tags`, and `launch_mode`. Add custom tags with `RUNTIME_TAGS="coding q8 long-context"`.
+Named command and generic-binary profiles can still use runtime ids such as `ddtree-mlx`, `turboquant`, `mlx-vlm`, `mlx-omni-server`, `mistral.rs`, `mlc-llm`, `lightllm`, `fastchat`, `openllm`, `nexa`, `exllamav2`, `aphrodite`, and `lmdeploy`. They retain their real runtime label instead of displaying as custom. Use `LAUNCH_MODE=external` when a named runtime is already running outside Model Switchboard. Every profile status includes `runtime_label`, `runtime_tags`, and `launch_mode`. Add custom tags with `RUNTIME_TAGS="coding q8 long-context"`.
 
-Profiles can be JSON or declarative `.env` files. `.env` files are parsed as key/value data, not shell scripts; use quoted `START_COMMAND` or `STOP_COMMAND` values for commands that intentionally run through the launcher.
+Profiles can be JSON or declarative `.env` files. `.env` files are parsed as key/value data, not shell scripts. Use quoted `START_COMMAND` or `STOP_COMMAND` values for commands that intentionally run through the launcher.
 
 Generic JSON example:
 
@@ -274,27 +274,27 @@ The app expects a controller base URL, defaulting to `http://127.0.0.1:8877`.
 | `POST` | `/api/integrations/run` | Trigger an optional integration (Plus) |
 | `POST` | `/api/benchmark/start` | Run benchmark(s) (Plus) |
 
-Any backend that returns the same profile-status JSON shape and supports these lifecycle actions is compatible. See `Sources/ModelSwitchboardCore/Models/` and `Sources/ModelSwitchboardControllerCore/ControllerRouter.swift` for the exact contracts.
+Any backend that returns the same profile-status JSON shape and supports these lifecycle actions is compatible. Exact contracts live in `Sources/ModelSwitchboardCore/Models/` and `Sources/ModelSwitchboardControllerCore/ControllerRouter.swift`.
 
 ## Remote gateways
 
-Remote gateways put model servers on **other machines** into the same panel:
-each gateway is another controller endpoint speaking the contract above.
-The repo ships a reference backend for Linux/Unix hosts, a single stdlib-only
+Remote gateways put model servers on **other machines** into the same panel.
+Each gateway is another controller endpoint speaking the contract above.
+The repo ships a reference backend for Linux/Unix hosts: a single stdlib-only
 Python file, the **remote agent** ([RemoteAgent/README.md](RemoteAgent/README.md)).
 
 The moving parts:
 
-1. **On the remote host**: nothing to download; the app bundles the agent
-   and **Install Agent on Host** (in the gateway editor) pushes it over SSH
-   and sets up a systemd user service under
-   `~/.local/share/model-switchboard-agent/`. (Manual alternatives: a
+1. **On the remote host**: nothing to download. The app bundles the agent.
+   **Install Agent on Host** (in the gateway editor) pushes it over SSH and
+   sets up a systemd user service under
+   `~/.local/share/model-switchboard-agent/`. Manual alternatives: a
    `curl | bash` one-liner of `RemoteAgent/install-remote-agent.sh`, or a repo
-   checkout.) Profiles use the exact same `.env` / `.json` format described
-   above. Default folder is the visible **`~/model-profiles/`** (agent state
-   stays under `~/.local/share/…`). `model-switchboard-agent link` scans your
-   home for existing launch `.env` files (e.g. AI-authored `model.env`), asks
-   you to confirm or paste another path, and persists it, or pass
+   checkout. Profiles use the same `.env` / `.json` format described above.
+   Default folder is the visible **`~/model-profiles/`** (agent state stays
+   under `~/.local/share/…`). `model-switchboard-agent link` scans your home
+   for existing launch `.env` files (e.g. AI-authored `model.env`), asks you
+   to confirm or paste another path, and persists it. You can also pass
    `--profiles-dir` / `MODEL_SWITCHBOARD_PROFILES_DIR`. Launch templates cover
    `vllm`, `llama.cpp` (`llama-server`), `sglang`, and `tgi`; anything else
    works through `START_COMMAND`. The Mac controller accepts the same
@@ -305,12 +305,12 @@ The moving parts:
    `modelswitchboard-gateway://…` pairing code; paste it into the form to
    prefill user/host/ports. It only encodes those fields; pairing is fully
    local, no service involved.
-   - **SSH tunnel** (recommended): the agent stays loopback-only and the app
-     maintains `ssh -N -L` to it using your SSH config, keys, and agent
-     (`BatchMode=yes`; the app never handles passwords; connect once from
-     Terminal first so the host key is trusted). While a remote model runs,
+   - **SSH tunnel** (recommended): the agent stays loopback-only. The app
+     maintains `ssh -N -L` using your SSH config, keys, and agent
+     (`BatchMode=yes`; the app never handles passwords). Connect once from
+     Terminal first so the host key is trusted. While a remote model runs,
      its port is forwarded to the same local port over the tunnel's
-     ControlMaster socket, so `Copy Endpoint URL` hands you a URL that works
+     ControlMaster socket. `Copy Endpoint URL` then hands you a URL that works
      from the Mac. Tunnels reconnect with backoff and surface SSH failures
      (missing agent key, changed host key, unreachable host) in the panel.
    - **Tailscale**: install the agent with `--tailscale` (or run
@@ -467,8 +467,8 @@ Raycast users have two paths:
 This repo supports both:
 
 - `Scripts/install.sh` explicitly registers the app with Launch Services and forces a Spotlight import so Raycast can discover it faster.
-- `Scripts/model-switchboardctl` provides a tiny controller CLI, selectable per edition via `MODEL_SWITCHBOARD_VARIANT=base|plus`. Agents can start with `model-switchboardctl capabilities`, `model-switchboardctl robot-docs guide`, `model-switchboardctl triage`, or `model-switchboardctl doctor --json`; mutating commands support `--dry-run`/`--plan` and structured `--json` envelopes.
-- `Integrations/Raycast/Script Commands/` contains Script Commands for status, opening the profiles folder, stopping all models, and running quick benchmarks.
+- `Scripts/model-switchboardctl` is a tiny controller CLI. Pick an edition with `MODEL_SWITCHBOARD_VARIANT=base|plus`. Agents can start with `model-switchboardctl capabilities`, `model-switchboardctl robot-docs guide`, `model-switchboardctl triage`, or `model-switchboardctl doctor --json`. Mutating commands support `--dry-run`/`--plan` and structured `--json` envelopes.
+- `Integrations/Raycast/Script Commands/` has Script Commands for status, opening the profiles folder, stopping all models, and running quick benchmarks.
 
 If Finder shows `.app` extensions, that is the macOS `AppleShowAllExtensions` Finder preference, not a bundle naming issue.
 
@@ -477,10 +477,10 @@ If Finder shows `.app` extensions, that is the macOS `AppleShowAllExtensions` Fi
 ## Troubleshooting
 
 **The app doesn't appear in Spotlight or Raycast.**
-Run `./Scripts/install.sh`; it registers the bundle with Launch Services and forces a Spotlight import. If the old `ModelSwitchboard.app` name is still cached, the installer removes it automatically.
+Run `./Scripts/install.sh`. It registers the bundle with Launch Services and forces a Spotlight import. If the old `ModelSwitchboard.app` name is still cached, the installer removes it automatically.
 
 **A profile shows "Not Running" even though I can `curl` the endpoint.**
-The default health check for `llama.cpp` and `mlx` profiles probes `/v1/models` and verifies the expected model ID is present. If your server returns a different id, set `SERVER_MODEL_ID` in the profile to match, or switch the profile to `HEALTHCHECK_MODE=http-200` for a looser check.
+The default health check for `llama.cpp` and `mlx` profiles probes `/v1/models` and verifies the expected model ID is present. If your server returns a different id, set `SERVER_MODEL_ID` in the profile to match. For a looser check, switch the profile to `HEALTHCHECK_MODE=http-200`.
 
 **`Activate` doesn't kill the previously running model.**
 Each runtime is tracked by a managed PID file. If you started the process outside Model Switchboard (e.g. a terminal `llama-server` invocation), the controller doesn't own that PID. Stop the outside process manually, then use `Activate`.
@@ -502,7 +502,7 @@ Run `MSW_VERIFY_UI=0 ./Scripts/verify-installed-app.sh` to execute lifecycle/API
 ## Known limitations
 
 **Desktop / Notification Center widget requires a Developer-ID-signed build.**
-The widget target (`ModelSwitchboardWidget`) is real, embedded into the app bundle at `Contents/PlugIns/ModelSwitchboardWidget.appex`, and wired through `project.yml`. Local installs from `./Scripts/install.sh` ad-hoc sign the bundle (`codesign --sign -`), and ad-hoc-signed widget extensions are not reliably registered by WidgetKit's gallery. The widget begins to register once the app is installed from a Developer ID-signed, notarized DMG (i.e. the GitHub Release build). To verify on a local build:
+The widget target (`ModelSwitchboardWidget`) is real. It is embedded at `Contents/PlugIns/ModelSwitchboardWidget.appex` and wired through `project.yml`. Local installs from `./Scripts/install.sh` ad-hoc sign the bundle (`codesign --sign -`). Ad-hoc-signed widget extensions are not reliably registered by WidgetKit's gallery. The widget begins to register once the app is installed from a Developer ID-signed, notarized DMG (the GitHub Release build). To verify on a local build:
 
 ```bash
 pluginkit -a "$HOME/Applications/Model Switchboard.app/Contents/PlugIns/ModelSwitchboardWidget.appex"
