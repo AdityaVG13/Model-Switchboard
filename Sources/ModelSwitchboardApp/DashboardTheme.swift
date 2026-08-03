@@ -49,10 +49,13 @@ enum DashboardAppearanceKeys {
 // MARK: - Theme tokens (from the Switchboard Panel design)
 
 struct DashboardTheme {
+    /// Opaque panel fill — keep solid so Auto/Light/Dark swaps never desync.
     let panelBg: Color
     let cellBg: Color
     let hoverBg: Color
     let line: Color
+    /// Primary titles / model names (never use Color.primary in MenuBarExtra).
+    let label: Color
     let sub: Color
     let faint: Color
     let btnBg: Color
@@ -65,43 +68,53 @@ struct DashboardTheme {
     let dotOff: Color
     let sparkStroke: Color
     let panelBorder: Color
+    /// Text field / secure field fill (settings).
+    let fieldBg: Color
+    let fieldFg: Color
 
     static let dark = DashboardTheme(
-        panelBg: Color(.sRGB, red: 26 / 255, green: 26 / 255, blue: 29 / 255, opacity: 0.98),
-        cellBg: Color.white.opacity(0.05),
-        hoverBg: Color.white.opacity(0.06),
-        line: Color.white.opacity(0.07),
-        sub: Color(.sRGB, red: 142 / 255, green: 142 / 255, blue: 150 / 255),
-        faint: Color(.sRGB, red: 110 / 255, green: 110 / 255, blue: 118 / 255),
-        btnBg: Color.white.opacity(0.07),
-        btnFg: Color(.sRGB, red: 216 / 255, green: 216 / 255, blue: 220 / 255),
-        btnStrongBg: Color.white.opacity(0.1),
-        btnStrongFg: .white,
-        tabOnBg: Color.white.opacity(0.14),
-        tabOnFg: .white,
+        panelBg: Color(.sRGB, red: 26 / 255, green: 26 / 255, blue: 29 / 255),
+        cellBg: Color(.sRGB, red: 40 / 255, green: 40 / 255, blue: 44 / 255),
+        hoverBg: Color(.sRGB, red: 48 / 255, green: 48 / 255, blue: 52 / 255),
+        line: Color(.sRGB, red: 55 / 255, green: 55 / 255, blue: 60 / 255),
+        label: Color(.sRGB, red: 245 / 255, green: 245 / 255, blue: 247 / 255),
+        sub: Color(.sRGB, red: 162 / 255, green: 162 / 255, blue: 170 / 255),
+        faint: Color(.sRGB, red: 120 / 255, green: 120 / 255, blue: 128 / 255),
+        btnBg: Color(.sRGB, red: 48 / 255, green: 48 / 255, blue: 52 / 255),
+        btnFg: Color(.sRGB, red: 220 / 255, green: 220 / 255, blue: 224 / 255),
+        btnStrongBg: Color(.sRGB, red: 58 / 255, green: 58 / 255, blue: 64 / 255),
+        btnStrongFg: Color.white,
+        tabOnBg: Color(.sRGB, red: 58 / 255, green: 58 / 255, blue: 64 / 255),
+        tabOnFg: Color.white,
         tabOffFg: Color(.sRGB, red: 154 / 255, green: 154 / 255, blue: 162 / 255),
         dotOff: Color(.sRGB, red: 110 / 255, green: 110 / 255, blue: 118 / 255),
         sparkStroke: Color(.sRGB, red: 154 / 255, green: 154 / 255, blue: 162 / 255),
-        panelBorder: Color.white.opacity(0.09)
+        panelBorder: Color(.sRGB, red: 55 / 255, green: 55 / 255, blue: 60 / 255),
+        fieldBg: Color(.sRGB, red: 36 / 255, green: 36 / 255, blue: 40 / 255),
+        fieldFg: Color(.sRGB, red: 245 / 255, green: 245 / 255, blue: 247 / 255)
     )
 
+    /// Light mode tuned for WCAG-ish contrast on model rows (image #2 failure).
     static let light = DashboardTheme(
-        panelBg: Color(.sRGB, red: 246 / 255, green: 246 / 255, blue: 248 / 255, opacity: 0.99),
-        cellBg: Color.black.opacity(0.05),
-        hoverBg: Color.black.opacity(0.05),
-        line: Color.black.opacity(0.08),
-        sub: Color(.sRGB, red: 134 / 255, green: 134 / 255, blue: 139 / 255),
-        faint: Color(.sRGB, red: 160 / 255, green: 160 / 255, blue: 166 / 255),
-        btnBg: Color.black.opacity(0.06),
-        btnFg: Color(.sRGB, red: 60 / 255, green: 60 / 255, blue: 67 / 255),
-        btnStrongBg: Color.black.opacity(0.1),
-        btnStrongFg: Color(.sRGB, red: 29 / 255, green: 29 / 255, blue: 31 / 255),
-        tabOnBg: Color.white.opacity(0.95),
-        tabOnFg: Color(.sRGB, red: 29 / 255, green: 29 / 255, blue: 31 / 255),
-        tabOffFg: Color(.sRGB, red: 134 / 255, green: 134 / 255, blue: 139 / 255),
-        dotOff: Color(.sRGB, red: 180 / 255, green: 180 / 255, blue: 186 / 255),
-        sparkStroke: Color(.sRGB, red: 160 / 255, green: 160 / 255, blue: 166 / 255),
-        panelBorder: Color.black.opacity(0.1)
+        panelBg: Color(.sRGB, red: 244 / 255, green: 244 / 255, blue: 247 / 255),
+        cellBg: Color(.sRGB, red: 255 / 255, green: 255 / 255, blue: 255 / 255),
+        hoverBg: Color(.sRGB, red: 232 / 255, green: 232 / 255, blue: 237 / 255),
+        line: Color(.sRGB, red: 210 / 255, green: 210 / 255, blue: 216 / 255),
+        label: Color(.sRGB, red: 28 / 255, green: 28 / 255, blue: 30 / 255),
+        sub: Color(.sRGB, red: 72 / 255, green: 72 / 255, blue: 78 / 255),
+        faint: Color(.sRGB, red: 100 / 255, green: 100 / 255, blue: 108 / 255),
+        btnBg: Color(.sRGB, red: 228 / 255, green: 228 / 255, blue: 234 / 255),
+        btnFg: Color(.sRGB, red: 40 / 255, green: 40 / 255, blue: 46 / 255),
+        btnStrongBg: Color(.sRGB, red: 214 / 255, green: 214 / 255, blue: 220 / 255),
+        btnStrongFg: Color(.sRGB, red: 22 / 255, green: 22 / 255, blue: 24 / 255),
+        tabOnBg: Color(.sRGB, red: 255 / 255, green: 255 / 255, blue: 255 / 255),
+        tabOnFg: Color(.sRGB, red: 22 / 255, green: 22 / 255, blue: 24 / 255),
+        tabOffFg: Color(.sRGB, red: 90 / 255, green: 90 / 255, blue: 98 / 255),
+        dotOff: Color(.sRGB, red: 150 / 255, green: 150 / 255, blue: 158 / 255),
+        sparkStroke: Color(.sRGB, red: 120 / 255, green: 120 / 255, blue: 128 / 255),
+        panelBorder: Color(.sRGB, red: 200 / 255, green: 200 / 255, blue: 208 / 255),
+        fieldBg: Color(.sRGB, red: 255 / 255, green: 255 / 255, blue: 255 / 255),
+        fieldFg: Color(.sRGB, red: 28 / 255, green: 28 / 255, blue: 30 / 255)
     )
 
     static func resolve(_ scheme: ColorScheme) -> DashboardTheme {
@@ -172,6 +185,10 @@ struct DashboardSegmentedTabs<Option: Hashable>: View {
         }
         .padding(2)
         .background(theme.cellBg, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(theme.panelBorder.opacity(0.8), lineWidth: 1)
+        }
     }
 }
 

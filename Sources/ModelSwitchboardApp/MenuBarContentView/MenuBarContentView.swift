@@ -111,8 +111,13 @@ struct MenuBarContentView: View {
         (DashboardAccent(rawValue: accentRaw) ?? .orange).color
     }
 
+    /// Always light or dark — never nil — so MenuBarExtra semantic colors match tokens.
+    var resolvedColorScheme: ColorScheme {
+        themePreference.colorScheme ?? systemColorScheme
+    }
+
     var theme: DashboardTheme {
-        DashboardTheme.resolve(themePreference.colorScheme ?? systemColorScheme)
+        DashboardTheme.resolve(resolvedColorScheme)
     }
 
     var body: some View {
@@ -207,7 +212,17 @@ struct MenuBarContentView: View {
                 transaction.animation = nil
             }
         }
-        .preferredColorScheme(themePreference.colorScheme)
+        .preferredColorScheme(resolvedColorScheme)
+        .onChange(of: themePreferenceRaw) { _, _ in
+            if let hostWindow { configureHostWindow(hostWindow) }
+            synchronizeInspectorWindow()
+        }
+        .onChange(of: systemColorScheme) { _, _ in
+            if themePreference.colorScheme == nil, let hostWindow {
+                configureHostWindow(hostWindow)
+            }
+            synchronizeInspectorWindow()
+        }
         .onChange(of: hub.hasRemoteGateways) { _, hasRemotes in
             hostMetricsMonitor.attach(hub: hub)
             if hasRemotes {

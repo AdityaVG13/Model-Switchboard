@@ -42,7 +42,7 @@ extension MenuBarContentView {
             RoundedRectangle(cornerRadius: DashboardChromeMetrics.continuousCornerRadius, style: .continuous)
                 .stroke(theme.panelBorder, lineWidth: 1)
         }
-        .preferredColorScheme(themePreference.colorScheme)
+        .preferredColorScheme(resolvedColorScheme)
     }
 
     @ViewBuilder

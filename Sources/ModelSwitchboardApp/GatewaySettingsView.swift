@@ -79,6 +79,7 @@ struct GatewaySettingsSection: View {
                             HStack(spacing: 4) {
                                 Text(runtime.name)
                                     .font(.system(size: 12.5, weight: .medium))
+                                    .foregroundStyle(theme.label)
                                     .lineLimit(1)
                                 Button {
                                     renamingGatewayID = runtime.id

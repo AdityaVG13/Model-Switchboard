@@ -84,6 +84,7 @@ struct RemoteHostsPanelView: View {
                         HStack(spacing: 4) {
                             Text(runtime.name)
                                 .font(.system(size: 13.5, weight: .semibold))
+                                .foregroundStyle(theme.label)
                                 .lineLimit(1)
                             Button {
                                 renamingGatewayID = runtime.id
@@ -189,6 +190,7 @@ struct RemoteHostsPanelView: View {
                         HStack(spacing: 6) {
                             Text(status.displayName)
                                 .font(.system(size: 11.5, weight: .medium))
+                                .foregroundStyle(theme.label)
                                 .lineLimit(1)
                             Spacer(minLength: 0)
                             Text(modelMemoryLabel(status))

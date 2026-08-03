@@ -110,14 +110,18 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Controller base URL")
                     .font(.system(size: 12.5))
+                    .foregroundStyle(theme.label)
                 TextField(defaultControllerBaseURL, text: $controllerBaseURL)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(size: 11.5, design: .monospaced))
+                    .foregroundStyle(theme.fieldFg)
                 Text("Bearer token (optional)")
                     .font(.system(size: 12.5))
+                    .foregroundStyle(theme.label)
                 SecureField("Required for --unsafe-bind controllers", text: $controllerAuthToken)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(size: 11.5, design: .monospaced))
+                    .foregroundStyle(theme.fieldFg)
                 HStack(spacing: 10) {
                     settingsLinkButton("Use Default") {
                         controllerBaseURL = defaultControllerBaseURL

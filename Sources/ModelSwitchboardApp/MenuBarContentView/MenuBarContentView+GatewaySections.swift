@@ -200,6 +200,7 @@ struct RemoteProfileRowView: View {
                     .font(.system(size: 12.5, weight: .medium))
                     .lineLimit(1)
                     .truncationMode(.tail)
+                    .foregroundStyle(theme.label)
                 Text(subtitle(pending: pending))
                     .font(.system(size: 10.5))
                     .foregroundStyle(theme.sub)

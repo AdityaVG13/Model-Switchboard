@@ -126,7 +126,7 @@ extension MenuBarContentView {
         window.maxSize = NSSize(width: maxMainPanelWidth, height: panelHeight)
         // Solid backdrop so open/close thrash never shows clear/black chrome.
         let scheme: MenuBarExtraWindowBackdrop.ColorSchemeHint =
-            (themePreference.colorScheme ?? systemColorScheme) == .light ? .light : .dark
+            resolvedColorScheme == .light ? .light : .dark
         MenuBarExtraWindowBackdrop.apply(to: window, scheme: scheme)
     }
 }
