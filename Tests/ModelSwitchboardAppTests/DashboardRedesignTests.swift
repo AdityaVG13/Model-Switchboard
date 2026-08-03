@@ -6,52 +6,52 @@ import ModelSwitchboardTestSupport
 
 // MARK: - Inspector side placement
 
-@Test func inspectorPanelOpensOnRequestedSideAndShiftsParentWhenNeeded() {
+@Test func inspectorPanelOpensOnRequestedSideAndFlipsWhenOffScreen() {
     let parent = NSRect(x: 500, y: 100, width: 372, height: 620)
     let screen = NSRect(x: 0, y: 0, width: 1512, height: 950)
 
-    // Leading placement fits: panel sits left of the parent with the gap.
     #expect(
         InspectorPanelController.panelOriginX(
             parentFrame: parent, screenVisibleFrame: screen, width: 372, gap: 10, side: .leading
         ) == parent.minX - 10 - 372
     )
 
-    // Trailing placement fits: panel sits right of the parent with the gap.
     #expect(
         InspectorPanelController.panelOriginX(
             parentFrame: parent, screenVisibleFrame: screen, width: 372, gap: 10, side: .trailing
         ) == parent.maxX + 10
     )
 
-    // Parent hugs the right screen edge: prefer trailing by shifting parent left
-    // so the panel can still open on the right (not a silent flip to left).
+    // Parent hugs the right screen edge: trailing preference flips to leading.
     let rightEdgeParent = NSRect(x: 1512 - 380, y: 100, width: 372, height: 620)
-    let trailingLayout = InspectorPanelController.layoutFrames(
-        parentFrame: rightEdgeParent,
-        screenVisibleFrame: screen,
-        panelWidth: 372,
-        panelHeight: 620,
-        gap: 10,
-        side: .trailing
+    #expect(
+        InspectorPanelController.panelOriginX(
+            parentFrame: rightEdgeParent, screenVisibleFrame: screen, width: 372, gap: 10, side: .trailing
+        ) == rightEdgeParent.minX - 10 - 372
     )
-    #expect(trailingLayout.panelFrame.minX == screen.maxX - 372)
-    #expect(trailingLayout.panelFrame.minX == trailingLayout.parentFrame.maxX + 10)
-    #expect(trailingLayout.parentFrame.minX < rightEdgeParent.minX)
 
-    // Parent hugs the left screen edge: prefer leading by shifting parent right.
+    // Parent hugs the left screen edge: leading preference flips to trailing.
     let leftEdgeParent = NSRect(x: 4, y: 100, width: 372, height: 620)
-    let leadingLayout = InspectorPanelController.layoutFrames(
-        parentFrame: leftEdgeParent,
-        screenVisibleFrame: screen,
-        panelWidth: 372,
-        panelHeight: 620,
-        gap: 10,
-        side: .leading
+    #expect(
+        InspectorPanelController.panelOriginX(
+            parentFrame: leftEdgeParent, screenVisibleFrame: screen, width: 372, gap: 10, side: .leading
+        ) == leftEdgeParent.maxX + 10
     )
-    #expect(leadingLayout.panelFrame.minX == screen.minX)
-    #expect(leadingLayout.parentFrame.minX == leadingLayout.panelFrame.maxX + 10)
-    #expect(leadingLayout.parentFrame.minX > leftEdgeParent.minX)
+}
+
+@Test func sidePanelPreferenceMigrationMirrorsLeftRightOnce() {
+    let suite = "io.modelswitchboard.tests.side-\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+
+    defaults.set("right", forKey: DashboardAppearanceKeys.sidePanel)
+    DashboardSidePreference.migrateMirroredPreferenceIfNeeded(defaults: defaults)
+    #expect(defaults.string(forKey: DashboardAppearanceKeys.sidePanel) == "left")
+    #expect(defaults.bool(forKey: DashboardAppearanceKeys.sidePanelPreferenceMirrored))
+
+    // Second call is a no-op.
+    DashboardSidePreference.migrateMirroredPreferenceIfNeeded(defaults: defaults)
+    #expect(defaults.string(forKey: DashboardAppearanceKeys.sidePanel) == "left")
 }
 
 // MARK: - Runtime filter classification

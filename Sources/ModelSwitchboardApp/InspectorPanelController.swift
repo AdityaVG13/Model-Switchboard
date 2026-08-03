@@ -70,11 +70,9 @@ final class InspectorPanelController {
             window.hasShadow = true
             window.isMovable = false
             window.isMovableByWindowBackground = false
-            // Follow parent deactivate so click-outside dismisses the pair.
             window.hidesOnDeactivate = true
             window.level = .floating
             window.collectionBehavior = [.transient, .moveToActiveSpace, .fullScreenAuxiliary]
-            // Do not take app activation away from the user's current focus.
             window.becomesKeyOnlyIfNeeded = true
 
             panelWindow = window
@@ -94,29 +92,23 @@ final class InspectorPanelController {
             parentWindow = parent
         }
 
-        // Honor Left/Right relative to the dashboard. Menu bar windows often sit
-        // on the right edge; when "Right" would go off-screen, shift the parent
-        // left so the inspector can still open on the preferred side instead of
-        // silently flipping (which made "Right" look inverted).
-        let layout = Self.layoutFrames(
+        let originX = Self.panelOriginX(
             parentFrame: parent.frame,
             screenVisibleFrame: parent.screen?.visibleFrame,
-            panelWidth: width,
-            panelHeight: height,
+            width: width,
             gap: gap,
             side: side
         )
-        if abs(layout.parentFrame.origin.x - parent.frame.origin.x) > 0.5
-            || abs(layout.parentFrame.origin.y - parent.frame.origin.y) > 0.5
-        {
-            parent.setFrame(layout.parentFrame, display: true)
-        }
-
-        window.setFrame(layout.panelFrame, display: true)
+        let frame = NSRect(
+            x: originX,
+            y: parent.frame.minY,
+            width: width,
+            height: height
+        )
+        window.setFrame(frame, display: true)
         window.alphaValue = 1
         if !window.isVisible {
             window.alphaValue = showAnimationDuration > 0 ? 0 : 1
-            // Never makeKey — avoids focus thrash that re-activates the menu bar window.
             window.orderFront(nil)
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = showAnimationDuration
@@ -127,10 +119,9 @@ final class InspectorPanelController {
         }
     }
 
-    /// Panel x for the preferred side, flipping only when the pair cannot fit
-    /// on that side even after shifting the parent.
-    ///
-    /// Kept for unit tests and callers that only need the panel origin.
+    /// Resolves the panel's x origin for the requested side, flipping to the
+    /// opposite side when the preferred placement would leave the visible screen.
+    /// Does not move the parent — keeps a true side-by-side child panel.
     nonisolated static func panelOriginX(
         parentFrame: NSRect,
         screenVisibleFrame: NSRect?,
@@ -139,86 +130,19 @@ final class InspectorPanelController {
         gap: CGFloat,
         side: InspectorPanelSide
     ) -> CGFloat {
-        layoutFrames(
-            parentFrame: parentFrame,
-            screenVisibleFrame: screenVisibleFrame,
-            panelWidth: width,
-            panelHeight: height > 0 ? height : parentFrame.height,
-            gap: gap,
-            side: side
-        ).panelFrame.minX
-    }
+        let leadingX = parentFrame.minX - gap - width
+        let trailingX = parentFrame.maxX + gap
 
-    /// Returns parent + panel frames that honor `side` when possible.
-    nonisolated static func layoutFrames(
-        parentFrame: NSRect,
-        screenVisibleFrame: NSRect?,
-        panelWidth: CGFloat,
-        panelHeight: CGFloat,
-        gap: CGFloat,
-        side: InspectorPanelSide
-    ) -> (parentFrame: NSRect, panelFrame: NSRect) {
-        let screen = screenVisibleFrame ?? parentFrame
-        let pairWidth = parentFrame.width + gap + panelWidth
-        var parent = parentFrame
-        let height = panelHeight > 0 ? panelHeight : parentFrame.height
-
-        func panelFrame(beside parent: NSRect, side: InspectorPanelSide) -> NSRect {
-            let x: CGFloat
-            switch side {
-            case .leading:
-                x = parent.minX - gap - panelWidth
-            case .trailing:
-                x = parent.maxX + gap
-            }
-            return NSRect(x: x, y: parent.minY, width: panelWidth, height: height)
+        guard let screen = screenVisibleFrame else {
+            return side == .leading ? leadingX : trailingX
         }
 
-        func fits(_ frame: NSRect) -> Bool {
-            frame.minX >= screen.minX - 0.5 && frame.maxX <= screen.maxX + 0.5
+        switch side {
+        case .leading:
+            return leadingX >= screen.minX ? leadingX : trailingX
+        case .trailing:
+            return trailingX + width <= screen.maxX ? trailingX : leadingX
         }
-
-        // 1) Preferred side beside the current parent.
-        var panel = panelFrame(beside: parent, side: side)
-        if fits(panel) {
-            return (parent, panel)
-        }
-
-        // 2) Shift parent so the preferred side fits (typical: Right near screen edge).
-        if pairWidth <= screen.width + 0.5 {
-            switch side {
-            case .trailing:
-                // Panel wants the right of parent; park panel against screen right, parent left of it.
-                let panelX = screen.maxX - panelWidth
-                let parentX = panelX - gap - parent.width
-                if parentX >= screen.minX - 0.5 {
-                    parent.origin.x = parentX
-                    panel = NSRect(x: panelX, y: parent.minY, width: panelWidth, height: height)
-                    return (parent, panel)
-                }
-            case .leading:
-                // Panel wants the left of parent; park panel against screen left, parent right of it.
-                let panelX = screen.minX
-                let parentX = panelX + panelWidth + gap
-                if parentX + parent.width <= screen.maxX + 0.5 {
-                    parent.origin.x = parentX
-                    panel = NSRect(x: panelX, y: parent.minY, width: panelWidth, height: height)
-                    return (parent, panel)
-                }
-            }
-        }
-
-        // 3) Last resort: opposite side (may still clip on tiny screens).
-        let flipped: InspectorPanelSide = side == .leading ? .trailing : .leading
-        panel = panelFrame(beside: parent, side: flipped)
-        if fits(panel) {
-            return (parent, panel)
-        }
-        // Clamp panel into the screen as a final fallback.
-        var clamped = panel
-        if clamped.minX < screen.minX { clamped.origin.x = screen.minX }
-        if clamped.maxX > screen.maxX { clamped.origin.x = screen.maxX - panelWidth }
-        return (parent, clamped)
     }
 
     func hide(completion: (@MainActor @Sendable () -> Void)? = nil) {

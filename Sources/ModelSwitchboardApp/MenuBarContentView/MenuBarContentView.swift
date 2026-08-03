@@ -149,6 +149,7 @@ struct MenuBarContentView: View {
             synchronizeInspectorWindow()
         }
         .task {
+            DashboardSidePreference.migrateMirroredPreferenceIfNeeded()
             if features.supportsBenchmarks {
                 systemMetrics.start()
             } else {
