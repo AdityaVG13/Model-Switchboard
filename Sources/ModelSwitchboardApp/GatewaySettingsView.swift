@@ -25,6 +25,8 @@ struct GatewaySettingsSection: View {
     @State private var validationMessage: String?
     @State private var deployState: DeployState = .idle
     @State private var deployWithTailscale = false
+    @State private var renamingGatewayID: String?
+    @State private var renameDraft = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -62,29 +64,75 @@ struct GatewaySettingsSection: View {
 
     private var gatewayList: some View {
         ForEach(hub.remoteRuntimes) { runtime in
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(statusColor(runtime))
-                    .frame(width: 7, height: 7)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(runtime.name)
-                        .font(.system(size: 12.5, weight: .medium))
-                    Text(runtime.config.endpointSummary)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(theme.sub)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-                Spacer()
-                linkButton("Edit") {
-                    draft = runtime.config
-                    draftToken = hub.authToken(forGateway: runtime.id)
-                    draftIsNew = false
-                    validationMessage = nil
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(statusColor(runtime))
+                        .frame(width: 7, height: 7)
+                    VStack(alignment: .leading, spacing: 1) {
+                        if renamingGatewayID == runtime.id {
+                            TextField("Display name", text: $renameDraft)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(size: 12.5, weight: .medium))
+                                .onSubmit { commitRename(id: runtime.id) }
+                        } else {
+                            HStack(spacing: 4) {
+                                Text(runtime.name)
+                                    .font(.system(size: 12.5, weight: .medium))
+                                    .lineLimit(1)
+                                Button {
+                                    renamingGatewayID = runtime.id
+                                    renameDraft = runtime.name
+                                } label: {
+                                    Image(systemName: "pencil")
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .foregroundStyle(accent)
+                                        .frame(width: 20, height: 20)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .help("Rename this gateway")
+                                .accessibilityLabel("Rename \(runtime.name)")
+                            }
+                        }
+                        Text(runtime.config.endpointSummary)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(theme.sub)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    Spacer(minLength: 0)
+                    if renamingGatewayID == runtime.id {
+                        linkButton("Save") { commitRename(id: runtime.id) }
+                        linkButton("Cancel") {
+                            renamingGatewayID = nil
+                            renameDraft = ""
+                        }
+                    } else {
+                        linkButton("Edit") {
+                            renamingGatewayID = nil
+                            draft = runtime.config
+                            draftToken = hub.authToken(forGateway: runtime.id)
+                            draftIsNew = false
+                            validationMessage = nil
+                        }
+                    }
                 }
             }
             .padding(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
         }
+    }
+
+    private func commitRename(id: String) {
+        let trimmed = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            validationMessage = "Give this gateway a name."
+            return
+        }
+        _ = hub.renameGateway(id: id, to: trimmed)
+        renamingGatewayID = nil
+        renameDraft = ""
+        validationMessage = nil
     }
 
     private func statusColor(_ runtime: GatewayRuntime) -> Color {
@@ -137,7 +185,13 @@ struct GatewaySettingsSection: View {
                 }
             }
 
-            field("Name", text: binding.name, prompt: "DGX Spark")
+            VStack(alignment: .leading, spacing: 4) {
+                field("Display name", text: binding.name, prompt: "DGX Spark / Lab / Home")
+                Text("Your label for this machine — shown on the dashboard and Remote Hosts. Rename anytime.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(theme.sub)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             HStack(spacing: 8) {
                 Text("Connection")

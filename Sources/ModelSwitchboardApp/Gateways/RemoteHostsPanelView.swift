@@ -9,6 +9,8 @@ struct RemoteHostsPanelView: View {
     let theme: DashboardTheme
     let accent: Color
     @State private var didCopyInstallCommand = false
+    @State private var renamingGatewayID: String?
+    @State private var renameDraft = ""
 
     var body: some View {
         ScrollView(.vertical) {
@@ -60,9 +62,44 @@ struct RemoteHostsPanelView: View {
                     .fill(statusColor(runtime: runtime, entry: entry))
                     .frame(width: 7, height: 7)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(runtime.name)
-                        .font(.system(size: 13.5, weight: .semibold))
-                        .lineLimit(1)
+                    if renamingGatewayID == runtime.id {
+                        HStack(spacing: 6) {
+                            TextField("Display name", text: $renameDraft)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(size: 13, weight: .semibold))
+                                .onSubmit { commitRename(id: runtime.id) }
+                            Button("Save") { commitRename(id: runtime.id) }
+                                .buttonStyle(.plain)
+                                .font(.system(size: 11.5, weight: .semibold))
+                                .foregroundStyle(accent)
+                            Button("Cancel") {
+                                renamingGatewayID = nil
+                                renameDraft = ""
+                            }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(theme.sub)
+                        }
+                    } else {
+                        HStack(spacing: 4) {
+                            Text(runtime.name)
+                                .font(.system(size: 13.5, weight: .semibold))
+                                .lineLimit(1)
+                            Button {
+                                renamingGatewayID = runtime.id
+                                renameDraft = runtime.name
+                            } label: {
+                                Image(systemName: "pencil")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(accent)
+                                    .frame(width: 20, height: 20)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .help("Rename this gateway")
+                            .accessibilityLabel("Rename " + runtime.name)
+                        }
+                    }
                     Text(subtitle(runtime: runtime, metrics: metrics))
                         .font(.system(size: 10.5, design: .monospaced))
                         .foregroundStyle(theme.sub)
@@ -239,7 +276,16 @@ struct RemoteHostsPanelView: View {
         return "— · :" + status.port
     }
 
+    private func commitRename(id: String) {
+        let trimmed = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        _ = hub.renameGateway(id: id, to: trimmed)
+        renamingGatewayID = nil
+        renameDraft = ""
+    }
+
     private func agentUpgradeHint(for runtime: GatewayRuntime) -> String {
+
         switch runtime.config.kind {
         case .ssh:
             return "SSH gateways can use Settings → Install Agent on Host, or paste the one-liner below on the box. Until then only process RSS is shown — not GPU VRAM."

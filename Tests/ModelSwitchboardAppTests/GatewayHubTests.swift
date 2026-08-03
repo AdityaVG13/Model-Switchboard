@@ -239,3 +239,24 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
     )
     #expect(directRuntime.reachableEndpointURL(for: lanStatus) == "http://10.0.0.9:8082/v1")
 }
+
+@MainActor
+@Test func renameGatewayUpdatesLabelWithoutReplacingRuntime() throws {
+    try withTestDefaults { defaults, service in
+        let hub = makeHub(defaults: defaults, keychainService: service)
+        let config = GatewayConfig(name: "Spark", kind: .direct, baseURL: "http://10.0.0.9:8877")
+        hub.upsertGateway(config, token: "tok-0123456789abcdef")
+        defer { hub.removeGateway(id: config.id) }
+
+        let before = try #require(hub.remoteRuntimes.first)
+        #expect(before.name == "Spark")
+
+        #expect(hub.renameGateway(id: config.id, to: "Lab Box"))
+        let after = try #require(hub.remoteRuntimes.first)
+        #expect(after.name == "Lab Box")
+        // Same runtime instance — connection was not torn down for a label change.
+        #expect(after === before)
+        #expect(after.store.controllerBaseURL == "http://10.0.0.9:8877")
+        #expect(GatewayConfigStore.load(from: defaults).first?.name == "Lab Box")
+    }
+}

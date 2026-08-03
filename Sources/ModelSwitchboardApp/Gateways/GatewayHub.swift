@@ -8,7 +8,7 @@ import ModelSwitchboardCore
 @Observable
 final class GatewayRuntime: Identifiable {
     nonisolated let id: String
-    let config: GatewayConfig
+    private(set) var config: GatewayConfig
     let store: SwitchboardStore
     let tunnel: SSHTunnelManager?
     var tunnelState: SSHTunnelManager.State = .idle
@@ -24,6 +24,11 @@ final class GatewayRuntime: Identifiable {
     }
 
     var name: String { config.name }
+
+    /// Update stored config without rebuilding the store/tunnel (label renames).
+    fileprivate func applyConfigPreservingConnection(_ config: GatewayConfig) {
+        self.config = config
+    }
 
     /// A URL for this profile that is valid from this Mac, or nil when the
     /// endpoint is only reachable on the remote host.
@@ -125,15 +130,47 @@ final class GatewayHub {
         tokenStorageFactory(id).load() ?? ""
     }
 
+    /// Rename a gateway without restarting its tunnel or status store.
+    @discardableResult
+    func renameGateway(id: String, to name: String) -> Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        var configs = GatewayConfigStore.load(from: defaults)
+        guard let index = configs.firstIndex(where: { $0.id == id }) else { return false }
+        guard configs[index].name != trimmed else { return true }
+        configs[index].name = trimmed
+        GatewayConfigStore.save(configs, to: defaults)
+        applyConfigs(configs)
+        return true
+    }
+
+    /// Connection identity: everything except the operator-facing display name.
+    private static func sameConnection(_ lhs: GatewayConfig, _ rhs: GatewayConfig) -> Bool {
+        var a = lhs
+        var b = rhs
+        a.name = ""
+        b.name = ""
+        return a == b
+    }
+
     func applyConfigs(_ configs: [GatewayConfig]) {
         var kept: [String: GatewayRuntime] = [:]
         for runtime in remoteRuntimes {
-            if let config = configs.first(where: { $0.id == runtime.id }), config == runtime.config {
-                // Config Equatable ignores the Keychain token. Sync credentials
-                // onto the kept store so token-only edits take effect without a
-                // rebuild (and without waiting for app restart).
-                syncAuthToken(onto: runtime)
-                kept[runtime.id] = runtime
+            if let config = configs.first(where: { $0.id == runtime.id }) {
+                if config == runtime.config {
+                    // Config Equatable ignores the Keychain token. Sync credentials
+                    // onto the kept store so token-only edits take effect without a
+                    // rebuild (and without waiting for app restart).
+                    syncAuthToken(onto: runtime)
+                    kept[runtime.id] = runtime
+                } else if Self.sameConnection(config, runtime.config) {
+                    // Display name (or other non-connection fields) only — keep tunnel/store.
+                    runtime.applyConfigPreservingConnection(config)
+                    syncAuthToken(onto: runtime)
+                    kept[runtime.id] = runtime
+                } else {
+                    teardown(runtime)
+                }
             } else {
                 teardown(runtime)
             }
