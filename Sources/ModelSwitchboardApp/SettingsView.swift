@@ -93,7 +93,7 @@ struct SettingsView: View {
                 }
             }
             groupDivider
-            settingsRow("Side panel opens") {
+            settingsRow("Side panel") {
                 segmented(
                     options: DashboardSidePreference.allCases.map(\.rawValue),
                     labels: DashboardSidePreference.allCases.map(\.label),

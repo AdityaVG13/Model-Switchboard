@@ -6,7 +6,7 @@ import ModelSwitchboardTestSupport
 
 // MARK: - Inspector side placement
 
-@Test func inspectorPanelOpensOnRequestedSideAndFlipsWhenOffScreen() {
+@Test func inspectorPanelOpensOnRequestedSideAndShiftsParentWhenNeeded() {
     let parent = NSRect(x: 500, y: 100, width: 372, height: 620)
     let screen = NSRect(x: 0, y: 0, width: 1512, height: 950)
 
@@ -24,21 +24,34 @@ import ModelSwitchboardTestSupport
         ) == parent.maxX + 10
     )
 
-    // Parent hugs the right screen edge: trailing preference flips to leading.
+    // Parent hugs the right screen edge: prefer trailing by shifting parent left
+    // so the panel can still open on the right (not a silent flip to left).
     let rightEdgeParent = NSRect(x: 1512 - 380, y: 100, width: 372, height: 620)
-    #expect(
-        InspectorPanelController.panelOriginX(
-            parentFrame: rightEdgeParent, screenVisibleFrame: screen, width: 372, gap: 10, side: .trailing
-        ) == rightEdgeParent.minX - 10 - 372
+    let trailingLayout = InspectorPanelController.layoutFrames(
+        parentFrame: rightEdgeParent,
+        screenVisibleFrame: screen,
+        panelWidth: 372,
+        panelHeight: 620,
+        gap: 10,
+        side: .trailing
     )
+    #expect(trailingLayout.panelFrame.minX == screen.maxX - 372)
+    #expect(trailingLayout.panelFrame.minX == trailingLayout.parentFrame.maxX + 10)
+    #expect(trailingLayout.parentFrame.minX < rightEdgeParent.minX)
 
-    // Parent hugs the left screen edge: leading preference flips to trailing.
+    // Parent hugs the left screen edge: prefer leading by shifting parent right.
     let leftEdgeParent = NSRect(x: 4, y: 100, width: 372, height: 620)
-    #expect(
-        InspectorPanelController.panelOriginX(
-            parentFrame: leftEdgeParent, screenVisibleFrame: screen, width: 372, gap: 10, side: .leading
-        ) == leftEdgeParent.maxX + 10
+    let leadingLayout = InspectorPanelController.layoutFrames(
+        parentFrame: leftEdgeParent,
+        screenVisibleFrame: screen,
+        panelWidth: 372,
+        panelHeight: 620,
+        gap: 10,
+        side: .leading
     )
+    #expect(leadingLayout.panelFrame.minX == screen.minX)
+    #expect(leadingLayout.parentFrame.minX == leadingLayout.panelFrame.maxX + 10)
+    #expect(leadingLayout.parentFrame.minX > leftEdgeParent.minX)
 }
 
 // MARK: - Runtime filter classification

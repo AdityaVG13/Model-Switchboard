@@ -46,8 +46,9 @@ enum DashboardSidePreference: String, CaseIterable {
 
     var label: String {
         switch self {
-        case .left: "Left"
-        case .right: "Right"
+        // Relative to the main dashboard card (not the screen edge).
+        case .left: "Left of panel"
+        case .right: "Right of panel"
         }
     }
 
