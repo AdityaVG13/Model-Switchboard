@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import ModelSwitchboardCore
 
@@ -7,6 +8,7 @@ struct RemoteHostsPanelView: View {
     @Bindable var metricsMonitor: RemoteHostMetricsMonitor
     let theme: DashboardTheme
     let accent: Color
+    @State private var didCopyInstallCommand = false
 
     var body: some View {
         ScrollView(.vertical) {
@@ -85,6 +87,7 @@ struct RemoteHostsPanelView: View {
                             .font(.system(size: 10.5))
                             .foregroundStyle(theme.sub)
                             .fixedSize(horizontal: false, vertical: true)
+                        copyInstallCommandRow
                     }
                 }
             } else {
@@ -239,10 +242,46 @@ struct RemoteHostsPanelView: View {
     private func agentUpgradeHint(for runtime: GatewayRuntime) -> String {
         switch runtime.config.kind {
         case .ssh:
-            return "Settings → Install Agent on Host (SSH) to push GPU/VRAM metrics. RSS is process memory, not VRAM."
+            return "SSH gateways can use Settings → Install Agent on Host, or paste the one-liner below on the box. Until then only process RSS is shown — not GPU VRAM."
         case .direct:
-            return "On the host, re-run Install Agent / the install one-liner from Settings so /api/host/metrics is available. Until then only process RSS is shown — not GPU VRAM."
+            return "SSH into this host and re-run the install one-liner (copy below) so /api/host/metrics can report GPU/VRAM. Until then only process RSS is shown."
         }
+    }
+
+    /// Shared with Settings — keep a single install entry point for operators.
+    private var installOneLiner: String { GatewaySettingsSection.installOneLiner }
+
+    private var copyInstallCommandRow: some View {
+        HStack(spacing: 8) {
+            Text(installOneLiner)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(theme.faint)
+                .lineLimit(2)
+                .truncationMode(.middle)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(installOneLiner, forType: .string)
+                didCopyInstallCommand = true
+                Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(2))
+                    didCopyInstallCommand = false
+                }
+            } label: {
+                Image(systemName: didCopyInstallCommand ? "checkmark" : "doc.on.doc")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(didCopyInstallCommand ? DashboardTheme.runningGreen : accent)
+                    .frame(width: 28, height: 28)
+                    .background(theme.btnBg, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(didCopyInstallCommand ? "Copied" : "Copy install command")
+            .accessibilityLabel(didCopyInstallCommand ? "Copied install command" : "Copy install command")
+        }
+        .padding(EdgeInsets(top: 6, leading: 8, bottom: 6, trailing: 6))
+        .background(theme.panelBg.opacity(0.55), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
 
