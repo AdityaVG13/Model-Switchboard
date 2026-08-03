@@ -258,6 +258,11 @@ class OperationFailedError(AgentError):
     code = "internal_error"
     public_message = "internal server error"
 
+    def __init__(self, message: str):
+        super().__init__(message)
+        # Surface the concrete failure to clients (benchmark already running, etc.).
+        self.public_message = message
+
 
 class UnsupportedError(AgentError):
     http_status = 400
@@ -893,6 +898,223 @@ def process_rss_mb(pid: int | None) -> float | None:
     except (OSError, subprocess.TimeoutExpired, ValueError):
         return None
     return round(rss_kb / 1024 * 10) / 10
+
+
+
+# -- host / GPU metrics ----------------------------------------------------
+
+_GPU_METRICS_CACHE: dict[str, Any] = {"at": 0.0, "payload": None}
+_GPU_METRICS_TTL_SECONDS = 2.0
+_CPU_SAMPLE_LOCK = threading.Lock()
+_CPU_PREV: tuple[float, float] | None = None  # (total, idle)
+
+
+def _read_proc_meminfo() -> dict[str, int]:
+    """Return /proc/meminfo keys in kB (Linux). Empty on non-Linux."""
+    out: dict[str, int] = {}
+    try:
+        for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
+            if ":" not in line:
+                continue
+            key, rest = line.split(":", 1)
+            parts = rest.split()
+            if parts:
+                try:
+                    out[key] = int(parts[0])
+                except ValueError:
+                    pass
+    except OSError:
+        return {}
+    return out
+
+
+def _sample_cpu_percent() -> float | None:
+    """Busy CPU % from /proc/stat deltas, or loadavg fallback."""
+    global _CPU_PREV
+    try:
+        first = Path("/proc/stat").read_text(encoding="utf-8").splitlines()[0]
+    except OSError:
+        first = ""
+    if first.startswith("cpu "):
+        parts = first.split()
+        try:
+            # user nice system idle iowait irq softirq steal ...
+            nums = [float(x) for x in parts[1:8]]
+        except ValueError:
+            nums = []
+        if len(nums) >= 4:
+            idle = nums[3] + (nums[4] if len(nums) > 4 else 0.0)
+            total = sum(nums)
+            with _CPU_SAMPLE_LOCK:
+                prev = _CPU_PREV
+                _CPU_PREV = (total, idle)
+            if prev is not None:
+                d_total = total - prev[0]
+                d_idle = idle - prev[1]
+                if d_total > 0:
+                    busy = max(0.0, min(100.0, (1.0 - d_idle / d_total) * 100.0))
+                    return round(busy * 10) / 10
+            return None
+    try:
+        load1, _, _ = os.getloadavg()
+        cpus = os.cpu_count() or 1
+        return round(min(100.0, (load1 / cpus) * 100.0) * 10) / 10
+    except OSError:
+        return None
+
+
+def _sample_memory() -> dict[str, Any]:
+    info = _read_proc_meminfo()
+    if info.get("MemTotal"):
+        total_kb = info["MemTotal"]
+        # Match common "used" definition: total - free - buffers - cached
+        free_kb = info.get("MemFree", 0)
+        buffers_kb = info.get("Buffers", 0)
+        cached_kb = info.get("Cached", 0) + info.get("SReclaimable", 0)
+        used_kb = max(0, total_kb - free_kb - buffers_kb - cached_kb)
+        total_mb = total_kb / 1024
+        used_mb = used_kb / 1024
+        percent = (used_kb / total_kb) * 100.0 if total_kb else None
+        return {
+            "used_mb": round(used_mb * 10) / 10,
+            "total_mb": round(total_mb * 10) / 10,
+            "percent": round(percent * 10) / 10 if percent is not None else None,
+            "source": "proc",
+        }
+    # Fallback: no absolute numbers without platform APIs.
+    return {
+        "used_mb": None,
+        "total_mb": None,
+        "percent": None,
+        "source": "unavailable",
+    }
+
+
+def _run_nvidia_smi_query() -> dict[str, Any] | None:
+    """Query nvidia-smi once. Returns None when the binary/driver is absent."""
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=index,name,utilization.gpu,temperature.gpu,memory.used,memory.total",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    gpus: list[dict[str, Any]] = []
+    for line in result.stdout.splitlines():
+        parts = [p.strip() for p in line.split(",")]
+        if len(parts) < 6:
+            continue
+        try:
+            index = int(parts[0])
+            util = float(parts[2]) if parts[2] not in ("", "[N/A]", "N/A") else None
+            temp = float(parts[3]) if parts[3] not in ("", "[N/A]", "N/A") else None
+            used = float(parts[4]) if parts[4] not in ("", "[N/A]", "N/A") else None
+            total = float(parts[5]) if parts[5] not in ("", "[N/A]", "N/A") else None
+        except ValueError:
+            continue
+        gpus.append(
+            {
+                "index": index,
+                "name": parts[1],
+                "util_percent": util,
+                "temp_c": temp,
+                "vram_used_mb": used,
+                "vram_total_mb": total,
+            }
+        )
+    # Per-process VRAM (compute apps).
+    by_pid: dict[int, float] = {}
+    try:
+        proc_result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-compute-apps=pid,used_gpu_memory",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+        if proc_result.returncode == 0:
+            for line in proc_result.stdout.splitlines():
+                parts = [p.strip() for p in line.split(",")]
+                if len(parts) < 2:
+                    continue
+                try:
+                    pid = int(parts[0])
+                    mem = float(parts[1]) if parts[1] not in ("", "[N/A]", "N/A") else None
+                except ValueError:
+                    continue
+                if mem is not None:
+                    by_pid[pid] = by_pid.get(pid, 0.0) + mem
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return {"gpus": gpus, "vram_by_pid": by_pid, "source": "nvidia-smi"}
+
+
+def gpu_metrics_snapshot() -> dict[str, Any]:
+    """Cached GPU snapshot for status rows + /api/host/metrics."""
+    now = time.time()
+    cached = _GPU_METRICS_CACHE.get("payload")
+    if cached is not None and now - float(_GPU_METRICS_CACHE.get("at") or 0) < _GPU_METRICS_TTL_SECONDS:
+        return cached
+    nvidia = _run_nvidia_smi_query()
+    if nvidia is None:
+        payload = {"gpus": [], "vram_by_pid": {}, "source": "unavailable"}
+    else:
+        payload = nvidia
+    _GPU_METRICS_CACHE["at"] = now
+    _GPU_METRICS_CACHE["payload"] = payload
+    return payload
+
+
+def process_vram_mb(pid: int | None) -> float | None:
+    """GPU memory (MiB) attributed to *pid* via nvidia-smi, if available."""
+    if not pid:
+        return None
+    snap = gpu_metrics_snapshot()
+    by_pid = snap.get("vram_by_pid") or {}
+    value = by_pid.get(int(pid))
+    if value is None:
+        return None
+    return round(float(value) * 10) / 10
+
+
+def host_metrics_payload() -> dict[str, Any]:
+    """SparkDash-like host snapshot for the Mac Remote Hosts panel.
+
+    Units:
+    - CPU/GPU util: percent 0-100
+    - temp: Celsius
+    - memory/VRAM: megabytes (MiB from nvidia-smi; MB from /proc)
+    Graceful when nvidia-smi or /proc are absent (old agent / non-GPU host).
+    """
+    gpu = gpu_metrics_snapshot()
+    mem = _sample_memory()
+    hostname = socket.gethostname()
+    return {
+        "host": hostname,
+        "collected_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "cpu_percent": _sample_cpu_percent(),
+        "memory": mem,
+        "gpus": gpu.get("gpus") or [],
+        "gpu_source": gpu.get("source") or "unavailable",
+        "processes": [
+            {"pid": pid, "vram_mb": round(float(mb) * 10) / 10}
+            for pid, mb in sorted((gpu.get("vram_by_pid") or {}).items())
+        ],
+        "agent_version": AGENT_VERSION,
+    }
 
 
 def port_is_listening(port: str) -> bool:
@@ -1911,6 +2133,7 @@ def status_dict_from_discovery(
         "ready": ready,
         "server_ids": item.get("server_ids") or item.get("model_ids") or [],
         "rss_mb": process_rss_mb(pid) if alive and pid else None,
+        "vram_mb": process_vram_mb(pid) if alive and pid else None,
         "command": item.get("command") if alive else None,
         # Mac app ModelProfileStatus.logPath is a non-optional String — never null.
         "log_path": item.get("log_path")
@@ -2313,6 +2536,8 @@ class AgentService:
         # Profiles started by *this* agent process. Crash-recovery restarts only
         # these — an agent reboot / login never spontaneously loads a model.
         self._supervised: set[str] = set()
+        self._benchmark_lock = threading.Lock()
+        self._benchmark_running = False
 
     def resolve_profile(self, name: str) -> Profile:
         """Profiles folder first; then claimed port folders (port-N); never invent."""
@@ -2576,8 +2801,345 @@ class AgentService:
             "error": None,
         }
 
+    def _benchmark_dir(self) -> Path:
+        path = self.configuration.run_directory / "benchmarks"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def _benchmark_pid_file(self) -> Path:
+        return self.configuration.run_directory / "benchmark.pid"
+
+    def _benchmark_log_path(self) -> Path:
+        return self.configuration.run_directory / "logs" / "benchmark.log"
+
+    def _benchmark_latest_json(self) -> Path:
+        return self._benchmark_dir() / "latest.json"
+
+    def _benchmark_latest_md(self) -> Path:
+        return self._benchmark_dir() / "latest.md"
+
+    def _read_benchmark_pid(self) -> int | None:
+        path = self._benchmark_pid_file()
+        try:
+            raw = path.read_text(encoding="utf-8").strip()
+            pid = int(raw)
+        except (OSError, ValueError):
+            return None
+        if not process_is_alive(pid):
+            path.unlink(missing_ok=True)
+            return None
+        return pid
+
+    def _latest_benchmark_report(self) -> dict[str, Any] | None:
+        path = self._benchmark_latest_json()
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        if not isinstance(payload, dict):
+            return None
+        reports = payload.get("benchmarks") or []
+        rows: list[dict[str, Any]] = []
+        for report in reports:
+            if not isinstance(report, dict):
+                continue
+            averages = report.get("averages") or {}
+            rows.append(
+                {
+                    "profile": report.get("profile"),
+                    "runtime": report.get("runtime"),
+                    "ttft_ms": averages.get("ttft_ms"),
+                    "decode_tokens_per_sec": averages.get("decode_tokens_per_sec"),
+                    "e2e_tokens_per_sec": averages.get("e2e_tokens_per_sec"),
+                    "rss_mb": report.get("rss_mb"),
+                    "vram_mb": report.get("vram_mb"),
+                }
+            )
+        return {
+            "generated_at": payload.get("generated_at"),
+            "suite": payload.get("suite"),
+            "profiles": payload.get("profiles") or [],
+            "rows": rows,
+            "json_path": str(path),
+            "markdown_path": str(self._benchmark_latest_md()),
+        }
+
     def benchmark_status(self) -> dict[str, Any]:
-        return {"running": False, "pid": None, "log_path": None, "latest": None}
+        pid = self._read_benchmark_pid() if self._benchmark_running else None
+        # Clear stale pid files left after process crash.
+        if not self._benchmark_running and self._benchmark_pid_file().exists():
+            self._benchmark_pid_file().unlink(missing_ok=True)
+            pid = None
+        log_path = self._benchmark_log_path()
+        return {
+            "running": self._benchmark_running,
+            "pid": pid if self._benchmark_running else None,
+            "log_path": str(log_path) if log_path.exists() or self._benchmark_running else None,
+            "latest": self._latest_benchmark_report(),
+        }
+
+    def start_benchmark(
+        self,
+        profiles: list[str] | None = None,
+        suite: str = "quick",
+        allow_concurrent: bool = False,
+        keep_running: bool = False,
+    ) -> dict[str, Any]:
+        """Run a quick local-endpoint benchmark in a background thread.
+
+        Hits the model on the agent host (always loopback-reachable here). The
+        Mac app must only start a remote bench when the profile is ready; the
+        agent will also try switch/start if needed.
+        """
+        with self._benchmark_lock:
+            if self._benchmark_running:
+                raise OperationFailedError("benchmark already running")
+            self._benchmark_running = True
+        loaded = self.profiles.load()
+        if profiles:
+            names = [n for n in profiles if n in loaded]
+            missing = [n for n in profiles if n not in loaded]
+            if missing and not names:
+                with self._benchmark_lock:
+                    self._benchmark_running = False
+                raise ProfileNotFoundError(missing[0])
+        else:
+            names = sorted(loaded.keys())
+        if not names:
+            with self._benchmark_lock:
+                self._benchmark_running = False
+            raise UsageError("no profiles available to benchmark")
+
+        log_path = self._benchmark_log_path()
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text("", encoding="utf-8")
+        # Marker pid = this agent process while the worker thread runs.
+        self._benchmark_pid_file().write_text(f"{os.getpid()}\n", encoding="utf-8")
+
+        def worker() -> None:
+            try:
+                self._run_benchmark_worker(
+                    names,
+                    suite=suite,
+                    allow_concurrent=allow_concurrent,
+                    keep_running=keep_running,
+                    log_path=log_path,
+                )
+            finally:
+                self._benchmark_pid_file().unlink(missing_ok=True)
+                with self._benchmark_lock:
+                    self._benchmark_running = False
+
+        thread = threading.Thread(target=worker, name="msw-benchmark", daemon=True)
+        thread.start()
+        return self.benchmark_status()
+
+    def _run_benchmark_worker(
+        self,
+        names: list[str],
+        *,
+        suite: str,
+        allow_concurrent: bool,
+        keep_running: bool,
+        log_path: Path,
+    ) -> None:
+        prompts = self._benchmark_prompts(suite)
+        reports: list[dict[str, Any]] = []
+
+        def log(line: str) -> None:
+            try:
+                with log_path.open("a", encoding="utf-8") as handle:
+                    handle.write(line + "\n")
+            except OSError:
+                pass
+
+        for name in names:
+            try:
+                profile = self.resolve_profile(name)
+            except AgentError as error:
+                log(f"{name}: resolve failed: {error}")
+                continue
+            before = self.status(profile)
+            was_running = bool(before.get("running"))
+            try:
+                if not before.get("ready"):
+                    if allow_concurrent:
+                        self.start(name)
+                    else:
+                        self.switch_profile(name)
+                    # Quick suite should not block the agent for minutes if the
+                    # model never becomes ready (disabled healthcheck, OOM, …).
+                    deadline = time.time() + (15 if suite == "quick" else 90)
+                    while time.time() < deadline:
+                        before = self.status(self.resolve_profile(name))
+                        if before.get("ready"):
+                            break
+                        time.sleep(0.5)
+                results: list[dict[str, Any]] = []
+                if not before.get("ready"):
+                    results.append(
+                        {
+                            "benchmark": "ready-wait",
+                            "category": "setup",
+                            "error": "profile not ready for benchmark",
+                        }
+                    )
+                else:
+                    for prompt in prompts:
+                        results.append(self._benchmark_one(profile, prompt))
+                successful = [r for r in results if not r.get("error")]
+                def avg(key: str) -> float | None:
+                    vals = [float(r[key]) for r in successful if r.get(key) is not None]
+                    if not vals:
+                        return None
+                    return round(sum(vals) / len(vals) * 10) / 10
+                current = self.status(self.resolve_profile(name))
+                reports.append(
+                    {
+                        "profile": name,
+                        "runtime": profile.runtime,
+                        "rss_mb": current.get("rss_mb"),
+                        "vram_mb": current.get("vram_mb"),
+                        "averages": {
+                            "ttft_ms": avg("ttft_ms"),
+                            "decode_tokens_per_sec": avg("decode_tokens_per_sec"),
+                            "e2e_tokens_per_sec": avg("e2e_tokens_per_sec"),
+                        },
+                        "results": results,
+                    }
+                )
+                log(f"{name}: ok rows={len(successful)}/{len(results)}")
+            except AgentError as error:
+                log(f"{name}: {error}")
+                reports.append(
+                    {
+                        "profile": name,
+                        "runtime": profile.runtime,
+                        "rss_mb": None,
+                        "vram_mb": None,
+                        "averages": {
+                            "ttft_ms": None,
+                            "decode_tokens_per_sec": None,
+                            "e2e_tokens_per_sec": None,
+                        },
+                        "results": [{"error": str(error)}],
+                    }
+                )
+            finally:
+                # Prefer leaving the host as we found it for quick suite.
+                if not keep_running and not was_running:
+                    try:
+                        self.stop(name, force=True)
+                    except TypeError:
+                        try:
+                            self.stop(name)
+                        except AgentError:
+                            pass
+                    except AgentError:
+                        pass
+
+        generated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        payload = {
+            "generated_at": generated_at,
+            "suite": suite,
+            "profiles": names,
+            "benchmarks": reports,
+        }
+        latest = self._benchmark_latest_json()
+        latest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        lines = [
+            "# Model Switchboard Benchmark",
+            "",
+            f"Generated: {generated_at}",
+            "",
+            "| Profile | Runtime | TTFT ms | Decode tok/s |",
+            "|---|---|---:|---:|",
+        ]
+        for report in reports:
+            averages = report.get("averages") or {}
+            lines.append(
+                f"| {report.get('profile')} | {report.get('runtime')} | "
+                f"{averages.get('ttft_ms') or '-'} | {averages.get('decode_tokens_per_sec') or '-'} |"
+            )
+        self._benchmark_latest_md().write_text("\n".join(lines) + "\n", encoding="utf-8")
+        log(f"wrote {latest}")
+
+    @staticmethod
+    def _benchmark_prompts(suite: str) -> list[dict[str, Any]]:
+        # Keep quick suite short: remote agents may hold large models.
+        if suite == "context":
+            return [
+                {"benchmark": "prefill-1k", "category": "prefill", "prompt": "Hello " * 200, "max_tokens": 16},
+                {"benchmark": "prefill-4k", "category": "prefill", "prompt": "Hello " * 800, "max_tokens": 16},
+            ]
+        return [
+            {
+                "benchmark": "quick-short",
+                "category": "decode",
+                "prompt": "Write a one-sentence greeting.",
+                "max_tokens": 32,
+            },
+            {
+                "benchmark": "quick-medium",
+                "category": "decode",
+                "prompt": "Explain what a token is in large language models in two sentences.",
+                "max_tokens": 64,
+            },
+        ]
+
+    def _benchmark_one(self, profile: Profile, prompt: dict[str, Any]) -> dict[str, Any]:
+        """POST /v1/chat/completions on the local endpoint and time TTFT/decode."""
+        url = profile.base_url.rstrip("/") + "/chat/completions"
+        body = json.dumps(
+            {
+                "model": profile.request_model,
+                "messages": [{"role": "user", "content": prompt["prompt"]}],
+                "max_tokens": int(prompt.get("max_tokens") or 32),
+                "temperature": 0,
+                "stream": False,
+            }
+        ).encode("utf-8")
+        request = urllib.request.Request(
+            url,
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        started = time.perf_counter()
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                raw = response.read()
+            elapsed_s = max(time.perf_counter() - started, 1e-6)
+            payload = json.loads(raw.decode("utf-8"))
+            choice = (payload.get("choices") or [{}])[0]
+            message = choice.get("message") or {}
+            content = message.get("content") or choice.get("text") or ""
+            usage = payload.get("usage") or {}
+            completion_tokens = usage.get("completion_tokens")
+            if not isinstance(completion_tokens, int):
+                completion_tokens = max(1, len(str(content).split()))
+            prompt_tokens = usage.get("prompt_tokens")
+            if not isinstance(prompt_tokens, int):
+                prompt_tokens = max(1, len(str(prompt["prompt"]).split()))
+            ttft_ms = elapsed_s * 1000.0  # non-stream: whole response latency as TTFT proxy
+            return {
+                "benchmark": prompt.get("benchmark"),
+                "category": prompt.get("category"),
+                "ttft_ms": round(ttft_ms * 10) / 10,
+                "decode_tokens_per_sec": round((completion_tokens / elapsed_s) * 10) / 10,
+                "e2e_tokens_per_sec": round(((prompt_tokens + completion_tokens) / elapsed_s) * 10) / 10,
+                "completion_tokens": completion_tokens,
+                "prompt_est_tokens": prompt_tokens,
+            }
+        except Exception as error:  # noqa: BLE001 - surface as row error
+            return {
+                "benchmark": prompt.get("benchmark"),
+                "category": prompt.get("category"),
+                "error": str(error),
+            }
+
+    def host_metrics(self) -> dict[str, Any]:
+        return host_metrics_payload()
 
     def status(
         self,
@@ -2657,6 +3219,8 @@ class AgentService:
             "ready": bool(ready and alive),
             "server_ids": server_ids if alive else [],
             "rss_mb": process_rss_mb(pid) if alive and pid else None,
+            # GPU VRAM when nvidia-smi can attribute memory to this pid (not RSS).
+            "vram_mb": process_vram_mb(pid) if alive and pid else None,
             "command": process_command(pid) if ((alive or zombie) and pid) else None,
             "log_path": profile.log_path,
             "discovery_source": "profile",
@@ -3117,6 +3681,8 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                 return lambda _: service.doctor_report()
             if path == "/api/benchmark/status":
                 return lambda _: service.benchmark_status()
+            if path == "/api/host/metrics":
+                return lambda _: service.host_metrics()
             if path == "/api/integrations":
                 return lambda _: {
                     "integrations": [],
@@ -3145,7 +3711,23 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                 return run_integration
             if path == "/api/benchmark/start":
                 def benchmark_start(payload: dict[str, Any]) -> dict[str, Any]:
-                    raise UnsupportedError("Benchmarks are not supported by the remote agent")
+                    selected = payload.get("profiles")
+                    if selected is not None and not isinstance(selected, list):
+                        raise UsageError("profiles must be a list of strings")
+                    names: list[str] | None = None
+                    if selected is not None:
+                        names = []
+                        for item in selected:
+                            if not isinstance(item, str) or not item:
+                                raise UsageError("profiles must be a list of strings")
+                            names.append(item)
+                    service.start_benchmark(
+                        profiles=names,
+                        suite=str(payload.get("suite") or "quick"),
+                        allow_concurrent=bool(payload.get("allow_concurrent")),
+                        keep_running=bool(payload.get("keep_running")),
+                    )
+                    return service.action_response()
                 return benchmark_start
             return None
         return None

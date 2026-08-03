@@ -355,12 +355,40 @@ class AgentHTTPContractTests(unittest.TestCase):
             finally:
                 harness.close()
 
-    def test_benchmark_start_is_unsupported(self) -> None:
+    def test_host_metrics_shape(self) -> None:
+        status, payload = self.plain.json_request("GET", "/api/host/metrics")
+        self.assertEqual(status, 200)
+        self.assertIn("host", payload)
+        self.assertIn("collected_at", payload)
+        self.assertIn("cpu_percent", payload)
+        self.assertIn("memory", payload)
+        self.assertIn("gpus", payload)
+        self.assertIsInstance(payload["gpus"], list)
+        self.assertIn("gpu_source", payload)
+        self.assertIn(payload["gpu_source"], {"nvidia-smi", "unavailable"})
+        self.assertIn("processes", payload)
+        self.assertIsInstance(payload["processes"], list)
+
+    def test_benchmark_start_accepts_quick_suite(self) -> None:
+        # Profile exists but never becomes ready (sleep + disabled healthcheck).
+        # Worker should still accept start and finish without hanging forever.
         status, payload = self.plain.json_request(
-            "POST", "/api/benchmark/start", {"suite": "quick"}
+            "POST", "/api/benchmark/start", {"suite": "quick", "profiles": ["qwen35-a3b"]}
         )
-        self.assertEqual(status, 400)
-        self.assertEqual(payload["error"], "unsupported_action")
+        self.assertEqual(status, 200, payload)
+        self.assertTrue(payload.get("ok"))
+        self.assertIn("benchmark", payload)
+        finished = False
+        for _ in range(80):  # ~20s with 0.25s steps; ready wait is 15s for quick
+            st, bench = self.plain.json_request("GET", "/api/benchmark/status")
+            self.assertEqual(st, 200)
+            if not bench.get("running"):
+                finished = True
+                break
+            time.sleep(0.25)
+        self.assertTrue(finished, "benchmark worker did not finish in time")
+        # Ensure stop cleans the sleep process left by the start attempt.
+        self.plain.service.stop_all(force=True)
 
     def test_integration_run_is_unsupported(self) -> None:
         status, payload = self.plain.json_request(
