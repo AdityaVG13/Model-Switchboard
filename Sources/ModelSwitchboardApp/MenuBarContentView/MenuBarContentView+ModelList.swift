@@ -105,6 +105,7 @@ extension MenuBarContentView {
         let profile = summary.profile
         let runtime = hub.enabledRemoteRuntimes.first { $0.name == summary.name }
         let store = runtime?.store
+        let hostMetrics = runtime.map { hostMetricsMonitor.entry(forGatewayID: $0.id).metrics } ?? nil
         let label = profile.ready ? "ACTIVE ON \(summary.name.uppercased())" : "STARTING ON \(summary.name.uppercased())"
         let isBusy = store?.isBusy(profile: profile.profile) == true
         let endpointURL = runtime.map { $0.reachableEndpointURL(for: profile) } ?? nil
@@ -113,36 +114,74 @@ extension MenuBarContentView {
             && endpointURL != nil
             && store?.canStartBenchmarkNow == true
             && store?.isBenchmarkInFlight(for: profile.profile) != true
-        let memoryLabel: String = {
-            if let vram = profile.vramMB {
-                return String(format: "%.1f GB VRAM", vram / 1024)
+        let memoryLabel = HostMetricsPresentation.profileMemoryLabel(
+            status: profile,
+            metrics: hostMetrics,
+            isRunning: true
+        ) ?? ":\(profile.port)"
+        let gpuStrip = HostMetricsPresentation.compactGPUStrip(hostMetrics)
+        let benchmarkHelp: String = {
+            if endpointURL == nil {
+                return "Benchmark disabled: :\(profile.port) is not reachable from this Mac (SSH forward or non-loopback bind required)."
             }
-            if let rss = profile.rssMB {
-                return String(format: "%.1f GB RSS", rss / 1024)
+            if !profile.ready {
+                return "Benchmark disabled: model on :\(profile.port) is not ready yet."
             }
-            return ":\(profile.port)"
+            if store?.canStartBenchmarkNow != true {
+                return "Benchmark cooling down or already running on \(summary.name)."
+            }
+            return "Run a quick benchmark on \(summary.name)"
         }()
 
         return VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(DashboardTheme.runningGreen)
-                    .frame(width: 6, height: 6)
-                    .shadow(color: DashboardTheme.runningGreen.opacity(0.6), radius: 3)
-                Text(label)
-                    .font(.system(size: 10, weight: .semibold))
-                    .kerning(0.8)
-                    .foregroundStyle(accent)
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(DashboardTheme.runningGreen)
+                            .frame(width: 6, height: 6)
+                            .shadow(color: DashboardTheme.runningGreen.opacity(0.6), radius: 3)
+                        Text(label)
+                            .font(.system(size: 10, weight: .semibold))
+                            .kerning(0.8)
+                            .foregroundStyle(accent)
+                    }
+                    Text(profile.displayName)
+                        .font(.system(size: 14, weight: .semibold))
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("\(profile.runtimeLabel ?? profile.runtime) · \(memoryLabel) · \(summary.name)")
+                        .font(.system(size: 10.5, design: .monospaced))
+                        .foregroundStyle(theme.sub)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    if let gpuStrip {
+                        Text(gpuStrip)
+                            .font(.system(size: 10.5, design: .monospaced))
+                            .foregroundStyle(accent.opacity(0.95))
+                            .lineLimit(1)
+                            .accessibilityLabel("Remote host GPU: \(gpuStrip)")
+                    }
+                }
+                Spacer(minLength: 0)
+                if let pct = HostMetricsPresentation.hostVRAMPercent(hostMetrics) {
+                    VStack(alignment: .trailing, spacing: 0) {
+                        Text("\(Int(pct.rounded()))%")
+                            .font(.system(size: 20, weight: .bold).monospacedDigit())
+                            .foregroundStyle(accent)
+                        Text("VRAM")
+                            .font(.system(size: 10))
+                            .foregroundStyle(theme.sub)
+                        if let detail = HostMetricsPresentation.hostVRAMUsedTotalLabel(hostMetrics) {
+                            Text(detail)
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(theme.faint)
+                        }
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("Host VRAM \(HostMetricsPresentation.hostVRAMUsedTotalLabel(hostMetrics) ?? "")")
+                }
             }
-            Text(profile.displayName)
-                .font(.system(size: 14, weight: .semibold))
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
-            Text("\(profile.runtimeLabel ?? profile.runtime) · \(memoryLabel) · \(summary.name)")
-                .font(.system(size: 10.5, design: .monospaced))
-                .foregroundStyle(theme.sub)
-                .lineLimit(1)
-                .truncationMode(.middle)
 
             if let store {
                 HStack(spacing: 6) {
@@ -157,11 +196,7 @@ extension MenuBarContentView {
                             setInspectorPanel(.benchmarks)
                             Task { await store.quickBenchmark([profile.profile]) }
                         }
-                        .help(
-                            endpointURL == nil
-                                ? "Benchmark needs a Mac-reachable endpoint (SSH forward or non-loopback bind)."
-                                : "Run a quick benchmark on \(summary.name)"
-                        )
+                        .help(benchmarkHelp)
                     }
                 }
             }

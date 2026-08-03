@@ -29,6 +29,7 @@ extension MenuBarContentView {
                 runtime: runtime,
                 filter: profileFilter,
                 excludeProfileID: excludeProfile,
+                hostMetrics: hostMetricsMonitor.entry(forGatewayID: runtime.id).metrics,
                 theme: theme,
                 accent: accent
             )
@@ -43,6 +44,8 @@ struct RemoteGatewaySectionView: View {
     let filter: MenuBarContentView.ProfileFilter
     /// Profile id already shown in the hero ACTIVE ON … card (if any).
     var excludeProfileID: String? = nil
+    /// Live host metrics from GET /api/host/metrics (GPU/VRAM), not process RSS.
+    var hostMetrics: HostMetricsPayload? = nil
     let theme: DashboardTheme
     let accent: Color
 
@@ -92,6 +95,7 @@ struct RemoteGatewaySectionView: View {
                     RemoteProfileRowView(
                         runtime: runtime,
                         profile: profile,
+                        hostMetrics: hostMetrics,
                         theme: theme,
                         accent: accent
                     )
@@ -112,19 +116,29 @@ struct RemoteGatewaySectionView: View {
     }
 
     private var sectionHeader: some View {
-        HStack(spacing: 6) {
-            Circle()
-                .fill(statusColor)
-                .frame(width: 6, height: 6)
-            DashboardSectionLabel(
-                text: "\(runtime.name.uppercased()) · \(store.displayedReadyProfiles)/\(store.summary.totalProfiles) READY",
-                theme: theme
-            )
-            Spacer(minLength: 0)
-            Text(connectionBadge)
-                .font(.system(size: 9, weight: .semibold))
-                .kerning(0.5)
-                .foregroundStyle(theme.faint)
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(statusColor)
+                    .frame(width: 6, height: 6)
+                DashboardSectionLabel(
+                    text: "\(runtime.name.uppercased()) · \(store.displayedReadyProfiles)/\(store.summary.totalProfiles) READY",
+                    theme: theme
+                )
+                Spacer(minLength: 0)
+                Text(connectionBadge)
+                    .font(.system(size: 9, weight: .semibold))
+                    .kerning(0.5)
+                    .foregroundStyle(theme.faint)
+            }
+            if let chip = HostMetricsPresentation.sectionMetricsChip(hostMetrics) {
+                Text(chip)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(accent.opacity(0.9))
+                    .lineLimit(1)
+                    .padding(.leading, 12)
+                    .accessibilityLabel("Host GPU metrics: \(chip)")
+            }
         }
         .padding(EdgeInsets(top: 10, leading: 4, bottom: 4, trailing: 4))
     }
@@ -166,6 +180,7 @@ struct RemoteGatewaySectionView: View {
 struct RemoteProfileRowView: View {
     @Bindable var runtime: GatewayRuntime
     let profile: ModelProfileStatus
+    var hostMetrics: HostMetricsPayload? = nil
     let theme: DashboardTheme
     let accent: Color
 
@@ -242,13 +257,12 @@ struct RemoteProfileRowView: View {
         var parts = [profile.runtimeLabel ?? profile.runtime, ":\(profile.port)"]
         if let pending {
             parts.append(pending.lowercased() + "…")
-        } else if isDisplayedRunning {
-            if let vramMB = profile.vramMB {
-                parts.append(String(format: "%.1f GB VRAM", vramMB / 1024))
-            } else if let rssMB = profile.rssMB {
-                // Process RSS only — not GPU VRAM.
-                parts.append(String(format: "%.1f GB RSS", rssMB / 1024))
-            }
+        } else if let memory = HostMetricsPresentation.profileMemoryLabel(
+            status: profile,
+            metrics: hostMetrics,
+            isRunning: isDisplayedRunning
+        ) {
+            parts.append(memory)
         }
         if isDisplayedRunning, runtime.reachableEndpointURL(for: profile) == nil {
             // Endpoint is loopback-on-remote (or not forwarded yet). Not a model class.
@@ -298,10 +312,16 @@ struct RemoteProfileRowView: View {
                         Task { await store.quickBenchmark([profile.profile]) }
                     }
                 } else if endpointURL == nil {
-                    Button("Benchmark needs a Mac-reachable endpoint") {}
+                    Button("Benchmark disabled · :\(profile.port) not reachable from this Mac") {}
                         .disabled(true)
                 } else if !profile.ready {
-                    Button("Benchmark when ready") {}
+                    Button("Benchmark disabled · model not ready on :\(profile.port)") {}
+                        .disabled(true)
+                } else if store.benchmark?.running == true {
+                    Button("Benchmark running on \(runtime.name)…") {}
+                        .disabled(true)
+                } else if !store.canStartBenchmarkNow {
+                    Button("Benchmark cooling down") {}
                         .disabled(true)
                 } else {
                     Button("Benchmark unavailable") {}
