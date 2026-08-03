@@ -6,12 +6,10 @@ import ModelSwitchboardTestSupport
 
 // MARK: - URLProtocol stub (host-routed, deterministic)
 
-/// Routes `/api/host/metrics` by request host. Thread-safe for concurrent polls.
+/// Routes host-metrics fixtures by request host. Thread-safe for concurrent polls.
 private final class HostMetricsURLProtocol: URLProtocol, @unchecked Sendable {
     private static let lock = NSLock()
-    /// host → HTTP status (200 body is a minimal valid HostMetricsPayload JSON).
     nonisolated(unsafe) private static var statusByHost: [String: Int] = [:]
-    /// host → artificial delay before responding (seconds).
     nonisolated(unsafe) private static var delayByHost: [String: TimeInterval] = [:]
 
     static func reset() {
@@ -29,7 +27,8 @@ private final class HostMetricsURLProtocol: URLProtocol, @unchecked Sendable {
     }
 
     override class func canInit(with request: URLRequest) -> Bool {
-        request.url?.host?.hasSuffix(".host-metrics.test") == true
+        guard let host = request.url?.host else { return false }
+        return host.hasSuffix(".host-metrics.test")
     }
 
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -52,8 +51,9 @@ private final class HostMetricsURLProtocol: URLProtocol, @unchecked Sendable {
         }
 
         let body: Data
-        if status == 200 {
-            body = Data(#"{"host":"\#(host)","cpu_percent":12.5,"gpus":[],"processes":[]}"#.utf8)
+        if (200..<300).contains(status) {
+            let json = #"{"host":"\#(host)","cpu_percent":12.5,"gpus":[],"processes":[]}"#
+            body = Data(json.utf8)
         } else {
             body = Data("HTTP \(status)".utf8)
         }
@@ -79,6 +79,7 @@ private func makeMetricsSession() -> URLSession {
     configuration.protocolClasses = [HostMetricsURLProtocol.self]
     configuration.timeoutIntervalForRequest = 5
     configuration.timeoutIntervalForResource = 5
+    configuration.waitsForConnectivity = false
     return URLSession(configuration: configuration)
 }
 
@@ -108,7 +109,9 @@ private func withMetricsHub(
                 features: .base,
                 gateway: GatewayContext(config: config),
                 autoStartRefresh: false,
-                controllerClientFactory: { try ControllerClient(baseURLString: $0, authToken: $1, session: session) }
+                controllerClientFactory: { base, auth in
+                    try ControllerClient(baseURLString: base, authToken: auth, session: session)
+                }
             )
         },
         tokenStorageFactory: { id in
@@ -138,74 +141,78 @@ private func withMetricsHub(
 
 // MARK: - Tests
 
-@MainActor
-@Test func pollOnceIsolatesErrorsAcrossConcurrentGateways() async throws {
-    HostMetricsURLProtocol.reset()
-    defer { HostMetricsURLProtocol.reset() }
+/// URLProtocol fixture uses process-global routing maps; serialize this suite.
+@Suite(.serialized)
+struct RemoteHostMetricsMonitorTests {
+    @MainActor
+    @Test func pollOnceIsolatesErrorsAcrossConcurrentGateways() async throws {
+        HostMetricsURLProtocol.reset()
+        defer { HostMetricsURLProtocol.reset() }
 
-    let okHost = "ok.host-metrics.test"
-    let badHost = "bad.host-metrics.test"
-    // Slow success so a sequential poll would finish the failure first;
-    // isolation only requires both results land correctly after one pollOnce.
-    HostMetricsURLProtocol.configure(host: okHost, status: 200, delay: 0.05)
-    HostMetricsURLProtocol.configure(host: badHost, status: 404, delay: 0)
+        let okHost = "ok.host-metrics.test"
+        let badHost = "bad.host-metrics.test"
+        HostMetricsURLProtocol.configure(host: okHost, status: 200, delay: 0.05)
+        HostMetricsURLProtocol.configure(host: badHost, status: 404, delay: 0)
 
-    let session = makeMetricsSession()
-    defer { session.invalidateAndCancel() }
+        let session = makeMetricsSession()
+        defer { session.invalidateAndCancel() }
 
-    try await withMetricsHub(
-        hosts: [
-            (name: "OK", host: okHost),
-            (name: "Bad", host: badHost),
-        ],
-        session: session
-    ) { hub, monitor in
-        await monitor.pollOnce()
+        try await withMetricsHub(
+            hosts: [
+                (name: "OK", host: okHost),
+                (name: "Bad", host: badHost),
+            ],
+            session: session
+        ) { hub, monitor in
+            await monitor.pollOnce()
 
-        let okRuntime = try #require(hub.enabledRemoteRuntimes.first { $0.name == "OK" })
-        let badRuntime = try #require(hub.enabledRemoteRuntimes.first { $0.name == "Bad" })
+            let okRuntime = try #require(hub.enabledRemoteRuntimes.first { $0.name == "OK" })
+            let badRuntime = try #require(hub.enabledRemoteRuntimes.first { $0.name == "Bad" })
 
-        let okEntry = monitor.entry(forGatewayID: okRuntime.id)
-        let badEntry = monitor.entry(forGatewayID: badRuntime.id)
+            let okEntry = monitor.entry(forGatewayID: okRuntime.id)
+            let badEntry = monitor.entry(forGatewayID: badRuntime.id)
 
-        #expect(okEntry.error == nil)
-        #expect(okEntry.unsupported == false)
-        #expect(okEntry.metrics?.cpuPercent == 12.5)
-        #expect(okEntry.metrics?.host == okHost)
+            #expect(okEntry.error == nil, "ok error=\(String(describing: okEntry.error)) base=\(okRuntime.store.controllerBaseURL)")
+            #expect(okEntry.unsupported == false)
+            #expect(okEntry.metrics?.cpuPercent == 12.5)
+            #expect(okEntry.metrics?.host == okHost)
 
-        #expect(badEntry.unsupported == true)
-        #expect(badEntry.metrics == nil)
-        #expect(badEntry.error?.contains("does not expose host metrics") == true)
+            #expect(badEntry.unsupported == true)
+            #expect(badEntry.metrics == nil)
+            #expect(badEntry.error?.contains("does not expose host metrics") == true)
+        }
     }
-}
 
-@MainActor
-@Test func pollOncePreservesLastGoodMetricsOnTransientFailure() async throws {
-    HostMetricsURLProtocol.reset()
-    defer { HostMetricsURLProtocol.reset() }
+    @MainActor
+    @Test func pollOncePreservesLastGoodMetricsOnTransientFailure() async throws {
+        HostMetricsURLProtocol.reset()
+        defer { HostMetricsURLProtocol.reset() }
 
-    let host = "transient.host-metrics.test"
-    HostMetricsURLProtocol.configure(host: host, status: 200)
+        let host = "transient.host-metrics.test"
+        HostMetricsURLProtocol.configure(host: host, status: 200)
 
-    let session = makeMetricsSession()
-    defer { session.invalidateAndCancel() }
+        let session = makeMetricsSession()
+        defer { session.invalidateAndCancel() }
 
-    try await withMetricsHub(
-        hosts: [(name: "Lab", host: host)],
-        session: session
-    ) { hub, monitor in
-        await monitor.pollOnce()
-        let runtime = try #require(hub.enabledRemoteRuntimes.first)
-        let good = monitor.entry(forGatewayID: runtime.id)
-        #expect(good.metrics?.cpuPercent == 12.5)
-        #expect(good.error == nil)
+        try await withMetricsHub(
+            hosts: [(name: "Lab", host: host)],
+            session: session
+        ) { hub, monitor in
+            let runtime = try #require(hub.enabledRemoteRuntimes.first)
+            #expect(runtime.store.controllerBaseURL.contains(host))
 
-        HostMetricsURLProtocol.configure(host: host, status: 503)
-        await monitor.pollOnce()
+            await monitor.pollOnce()
+            let good = monitor.entry(forGatewayID: runtime.id)
+            #expect(good.metrics?.cpuPercent == 12.5, "first poll error=\(String(describing: good.error))")
+            #expect(good.error == nil)
 
-        let after = monitor.entry(forGatewayID: runtime.id)
-        #expect(after.metrics?.cpuPercent == 12.5)
-        #expect(after.error != nil)
-        #expect(after.unsupported == false)
+            HostMetricsURLProtocol.configure(host: host, status: 503)
+            await monitor.pollOnce()
+
+            let after = monitor.entry(forGatewayID: runtime.id)
+            #expect(after.metrics?.cpuPercent == 12.5, "should keep last good metrics")
+            #expect(after.error != nil)
+            #expect(after.unsupported == false)
+        }
     }
 }
