@@ -74,6 +74,15 @@ extension MenuBarContentView {
                 benchmark: store.benchmark,
                 activeBenchmarkProfiles: store.activeBenchmarkProfiles,
                 cooldownEndsAt: store.benchmarkCooldownEndsAt,
+                remoteSections: hub.enabledRemoteRuntimes.map { runtime in
+                    GatewayBenchmarkSection(
+                        id: runtime.id,
+                        name: runtime.name,
+                        benchmark: runtime.store.benchmark,
+                        activeBenchmarkProfiles: runtime.store.activeBenchmarkProfiles,
+                        cooldownEndsAt: runtime.store.benchmarkCooldownEndsAt
+                    )
+                },
                 theme: theme,
                 accent: accent,
                 runBenchmark: {
@@ -86,6 +95,13 @@ extension MenuBarContentView {
                 openExampleProfilesDirectory: store.openExampleProfilesDirectory
             )
             .padding(EdgeInsets(top: 10, leading: 14, bottom: 10, trailing: 14))
+        case .remoteHosts:
+            RemoteHostsPanelView(
+                hub: hub,
+                metricsMonitor: hostMetricsMonitor,
+                theme: theme,
+                accent: accent
+            )
         }
     }
 

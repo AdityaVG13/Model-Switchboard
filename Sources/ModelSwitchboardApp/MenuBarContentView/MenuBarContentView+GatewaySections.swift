@@ -242,10 +242,13 @@ struct RemoteProfileRowView: View {
         var parts = [profile.runtimeLabel ?? profile.runtime, ":\(profile.port)"]
         if let pending {
             parts.append(pending.lowercased() + "…")
-        } else if let rssMB = profile.rssMB, isDisplayedRunning {
-            // Process RSS only — not GPU VRAM. Unified-memory hosts still report
-            // host process RSS; do not present this as "model size on GPU".
-            parts.append(String(format: "%.1f GB RSS", rssMB / 1024))
+        } else if isDisplayedRunning {
+            if let vramMB = profile.vramMB {
+                parts.append(String(format: "%.1f GB VRAM", vramMB / 1024))
+            } else if let rssMB = profile.rssMB {
+                // Process RSS only — not GPU VRAM.
+                parts.append(String(format: "%.1f GB RSS", rssMB / 1024))
+            }
         }
         if isDisplayedRunning, runtime.reachableEndpointURL(for: profile) == nil {
             // Endpoint is loopback-on-remote (or not forwarded yet). Not a model class.
@@ -274,6 +277,11 @@ struct RemoteProfileRowView: View {
 
     private func rowMenu(isBusy: Bool) -> some View {
         let endpointURL = runtime.reachableEndpointURL(for: profile)
+        let canBenchmark = store.features.supportsBenchmarks
+            && profile.ready
+            && endpointURL != nil
+            && store.canStartBenchmarkNow
+            && !store.isBenchmarkInFlight(for: profile.profile)
         return Menu {
             Button("Start (keep others running)") {
                 Task { await store.start(profile.profile) }
@@ -283,6 +291,23 @@ struct RemoteProfileRowView: View {
                 Task { await store.restart(profile.profile) }
             }
             .disabled(isBusy)
+            if store.features.supportsBenchmarks {
+                Divider()
+                if canBenchmark {
+                    Button("Benchmark on \(runtime.name)") {
+                        Task { await store.quickBenchmark([profile.profile]) }
+                    }
+                } else if endpointURL == nil {
+                    Button("Benchmark needs a Mac-reachable endpoint") {}
+                        .disabled(true)
+                } else if !profile.ready {
+                    Button("Benchmark when ready") {}
+                        .disabled(true)
+                } else {
+                    Button("Benchmark unavailable") {}
+                        .disabled(true)
+                }
+            }
             Divider()
             if let endpointURL {
                 Button("Copy Endpoint URL") {

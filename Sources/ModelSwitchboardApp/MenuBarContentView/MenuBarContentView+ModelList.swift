@@ -103,8 +103,27 @@ extension MenuBarContentView {
 
     private func remoteActiveCard(_ summary: (name: String, profile: ModelProfileStatus)) -> some View {
         let profile = summary.profile
+        let runtime = hub.enabledRemoteRuntimes.first { $0.name == summary.name }
+        let store = runtime?.store
         let label = profile.ready ? "ACTIVE ON \(summary.name.uppercased())" : "STARTING ON \(summary.name.uppercased())"
-        return VStack(alignment: .leading, spacing: 8) {
+        let isBusy = store?.isBusy(profile: profile.profile) == true
+        let endpointURL = runtime.map { $0.reachableEndpointURL(for: profile) } ?? nil
+        let canBenchmark = features.supportsBenchmarks
+            && profile.ready
+            && endpointURL != nil
+            && store?.canStartBenchmarkNow == true
+            && store?.isBenchmarkInFlight(for: profile.profile) != true
+        let memoryLabel: String = {
+            if let vram = profile.vramMB {
+                return String(format: "%.1f GB VRAM", vram / 1024)
+            }
+            if let rss = profile.rssMB {
+                return String(format: "%.1f GB RSS", rss / 1024)
+            }
+            return ":\(profile.port)"
+        }()
+
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
                 Circle()
                     .fill(DashboardTheme.runningGreen)
@@ -119,11 +138,33 @@ extension MenuBarContentView {
                 .font(.system(size: 14, weight: .semibold))
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("\(profile.runtimeLabel ?? profile.runtime) · :\(profile.port) · \(summary.name)")
+            Text("\(profile.runtimeLabel ?? profile.runtime) · \(memoryLabel) · \(summary.name)")
                 .font(.system(size: 10.5, design: .monospaced))
                 .foregroundStyle(theme.sub)
                 .lineLimit(1)
                 .truncationMode(.middle)
+
+            if let store {
+                HStack(spacing: 6) {
+                    heroButton("■ Stop", strong: true, disabled: isBusy) {
+                        Task { await store.stop(profile.profile) }
+                    }
+                    if features.supportsBenchmarks {
+                        heroButton(
+                            "Benchmark",
+                            disabled: isBusy || !canBenchmark
+                        ) {
+                            setInspectorPanel(.benchmarks)
+                            Task { await store.quickBenchmark([profile.profile]) }
+                        }
+                        .help(
+                            endpointURL == nil
+                                ? "Benchmark needs a Mac-reachable endpoint (SSH forward or non-loopback bind)."
+                                : "Run a quick benchmark on \(summary.name)"
+                        )
+                    }
+                }
+            }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)

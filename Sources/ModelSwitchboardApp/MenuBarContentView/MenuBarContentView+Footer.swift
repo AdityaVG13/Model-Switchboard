@@ -56,6 +56,12 @@ extension MenuBarContentView {
             // Trailing icon rail: fixed size, always fully inside the panel
             // corner radius (continuous clip eats ~12pt at the bottom-right).
             HStack(spacing: 2) {
+                if hub.hasRemoteGateways {
+                    footerIconButton("server.rack", label: "Remote Hosts") {
+                        let nextPanel = inspectorCoordinator.toggle(.remoteHosts)
+                        synchronizeInspectorWindow(panel: nextPanel)
+                    }
+                }
                 footerIconButton("questionmark.circle", label: "Help") {
                     let nextPanel = inspectorCoordinator.toggle(.help)
                     synchronizeInspectorWindow(panel: nextPanel)

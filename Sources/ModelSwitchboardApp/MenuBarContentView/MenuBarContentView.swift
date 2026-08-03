@@ -14,6 +14,7 @@ struct MenuBarContentView: View {
         case settings
         case help
         case benchmarks
+        case remoteHosts
 
         var id: String { rawValue }
 
@@ -22,6 +23,7 @@ struct MenuBarContentView: View {
             case .settings: "Settings"
             case .help: "Help"
             case .benchmarks: "Benchmarks"
+            case .remoteHosts: "Remote Hosts"
             }
         }
     }
@@ -88,6 +90,7 @@ struct MenuBarContentView: View {
     @State var hostWindow: NSWindow?
     @State var inspectorController = InspectorPanelController()
     @StateObject var systemMetrics: SystemMetricsMonitor
+    @State var hostMetricsMonitor = RemoteHostMetricsMonitor()
     @State var activeResizeStartFrame: NSRect?
 
     static let appVersion: String = {
@@ -150,6 +153,12 @@ struct MenuBarContentView: View {
             } else {
                 systemMetrics.stop()
             }
+            hostMetricsMonitor.attach(hub: hub)
+            if hub.hasRemoteGateways {
+                hostMetricsMonitor.start()
+            } else {
+                hostMetricsMonitor.stop()
+            }
             updateMenuBarHelp(hub.menuBarHelp)
             synchronizeInspectorWindow()
         }
@@ -160,6 +169,7 @@ struct MenuBarContentView: View {
                 try? await Task.sleep(for: .milliseconds(400))
                 guard !isMenuPresented else { return }
                 systemMetrics.stop()
+                hostMetricsMonitor.stop()
                 inspectorController.hide()
                 inspectorCoordinator.reset()
             }
@@ -198,6 +208,14 @@ struct MenuBarContentView: View {
         .preferredColorScheme(themePreference.colorScheme)
         .onChange(of: sidePreferenceRaw) { _, _ in
             synchronizeInspectorWindow()
+        }
+        .onChange(of: hub.hasRemoteGateways) { _, hasRemotes in
+            hostMetricsMonitor.attach(hub: hub)
+            if hasRemotes {
+                hostMetricsMonitor.start()
+            } else {
+                hostMetricsMonitor.stop()
+            }
         }
     }
 }

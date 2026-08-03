@@ -16,6 +16,7 @@ public enum ModelFixtures {
         running: Bool = true,
         ready: Bool = true,
         rssMB: Double? = 4096,
+        vramMB: Double? = nil,
         command: String? = nil,
         logPath: String = "/tmp/qwen.log"
     ) -> ModelProfileStatus {
@@ -36,6 +37,7 @@ public enum ModelFixtures {
             ready: ready,
             serverIDs: running ? [profile] : [],
             rssMB: running ? rssMB : nil,
+            vramMB: running ? vramMB : nil,
             command: command,
             logPath: logPath
         )

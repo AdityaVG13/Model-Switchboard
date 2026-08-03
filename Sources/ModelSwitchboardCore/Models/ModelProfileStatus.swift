@@ -17,6 +17,8 @@ public struct ModelProfileStatus: Codable, Identifiable, Equatable, Sendable {
     public let ready: Bool
     public let serverIDs: [String]
     public let rssMB: Double?
+    /// GPU memory in MB when the agent can attribute VRAM to this process (nvidia-smi).
+    public let vramMB: Double?
     public let command: String?
     public let logPath: String
 
@@ -39,6 +41,7 @@ public struct ModelProfileStatus: Codable, Identifiable, Equatable, Sendable {
         ready: Bool,
         serverIDs: [String],
         rssMB: Double?,
+        vramMB: Double? = nil,
         command: String?,
         logPath: String
     ) {
@@ -58,6 +61,7 @@ public struct ModelProfileStatus: Codable, Identifiable, Equatable, Sendable {
         self.ready = ready
         self.serverIDs = serverIDs
         self.rssMB = rssMB
+        self.vramMB = vramMB
         self.command = command
         self.logPath = logPath
     }
@@ -79,6 +83,7 @@ public struct ModelProfileStatus: Codable, Identifiable, Equatable, Sendable {
         case ready
         case serverIDs = "server_ids"
         case rssMB = "rss_mb"
+        case vramMB = "vram_mb"
         case command
         case logPath = "log_path"
     }
@@ -103,6 +108,7 @@ public struct ModelProfileStatus: Codable, Identifiable, Equatable, Sendable {
         ready = try container.decode(Bool.self, forKey: .ready)
         serverIDs = try container.decodeIfPresent([String].self, forKey: .serverIDs) ?? []
         rssMB = try container.decodeIfPresent(Double.self, forKey: .rssMB)
+        vramMB = try container.decodeIfPresent(Double.self, forKey: .vramMB)
         command = try container.decodeIfPresent(String.self, forKey: .command)
         if let path = try container.decodeIfPresent(String.self, forKey: .logPath) {
             logPath = path
@@ -152,7 +158,8 @@ public extension ModelProfileStatus {
         running: Bool? = nil,
         ready: Bool? = nil,
         serverIDs: [String]? = nil,
-        rssMB: Double? = nil
+        rssMB: Double? = nil,
+        vramMB: Double? = nil
     ) -> Self {
         Self(
             profile: profile,
@@ -171,6 +178,7 @@ public extension ModelProfileStatus {
             ready: ready ?? self.ready,
             serverIDs: serverIDs ?? self.serverIDs,
             rssMB: rssMB ?? self.rssMB,
+            vramMB: vramMB ?? self.vramMB,
             command: command,
             logPath: logPath
         )
@@ -188,8 +196,10 @@ public extension ModelProfileStatus {
         } else if ready {
             parts.append("endpoint healthy")
         }
-        if let rssMB {
-            parts.append(String(format: "%.1f MB", rssMB))
+        if let vramMB {
+            parts.append(String(format: "%.1f MB VRAM", vramMB))
+        } else if let rssMB {
+            parts.append(String(format: "%.1f MB RSS", rssMB))
         }
         return parts.joined(separator: " • ")
     }

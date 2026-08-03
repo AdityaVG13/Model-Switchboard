@@ -67,6 +67,10 @@ public struct ControllerClient: Sendable {
         try await get("/api/benchmark/status", as: BenchmarkStatus.self)
     }
 
+    public func fetchHostMetrics() async throws -> HostMetricsPayload {
+        try await get("/api/host/metrics", as: HostMetricsPayload.self)
+    }
+
     public func start(profile: String) async throws -> ControllerActionResponse {
         try await post("/api/start", payload: ProfileRequest(profile: profile))
     }

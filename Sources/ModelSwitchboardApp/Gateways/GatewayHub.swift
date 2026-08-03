@@ -299,7 +299,8 @@ final class GatewayHub {
         return SwitchboardStore(
             controllerBaseURL: baseURL,
             controllerAuthToken: token,
-            features: .base,
+            // Inherit the app edition so Plus can benchmark remote models.
+            features: .current,
             gateway: GatewayContext(config: config),
             autoStartRefresh: config.kind == .direct,
             controllerClientFactory: { baseURLString, authToken in
