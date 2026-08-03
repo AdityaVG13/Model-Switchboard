@@ -1,0 +1,343 @@
+{
+  "run_id": "20260803_remote-gateway-profiling",
+  "phase": "MEMORY-PROFILE",
+  "mode": "LOCAL-ONLY",
+  "captured_at_utc": "2026-08-03T18:30:01Z",
+  "platform": {
+    "system": "Darwin",
+    "machine": "arm64",
+    "python": "3.14.6",
+    "ru_maxrss_unit": "bytes"
+  },
+  "n_profiles": 20,
+  "n_samples": 20,
+  "warmup": 3,
+  "budget": {
+    "agent_rss_peak_mb": 80.0,
+    "agent_rss_soft_investigate_mb": 50.0,
+    "metric_ids": [
+      "A.agent_rss_peak",
+      "B.agent_rss_peak",
+      "C.agent_rss_peak"
+    ],
+    "source": "BUDGETS.md"
+  },
+  "method": {
+    "peak": "resource.getrusage(RUSAGE_SELF).ru_maxrss (normalized to bytes)",
+    "current": "ps -o rss= (KiB * 1024)",
+    "fixture": "N profile .env + 5 claims (same class as profile_cpu.py / bench_baseline.py)",
+    "paths": [
+      "status_payload()",
+      "host_metrics_payload()"
+    ]
+  },
+  "agent_version": "1.1.2",
+  "sample_tags": {
+    "statuses_len": 25,
+    "gpu_source": "unavailable",
+    "n_gpus": 0,
+    "host_metrics_cold_ms": 2.474
+  },
+  "status_wall_ms": {
+    "n": 20,
+    "mean": 102.50791889557149,
+    "p50": 102.35833399929106,
+    "p95": 106.93499998888001,
+    "max": 107.39887499948964
+  },
+  "host_metrics_wall_ms": {
+    "n": 20,
+    "mean": 0.08158319105859846,
+    "max": 0.1058329944498837
+  },
+  "rss": {
+    "before_status_loop": {
+      "current_mb": 35.656,
+      "peak_rusage_mb": 35.953
+    },
+    "after_status_loop": {
+      "peak_rusage_mb": 37.422,
+      "current_samples_mb": {
+        "min": 35.922,
+        "max": 36.688,
+        "mean": 36.471,
+        "n": 20
+      }
+    },
+    "after_metrics_loop": {
+      "peak_rusage_mb": 37.422,
+      "current_samples_mb": {
+        "min": 37.422,
+        "max": 37.422,
+        "mean": 37.422,
+        "n": 20
+      }
+    },
+    "scenario_peak": {
+      "peak_rusage_bytes": 39239680,
+      "peak_rusage_mb": 37.422,
+      "peak_current_sampled_bytes": 39239680,
+      "peak_current_sampled_mb": 37.422,
+      "final_current_mb": 37.422,
+      "final_peak_rusage_mb": 37.422,
+      "primary_peak_mb": 37.422,
+      "primary_metric": "ru_maxrss_bytes during status+metrics window"
+    }
+  },
+  "budget_check": {
+    "metric": "C.agent_rss_peak / A.agent_rss_peak / B.agent_rss_peak",
+    "budget_mb": 80.0,
+    "soft_investigate_mb": 50.0,
+    "measured_peak_mb": 37.422,
+    "headroom_mb": 42.578,
+    "vs_budget": "PASS",
+    "vs_soft": "within_soft",
+    "prior_sample_mb": 32.0,
+    "prior_note": "BUDGETS.md ~32 MB sample 2026-08-01"
+  },
+  "tracemalloc": {
+    "current_traced_bytes": 372863,
+    "peak_traced_bytes": 691049,
+    "current_traced_mb": 0.3556,
+    "peak_traced_mb": 0.659,
+    "top_lineno": [
+      {
+        "file": "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/pathlib/__init__.py",
+        "line": 298,
+        "size_bytes": 124052,
+        "size_mb": 0.1183,
+        "count": 2143
+      },
+      {
+        "file": "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/pathlib/__init__.py",
+        "line": 837,
+        "size_bytes": 46860,
+        "size_mb": 0.0447,
+        "count": 540
+      },
+      {
+        "file": "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/pathlib/__init__.py",
+        "line": 635,
+        "size_bytes": 21216,
+        "size_mb": 0.0202,
+        "count": 204
+      },
+      {
+        "file": "/Users/aditya/Developer/ModelSwitchboard/RemoteAgent/model_switchboard_agent.py",
+        "line": 2005,
+        "size_bytes": 18048,
+        "size_mb": 0.0172,
+        "count": 129
+      },
+      {
+        "file": "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/pathlib/__init__.py",
+        "line": 826,
+        "size_bytes": 11520,
+        "size_mb": 0.011,
+        "count": 180
+      },
+      {
+        "file": "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/pathlib/__init__.py",
+        "line": 771,
+        "size_bytes": 11328,
+        "size_mb": 0.0108,
+        "count": 192
+      },
+      {
+        "file": "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/pathlib/__init__.py",
+        "line": 136,
+        "size_bytes": 11256,
+        "size_mb": 0.0107,
+        "count": 201
+      },
+      {
+        "file": "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/pathlib/__init__.py",
+        "line": 264,
+        "size_bytes": 10884,
+        "size_mb": 0.0104,
+        "count": 84
+      },
+      {
+        "file": "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py",
+        "line": 504,
+        "size_bytes": 10350,
+        "size_mb": 0.0099,
+        "count": 207
+      },
+      {
+        "file": "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/pathlib/__init__.py",
+        "line": 214,
+        "size_bytes": 7344,
+        "size_mb": 0.007,
+        "count": 204
+      },
+      {
+        "file": "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py",
+        "line": 481,
+        "size_bytes": 7314,
+        "size_mb": 0.007,
+        "count": 138
+      },
+      {
+        "file": "/Users/aditya/Developer/ModelSwitchboard/RemoteAgent/model_switchboard_agent.py",
+        "line": 1923,
+        "size_bytes": 6816,
+        "size_mb": 0.0065,
+        "count": 12
+      },
+      {
+        "file": "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/pathlib/__init__.py",
+        "line": 154,
+        "size_bytes": 6528,
+        "size_mb": 0.0062,
+        "count": 204
+      },
+      {
+        "file": "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/subprocess.py",
+        "line": 1031,
+        "size_bytes": 6077,
+        "size_mb": 0.0058,
+        "count": 103
+      },
+      {
+        "file": "/Users/aditya/Developer/ModelSwitchboard/RemoteAgent/model_switchboard_agent.py",
+        "line": 1369,
+        "size_bytes": 6060,
+        "size_mb": 0.0058,
+        "count": 120
+      }
+    ]
+  },
+  "timeline": [
+    {
+      "label": "before_agent_import",
+      "ts": 1785781801.6070578,
+      "current_rss_bytes": 25493504,
+      "peak_rss_bytes_rusage": 25493504,
+      "current_rss_mb": 24.312,
+      "peak_rss_mb_rusage": 24.312
+    },
+    {
+      "label": "after_agent_import",
+      "ts": 1785781801.626,
+      "current_rss_bytes": 33112064,
+      "peak_rss_bytes_rusage": 33112064,
+      "current_rss_mb": 31.578,
+      "peak_rss_mb_rusage": 31.578
+    },
+    {
+      "label": "after_fixture",
+      "ts": 1785781801.631779,
+      "current_rss_bytes": 33128448,
+      "peak_rss_bytes_rusage": 33128448,
+      "current_rss_mb": 31.594,
+      "peak_rss_mb_rusage": 31.594
+    },
+    {
+      "label": "after_warmup",
+      "ts": 1785781801.700893,
+      "current_rss_bytes": 37388288,
+      "peak_rss_bytes_rusage": 37699584,
+      "current_rss_mb": 35.656,
+      "peak_rss_mb_rusage": 35.953
+    },
+    {
+      "label": "status_loop_i0",
+      "ts": 1785781801.8125389,
+      "current_rss_bytes": 37666816,
+      "peak_rss_bytes_rusage": 37699584,
+      "current_rss_mb": 35.922,
+      "peak_rss_mb_rusage": 35.953
+    },
+    {
+      "label": "status_loop_i4",
+      "ts": 1785781802.2439191,
+      "current_rss_bytes": 38158336,
+      "peak_rss_bytes_rusage": 38158336,
+      "current_rss_mb": 36.391,
+      "peak_rss_mb_rusage": 36.391
+    },
+    {
+      "label": "status_loop_i9",
+      "ts": 1785781802.7947268,
+      "current_rss_bytes": 38338560,
+      "peak_rss_bytes_rusage": 38338560,
+      "current_rss_mb": 36.562,
+      "peak_rss_mb_rusage": 36.562
+    },
+    {
+      "label": "status_loop_i14",
+      "ts": 1785781803.336919,
+      "current_rss_bytes": 38354944,
+      "peak_rss_bytes_rusage": 38354944,
+      "current_rss_mb": 36.578,
+      "peak_rss_mb_rusage": 36.578
+    },
+    {
+      "label": "status_loop_i19",
+      "ts": 1785781803.862108,
+      "current_rss_bytes": 38469632,
+      "peak_rss_bytes_rusage": 38469632,
+      "current_rss_mb": 36.688,
+      "peak_rss_mb_rusage": 36.688
+    },
+    {
+      "label": "after_status_loop",
+      "ts": 1785781803.879303,
+      "current_rss_bytes": 39239680,
+      "peak_rss_bytes_rusage": 39239680,
+      "current_rss_mb": 37.422,
+      "peak_rss_mb_rusage": 37.422
+    },
+    {
+      "label": "metrics_loop_i0",
+      "ts": 1785781803.8878982,
+      "current_rss_bytes": 39239680,
+      "peak_rss_bytes_rusage": 39239680,
+      "current_rss_mb": 37.422,
+      "peak_rss_mb_rusage": 37.422
+    },
+    {
+      "label": "metrics_loop_i19",
+      "ts": 1785781803.941141,
+      "current_rss_bytes": 39239680,
+      "peak_rss_bytes_rusage": 39239680,
+      "current_rss_mb": 37.422,
+      "peak_rss_mb_rusage": 37.422
+    },
+    {
+      "label": "after_metrics_loop",
+      "ts": 1785781803.943777,
+      "current_rss_bytes": 39239680,
+      "peak_rss_bytes_rusage": 39239680,
+      "current_rss_mb": 37.422,
+      "peak_rss_mb_rusage": 37.422
+    },
+    {
+      "label": "after_final_status",
+      "ts": 1785781803.995213,
+      "current_rss_bytes": 39239680,
+      "peak_rss_bytes_rusage": 39239680,
+      "current_rss_mb": 37.422,
+      "peak_rss_mb_rusage": 37.422
+    }
+  ],
+  "corroboration_time_l": {
+    "tool": "/usr/bin/time -l",
+    "command": "same fixture class N=20 status + N=20 host_metrics, no tracemalloc, no in-loop ps sampling",
+    "maximum_resident_set_size_bytes": 35028992,
+    "maximum_resident_set_size_mb": 33.406,
+    "peak_memory_footprint_bytes": 21479904,
+    "peak_memory_footprint_mb": 20.485,
+    "real_s": 0.34,
+    "user_s": 0.11,
+    "sys_s": 0.12,
+    "evidence_file": "time-l.err",
+    "note": "Slightly lower than instrumented harness (37.4 MB) because no tracemalloc / fewer samples; both PASS vs 80 MB."
+  },
+  "notes": [
+    "status_wall_ms in this run is inflated by tracemalloc+ps sampling during the status loop; use CPU-PROFILE/BASELINE for latency.",
+    "Primary gate is scenario_peak.primary_peak_mb from ru_maxrss.",
+    "No production code changes; measurement only."
+  ]
+}
