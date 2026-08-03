@@ -8,7 +8,11 @@ enum InspectorPanelSide {
 
 @MainActor
 final class InspectorPanelWindow: NSPanel {
-    override var canBecomeKey: Bool { true }
+    /// Settings needs typing; display panels stay non-activating so click-out
+    /// of the menu bar dashboard can dismiss without focus thrash.
+    var allowsKeyFocus = false
+
+    override var canBecomeKey: Bool { allowsKeyFocus }
     override var canBecomeMain: Bool { false }
 }
 
@@ -29,6 +33,9 @@ final class InspectorPanelController {
         self.hideAnimationDuration = hideAnimationDuration
     }
 
+    /// - Parameter allowsKeyFocus: true for Settings (SecureField); false for
+    ///   Remote Hosts / Benchmarks / Help so the panel does not steal key focus
+    ///   and pin the MenuBarExtra open when the user clicks elsewhere.
     func show(
         title: String,
         parent: NSWindow,
@@ -36,6 +43,7 @@ final class InspectorPanelController {
         height: CGFloat,
         gap: CGFloat,
         side: InspectorPanelSide = .leading,
+        allowsKeyFocus: Bool = false,
         content: AnyView
     ) {
         visibilityGeneration += 1
@@ -52,7 +60,7 @@ final class InspectorPanelController {
 
             window = InspectorPanelWindow(
                 contentRect: NSRect(x: 0, y: 0, width: width, height: height),
-                styleMask: [.borderless],
+                styleMask: [.borderless, .nonactivatingPanel],
                 backing: .buffered,
                 defer: false
             )
@@ -62,14 +70,18 @@ final class InspectorPanelController {
             window.hasShadow = true
             window.isMovable = false
             window.isMovableByWindowBackground = false
-            window.hidesOnDeactivate = false
+            // Follow parent deactivate so click-outside dismisses the pair.
+            window.hidesOnDeactivate = true
             window.level = .floating
-            window.collectionBehavior = [.transient, .moveToActiveSpace]
+            window.collectionBehavior = [.transient, .moveToActiveSpace, .fullScreenAuxiliary]
+            // Do not take app activation away from the user's current focus.
+            window.becomesKeyOnlyIfNeeded = true
 
             panelWindow = window
             hostingView = host
         }
 
+        window.allowsKeyFocus = allowsKeyFocus
         host.rootView = content
         window.title = title
         window.setContentSize(NSSize(width: width, height: height))
@@ -87,6 +99,7 @@ final class InspectorPanelController {
                 parentFrame: parent.frame,
                 screenVisibleFrame: parent.screen?.visibleFrame,
                 width: width,
+                height: height,
                 gap: gap,
                 side: side
             ),
@@ -94,10 +107,18 @@ final class InspectorPanelController {
             width: width,
             height: height
         )
-        window.setFrame(frame, display: true)
+        // Align to parent height; use same y as parent.
+        let aligned = NSRect(
+            x: frame.minX,
+            y: parent.frame.minY,
+            width: width,
+            height: height
+        )
+        window.setFrame(aligned, display: true)
         window.alphaValue = 1
         if !window.isVisible {
             window.alphaValue = showAnimationDuration > 0 ? 0 : 1
+            // Never makeKey — avoids focus thrash that re-activates the menu bar window.
             window.orderFront(nil)
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = showAnimationDuration
@@ -114,6 +135,7 @@ final class InspectorPanelController {
         parentFrame: NSRect,
         screenVisibleFrame: NSRect?,
         width: CGFloat,
+        height: CGFloat = 0,
         gap: CGFloat,
         side: InspectorPanelSide
     ) -> CGFloat {

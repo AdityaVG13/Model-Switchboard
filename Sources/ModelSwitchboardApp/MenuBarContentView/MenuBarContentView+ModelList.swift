@@ -108,10 +108,10 @@ extension MenuBarContentView {
         let hostMetrics = runtime.map { hostMetricsMonitor.entry(forGatewayID: $0.id).metrics } ?? nil
         let label = profile.ready ? "ACTIVE ON \(summary.name.uppercased())" : "STARTING ON \(summary.name.uppercased())"
         let isBusy = store?.isBusy(profile: profile.profile) == true
-        let endpointURL = runtime.map { $0.reachableEndpointURL(for: profile) } ?? nil
+        // Agent runs the suite on the remote host (loopback there). Mac-reachable
+        // model URL is only required for Copy Endpoint, not for agent benchmarks.
         let canBenchmark = features.supportsBenchmarks
             && profile.ready
-            && endpointURL != nil
             && store?.canStartBenchmarkNow == true
             && store?.isBenchmarkInFlight(for: profile.profile) != true
         let memoryLabel = HostMetricsPresentation.profileMemoryLabel(
@@ -121,16 +121,13 @@ extension MenuBarContentView {
         ) ?? ":\(profile.port)"
         let gpuStrip = HostMetricsPresentation.compactGPUStrip(hostMetrics)
         let benchmarkHelp: String = {
-            if endpointURL == nil {
-                return "Benchmark disabled: :\(profile.port) is not reachable from this Mac (SSH forward or non-loopback bind required)."
-            }
             if !profile.ready {
                 return "Benchmark disabled: model on :\(profile.port) is not ready yet."
             }
             if store?.canStartBenchmarkNow != true {
                 return "Benchmark cooling down or already running on \(summary.name)."
             }
-            return "Run a quick benchmark on \(summary.name)"
+            return "Run a quick benchmark on \(summary.name) via the remote agent (uses the model on that host)."
         }()
 
         return VStack(alignment: .leading, spacing: 10) {

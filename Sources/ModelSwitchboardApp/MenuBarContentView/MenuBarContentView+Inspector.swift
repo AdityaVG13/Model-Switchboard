@@ -12,7 +12,7 @@ extension MenuBarContentView {
                         inspectorCoordinator.requestDeferredClose(of: panel)
                         DispatchQueue.main.async {
                             let nextPanel = inspectorCoordinator.commitDeferredClose(of: panel)
-                            synchronizeInspectorWindow(panel: nextPanel, refocusHostWindowOnHide: nextPanel == nil)
+                            synchronizeInspectorWindow(panel: nextPanel)
                         }
                     } label: {
                         HStack(spacing: 3) {
@@ -117,17 +117,14 @@ extension MenuBarContentView {
     }
 
     func synchronizeInspectorWindow(
-        panel: InspectorPanel? = nil,
-        refocusHostWindowOnHide: Bool = false
+        panel: InspectorPanel? = nil
     ) {
         guard let hostWindow else { return }
         let currentPanel = panel ?? inspectorCoordinator.openPanel
         guard let currentPanel else {
-            inspectorController.hide {
-                if refocusHostWindowOnHide {
-                    hostWindow.makeKeyAndOrderFront(nil)
-                }
-            }
+            // Never re-key the host window on hide — that re-opens/focuses the
+            // menu bar dashboard when the user already clicked away.
+            inspectorController.hide()
             return
         }
 
@@ -138,6 +135,9 @@ extension MenuBarContentView {
             height: panelHeight,
             gap: panelGap,
             side: sidePreference.inspectorSide,
+            // Settings needs SecureField key focus; other panels must not steal
+            // activation or the MenuBarExtra stays stuck when clicking outside.
+            allowsKeyFocus: currentPanel == .settings,
             content: AnyView(inspectorCard(currentPanel))
         )
     }

@@ -37,7 +37,8 @@ struct MenuBarContentView: View {
     let reconnect: () -> Void
     let updateMenuBarHelp: (String) -> Void
     /// When false, deferred teardown may run after hide debounce.
-    var isMenuPresented: Bool = true
+    /// Binding so onDisappear / onChange always see live presentation state.
+    @Binding var isMenuPresented: Bool
 
     init(
         store: SwitchboardStore,
@@ -48,7 +49,7 @@ struct MenuBarContentView: View {
         controllerAuthToken: Binding<String>,
         reconnect: @escaping () -> Void,
         updateMenuBarHelp: @escaping (String) -> Void,
-        isMenuPresented: Bool = true,
+        isMenuPresented: Binding<Bool> = .constant(true),
         systemMetrics: SystemMetricsMonitor? = nil
     ) {
         self.store = store
@@ -59,7 +60,7 @@ struct MenuBarContentView: View {
         self._controllerAuthToken = controllerAuthToken
         self.reconnect = reconnect
         self.updateMenuBarHelp = updateMenuBarHelp
-        self.isMenuPresented = isMenuPresented
+        self._isMenuPresented = isMenuPresented
         self._systemMetrics = StateObject(wrappedValue: systemMetrics ?? SystemMetricsMonitor())
     }
 
@@ -162,16 +163,24 @@ struct MenuBarContentView: View {
             updateMenuBarHelp(hub.menuBarHelp)
             synchronizeInspectorWindow()
         }
+        .onChange(of: isMenuPresented) { _, presented in
+            // Dismiss inspector as soon as the menu closes so a floating side
+            // panel cannot keep focus and pin the dashboard open.
+            if !presented {
+                inspectorController.hide()
+                inspectorCoordinator.reset()
+            }
+        }
         .onDisappear {
             // Spam-toggling the status item can fire disappear/appear within a
-            // few hundred ms. Tear down only if we stay closed.
+            // few hundred ms. Tear down monitors only if we stay closed.
+            inspectorController.hide()
+            inspectorCoordinator.reset()
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(400))
                 guard !isMenuPresented else { return }
                 systemMetrics.stop()
                 hostMetricsMonitor.stop()
-                inspectorController.hide()
-                inspectorCoordinator.reset()
             }
         }
         .onChange(of: hub.menuBarHelp) { _, newValue in

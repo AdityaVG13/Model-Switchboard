@@ -62,7 +62,7 @@ struct ModelSwitchboardApp: App {
                 updateMenuBarHelp: { helpText in
                     statusItem?.button?.toolTip = helpText
                 },
-                isMenuPresented: isMenuPresented
+                isMenuPresented: $isMenuPresented
             )
                 .onAppear {
                     if store.controllerBaseURL != controllerBaseURL {

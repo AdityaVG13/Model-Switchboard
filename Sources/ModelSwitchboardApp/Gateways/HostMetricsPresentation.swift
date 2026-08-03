@@ -34,6 +34,7 @@ enum HostMetricsPresentation {
             return String(format: "%.1f GB VRAM", vram / 1024)
         }
         if let rss = status.rssMB {
+            // Process resident set only — not GPU VRAM (often much smaller).
             return String(format: "%.1f GB RSS", rss / 1024)
         }
         return nil

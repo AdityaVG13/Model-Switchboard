@@ -291,9 +291,9 @@ struct RemoteProfileRowView: View {
 
     private func rowMenu(isBusy: Bool) -> some View {
         let endpointURL = runtime.reachableEndpointURL(for: profile)
+        // Agent-side quick benchmark does not need a Mac-forwarded model URL.
         let canBenchmark = store.features.supportsBenchmarks
             && profile.ready
-            && endpointURL != nil
             && store.canStartBenchmarkNow
             && !store.isBenchmarkInFlight(for: profile.profile)
         return Menu {
@@ -311,9 +311,6 @@ struct RemoteProfileRowView: View {
                     Button("Benchmark on \(runtime.name)") {
                         Task { await store.quickBenchmark([profile.profile]) }
                     }
-                } else if endpointURL == nil {
-                    Button("Benchmark disabled · :\(profile.port) not reachable from this Mac") {}
-                        .disabled(true)
                 } else if !profile.ready {
                     Button("Benchmark disabled · model not ready on :\(profile.port)") {}
                         .disabled(true)

@@ -75,10 +75,18 @@ struct RemoteHostsPanelView: View {
             }
 
             if let error = entry.error, metrics == nil {
-                Text(error)
-                    .font(.system(size: 11))
-                    .foregroundStyle(DashboardTheme.stopRed.opacity(0.9))
-                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(error)
+                        .font(.system(size: 11))
+                        .foregroundStyle(DashboardTheme.stopRed.opacity(0.9))
+                        .fixedSize(horizontal: false, vertical: true)
+                    if entry.unsupported {
+                        Text(agentUpgradeHint(for: runtime))
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(theme.sub)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
             } else {
                 HStack(spacing: 6) {
                     metricTile(
@@ -225,8 +233,18 @@ struct RemoteHostsPanelView: View {
         if let rss = status.rssMB {
             return String(format: "%.1f GB RSS", rss / 1024)
         }
-        return "— · :\(status.port)"
+        return "— · :" + status.port
     }
+
+    private func agentUpgradeHint(for runtime: GatewayRuntime) -> String {
+        switch runtime.config.kind {
+        case .ssh:
+            return "Settings → Install Agent on Host (SSH) to push GPU/VRAM metrics. RSS is process memory, not VRAM."
+        case .direct:
+            return "On the host, re-run Install Agent / the install one-liner from Settings so /api/host/metrics is available. Until then only process RSS is shown — not GPU VRAM."
+        }
+    }
+
 
     private func subtitle(runtime: GatewayRuntime, metrics: HostMetricsPayload?) -> String {
         if let host = metrics?.host, !host.isEmpty {

@@ -193,7 +193,7 @@ final class RemoteHostMetricsMonitor {
             let unsupported = message.contains("404") || message.lowercased().contains("not found")
             var entry = target.previous
             entry.error = unsupported
-                ? "This remote agent does not expose host metrics yet. Redeploy the agent to upgrade."
+                ? "This remote agent does not expose host metrics yet (needs upgrade for GPU/VRAM)."
                 : message
             entry.unsupported = unsupported
             entry.updatedAt = Date()
