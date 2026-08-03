@@ -1218,7 +1218,7 @@ class ListListeningTcpTests(unittest.TestCase):
                         agent, "process_command", return_value="python -m server"
                     ):
                         first = agent.list_listening_tcp()
-                        # Still well inside LISTENING_TCP_CACHE_TTL_SECONDS (75ms).
+                        # Still well inside LISTENING_TCP_CACHE_TTL_SECONDS (2.0s).
                         clock["t"] = 1000.0 + 0.05
                         second = agent.list_listening_tcp()
                         self.assertEqual(first, second)

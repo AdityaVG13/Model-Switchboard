@@ -129,9 +129,14 @@ SKIP_LISTEN_PORTS = frozenset({
 })
 DISCOVERY_PROBE_BUDGET = 24
 DISCOVERY_PROBE_TIMEOUT = 0.6
-# Short TTL so concurrent/back-to-back status polls skip re-running ss.
-# Results may lag ≤TTL for concurrent callers -- intentional.
-LISTENING_TCP_CACHE_TTL_SECONDS = 0.075
+# Inventory cache TTL for list_listening_tcp (ss/lsof/proc).
+# Default 2.0s is tuned to UI status poll cadence (~10s active refresh) and
+# cross-request reuse: rapid re-polls, multi-client bursts, and concurrent
+# status/ports/scan callers share one snapshot for a few seconds instead of
+# cold-missing every request (old 75ms TTL was shorter than any real poll).
+# Ports/listen state may lag ≤TTL -- intentional; stop/start still use live
+# listener_pid / clear_listening_tcp_cache when accuracy matters.
+LISTENING_TCP_CACHE_TTL_SECONDS = 2.0
 
 PROFILE_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 SHELL_DEFAULT_RE = re.compile(
@@ -1376,8 +1381,8 @@ def parse_loose_env_assignments(file: Path) -> dict[str, str]:
     return values
 
 
-# Short-TTL inventory cache: (monotonic_ts, rows). Thread-safe for
-# ThreadingHTTPServer; concurrent callers may share a snapshot that lags ≤TTL.
+# Inventory cache: (monotonic_ts, rows). Thread-safe for ThreadingHTTPServer;
+# concurrent callers may share a snapshot that lags ≤LISTENING_TCP_CACHE_TTL_SECONDS.
 # list_listening_tcp always returns a caller-private shallow copy so handlers
 # cannot mutate cached rows. Misses fill under the lock (no stampede / DCL race
 # with clear_listening_tcp_cache mid-inventory).
@@ -1414,10 +1419,11 @@ def list_listening_tcp() -> list[dict[str, Any]]:
     cmdline resolution; command may be None for those rows. Same pid on a
     non-skip port still resolves when that row is seen.
 
-    Module-level cache (LISTENING_TCP_CACHE_TTL_SECONDS, default 75ms) so
+    Module-level cache (LISTENING_TCP_CACHE_TTL_SECONDS, default 2.0s) so
     concurrent or back-to-back status/ports polls in the same process skip
     re-running inventory. Results may lag ≤TTL -- intentional for poll
-    coalescing. Each call returns a fresh list of dicts (safe under
+    coalescing (UI active refresh is ~10s; 2s covers rapid re-polls and
+    multi-caller bursts). Each call returns a fresh list of dicts (safe under
     ThreadingHTTPServer if a handler mutates its result).
     """
     global _listening_tcp_cache
