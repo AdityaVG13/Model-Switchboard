@@ -73,9 +73,6 @@ struct MenuBarContentView: View {
     @AppStorage(DashboardAppearanceKeys.accent)
     var accentRaw: String = DashboardAccent.orange.rawValue
 
-    @AppStorage(DashboardAppearanceKeys.sidePanel)
-    var sidePreferenceRaw: String = DashboardSidePreference.right.rawValue
-
     @Environment(\.colorScheme) var systemColorScheme
 
     var minMainPanelWidth: Double { Double(DashboardChromeMetrics.minMainPanelWidth) }
@@ -114,10 +111,6 @@ struct MenuBarContentView: View {
         (DashboardAccent(rawValue: accentRaw) ?? .orange).color
     }
 
-    var sidePreference: DashboardSidePreference {
-        DashboardSidePreference(rawValue: sidePreferenceRaw) ?? .right
-    }
-
     var theme: DashboardTheme {
         DashboardTheme.resolve(themePreference.colorScheme ?? systemColorScheme)
     }
@@ -149,7 +142,6 @@ struct MenuBarContentView: View {
             synchronizeInspectorWindow()
         }
         .task {
-            DashboardSidePreference.migrateMirroredPreferenceIfNeeded()
             if features.supportsBenchmarks {
                 systemMetrics.start()
             } else {
@@ -216,9 +208,6 @@ struct MenuBarContentView: View {
             }
         }
         .preferredColorScheme(themePreference.colorScheme)
-        .onChange(of: sidePreferenceRaw) { _, _ in
-            synchronizeInspectorWindow()
-        }
         .onChange(of: hub.hasRemoteGateways) { _, hasRemotes in
             hostMetricsMonitor.attach(hub: hub)
             if hasRemotes {

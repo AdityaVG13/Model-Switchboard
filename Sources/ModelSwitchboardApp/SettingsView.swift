@@ -25,9 +25,6 @@ struct SettingsView: View {
     @AppStorage(DashboardAppearanceKeys.accent)
     private var accentRaw: String = DashboardAccent.orange.rawValue
 
-    @AppStorage(DashboardAppearanceKeys.sidePanel)
-    private var sidePreferenceRaw: String = DashboardSidePreference.right.rawValue
-
     @AppStorage(DashboardAppearanceKeys.menuBarShowsReadyCount)
     private var menuBarShowsReadyCount = true
 
@@ -91,14 +88,6 @@ struct SettingsView: View {
                             .accessibilityAddTraits(choice.rawValue == accentRaw ? [.isButton, .isSelected] : .isButton)
                     }
                 }
-            }
-            groupDivider
-            settingsRow("Side panel") {
-                segmented(
-                    options: DashboardSidePreference.allCases.map(\.rawValue),
-                    labels: DashboardSidePreference.allCases.map(\.label),
-                    selection: $sidePreferenceRaw
-                )
             }
             groupDivider
             settingsRow("Menu bar shows") {

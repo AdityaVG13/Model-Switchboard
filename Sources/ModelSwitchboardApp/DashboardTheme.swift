@@ -40,51 +40,9 @@ enum DashboardAccent: String, CaseIterable {
     }
 }
 
-enum DashboardSidePreference: String, CaseIterable {
-    case left
-    case right
-
-    var label: String {
-        switch self {
-        case .left: "Left"
-        case .right: "Right"
-        }
-    }
-
-    /// Side of the *dashboard* the inspector should prefer.
-    /// Near a screen edge the opposite side is used if needed (no parent shift).
-    var inspectorSide: InspectorPanelSide {
-        switch self {
-        case .left: .leading
-        case .right: .trailing
-        }
-    }
-
-    /// Older builds stored "right" while the menu-bar window (usually on the
-    /// screen's right edge) flipped the inspector to the left of the dashboard.
-    /// Mirror once so the control matches the side users actually saw.
-    static func migrateMirroredPreferenceIfNeeded(defaults: UserDefaults = .standard) {
-        let flag = DashboardAppearanceKeys.sidePanelPreferenceMirrored
-        guard defaults.object(forKey: flag) == nil else { return }
-        let key = DashboardAppearanceKeys.sidePanel
-        switch defaults.string(forKey: key) {
-        case "right":
-            defaults.set(DashboardSidePreference.left.rawValue, forKey: key)
-        case "left":
-            defaults.set(DashboardSidePreference.right.rawValue, forKey: key)
-        default:
-            break
-        }
-        defaults.set(true, forKey: flag)
-    }
-}
-
 enum DashboardAppearanceKeys {
     static let theme = "dashboardTheme"
     static let accent = "dashboardAccent"
-    static let sidePanel = "dashboardSidePanel"
-    /// One-time swap: older builds labeled Right while the panel usually opened left.
-    static let sidePanelPreferenceMirrored = "dashboardSidePanelPreferenceMirrored"
     static let menuBarShowsReadyCount = "menuBarShowsReadyCount"
 }
 
