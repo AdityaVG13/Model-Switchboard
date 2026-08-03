@@ -1,0 +1,235 @@
+{
+  "run_id": "20260803_remote-gateway-profiling",
+  "phase": "CPU-PROFILE",
+  "mode": "LOCAL-ONLY",
+  "captured_at_utc": "2026-08-03T18:26:29Z",
+  "agent_version": "1.1.2",
+  "n_profiles": 20,
+  "n_samples": 20,
+  "warmup": 3,
+  "jsonl": "Tests/artifacts/perf/20260803_remote-gateway-profiling/cpu-spans.jsonl",
+  "flags": {
+    "MSW_PERF_PROFILE": "1",
+    "MSW_PERF_JSONL": "/Users/aditya/Developer/ModelSwitchboard/Tests/artifacts/perf/20260803_remote-gateway-profiling/cpu-spans.jsonl"
+  },
+  "status_payload_wall": {
+    "n": 20,
+    "unit": "ms",
+    "mean": 7.579147859360091,
+    "stdev": 14.224366475861487,
+    "min": 2.7258750051259995,
+    "max": 49.57654100144282,
+    "p50": 2.942770515801385,
+    "p95": 48.796195824979804,
+    "p99": 49.42047196615022
+  },
+  "host_metrics_wall_warm": {
+    "n": 20,
+    "unit": "ms",
+    "mean": 0.050362394540570676,
+    "stdev": 0.011624269751840091,
+    "min": 0.0380830024369061,
+    "max": 0.09254197357222438,
+    "p50": 0.04843698116019368,
+    "p95": 0.06158716569188985,
+    "p99": 0.08635101199615741
+  },
+  "host_metrics_cold_ms": 2.1352499607019126,
+  "sample_tags": {
+    "statuses_len": 25,
+    "gpu_source": "unavailable",
+    "n_gpus": 0
+  },
+  "cprofile": "Tests/artifacts/perf/20260803_remote-gateway-profiling/cprofile.txt",
+  "cprofile_n": 20,
+  "spans": {
+    "status_payload": {
+      "span_count": 44,
+      "duration_ms": {
+        "n": 44,
+        "unit": "ms",
+        "mean": 13.722363636363637,
+        "stdev": 20.24420555063402,
+        "min": 2.665,
+        "max": 72.034,
+        "p50": 5.961,
+        "p95": 54.76625,
+        "p99": 65.44898
+      },
+      "stages_ranked": {
+        "list_listening_tcp": {
+          "n": 44,
+          "unit": "ms",
+          "mean": 8.750772727272727,
+          "stdev": 18.788866640155934,
+          "min": 0.002,
+          "max": 52.382,
+          "p50": 0.005,
+          "p95": 48.0821,
+          "p99": 51.37322,
+          "sum": 385.034,
+          "share_of_stage_sums": 0.6377057868760144
+        },
+        "profile_statuses": {
+          "n": 44,
+          "unit": "ms",
+          "mean": 2.8092045454545453,
+          "stdev": 2.22814635212557,
+          "min": 1.5,
+          "max": 16.017,
+          "p50": 2.2009999999999996,
+          "p95": 3.67775,
+          "p99": 10.779170000000002,
+          "sum": 123.605,
+          "share_of_stage_sums": 0.20471860611481005
+        },
+        "scan_port_claim_directories": {
+          "n": 44,
+          "unit": "ms",
+          "mean": 1.2940454545454545,
+          "stdev": 0.5232549271780129,
+          "min": 0.7,
+          "max": 2.029,
+          "p50": 1.0805,
+          "p95": 1.89895,
+          "p99": 2.01438,
+          "sum": 56.938,
+          "share_of_stage_sums": 0.09430256053529432
+        },
+        "profiles_load": {
+          "n": 44,
+          "unit": "ms",
+          "mean": 0.6427954545454546,
+          "stdev": 0.26057919204667046,
+          "min": 0.354,
+          "max": 1.325,
+          "p50": 0.546,
+          "p95": 0.9988000000000002,
+          "p99": 1.22481,
+          "sum": 28.283,
+          "share_of_stage_sums": 0.04684322104077645
+        },
+        "benchmark_status": {
+          "n": 44,
+          "unit": "ms",
+          "mean": 0.13520454545454544,
+          "stdev": 0.5537984512708762,
+          "min": 0.024,
+          "max": 3.719,
+          "p50": 0.052000000000000005,
+          "p95": 0.08,
+          "p99": 2.2148600000000007,
+          "sum": 5.949,
+          "share_of_stage_sums": 0.009852926562655273
+        },
+        "merge_discovery": {
+          "n": 44,
+          "unit": "ms",
+          "mean": 0.048295454545454544,
+          "stdev": 0.05687382180551372,
+          "min": 0.015,
+          "max": 0.341,
+          "p50": 0.032,
+          "p95": 0.1253500000000001,
+          "p99": 0.28252000000000005,
+          "sum": 2.125,
+          "share_of_stage_sums": 0.0035194938553777867
+        },
+        "discover_live_model_endpoints": {
+          "n": 44,
+          "unit": "ms",
+          "mean": 0.04195454545454546,
+          "stdev": 0.018991986737929758,
+          "min": 0.018,
+          "max": 0.07,
+          "p50": 0.0325,
+          "p95": 0.06740000000000002,
+          "p99": 0.06914000000000001,
+          "sum": 1.846,
+          "share_of_stage_sums": 0.003057405015071715
+        }
+      },
+      "example_tags": {
+        "n_profiles": 20,
+        "n_statuses": 25,
+        "n_listeners": 14,
+        "n_claims": 5,
+        "n_live": 0,
+        "full_discovery": true
+      }
+    },
+    "host_metrics_payload": {
+      "span_count": 26,
+      "duration_ms": {
+        "n": 26,
+        "unit": "ms",
+        "mean": 0.17807692307692308,
+        "stdev": 0.5836763434011643,
+        "min": 0.009,
+        "max": 2.288,
+        "p50": 0.011,
+        "p95": 1.5307499999999998,
+        "p99": 2.22225
+      },
+      "stages_ranked": {
+        "gpu": {
+          "n": 26,
+          "unit": "ms",
+          "mean": 0.15876923076923077,
+          "stdev": 0.560840605355376,
+          "min": 0.0,
+          "max": 2.178,
+          "p50": 0.0,
+          "p95": 1.45825,
+          "p99": 2.11925,
+          "sum": 4.128,
+          "share_of_stage_sums": 0.8931198615318044
+        },
+        "memory": {
+          "n": 26,
+          "unit": "ms",
+          "mean": 0.008115384615384615,
+          "stdev": 0.012934688007298585,
+          "min": 0.003,
+          "max": 0.057,
+          "p50": 0.004,
+          "p95": 0.036750000000000005,
+          "p99": 0.05425000000000001,
+          "sum": 0.211,
+          "share_of_stage_sums": 0.04565123323236694
+        },
+        "cpu": {
+          "n": 26,
+          "unit": "ms",
+          "mean": 0.005769230769230769,
+          "stdev": 0.004052729374707295,
+          "min": 0.004,
+          "max": 0.019,
+          "p50": 0.004,
+          "p95": 0.0155,
+          "p99": 0.01825,
+          "sum": 0.15,
+          "share_of_stage_sums": 0.032453483340545215
+        },
+        "assemble": {
+          "n": 26,
+          "unit": "ms",
+          "mean": 0.005115384615384615,
+          "stdev": 0.007716615439825536,
+          "min": 0.002,
+          "max": 0.033,
+          "p50": 0.002,
+          "p95": 0.02125,
+          "p99": 0.03025,
+          "sum": 0.133,
+          "share_of_stage_sums": 0.02877542189528343
+        }
+      },
+      "example_tags": {
+        "gpu_source": "unavailable",
+        "n_gpus": 0
+      }
+    }
+  },
+  "jsonl_lines": 70
+}
