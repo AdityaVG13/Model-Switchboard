@@ -1,0 +1,7 @@
+{
+  "metric": "swift test --filter HostMetricsPresentationTests",
+  "note": "Toolchain/presentation unit tests only \u2014 not a product SLO",
+  "wall_real_s": 2.37,
+  "tests_passed": 4,
+  "framework": "Swift Testing (XCTest filter matched 0; Swift Testing ran 4)"
+}

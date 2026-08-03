@@ -1,0 +1,114 @@
+{
+  "run_id": "20260803_remote-gateway-profiling",
+  "phase": "BASELINE",
+  "mode": "LOCAL-ONLY",
+  "captured_at_utc": "2026-08-03T18:17:31Z",
+  "agent_version": "1.1.2",
+  "N5_status_payload": {
+    "n": 50,
+    "mean": 4.8757167044095695,
+    "stdev": 14.902414504369704,
+    "min": 1.2178749893791974,
+    "max": 88.03612500196323,
+    "p50": 1.3577505014836788,
+    "p95": 25.829875309136572,
+    "p99": 67.64354999526395,
+    "provisional": false
+  },
+  "N20_status_payload": {
+    "n": 50,
+    "mean": 9.884668313898146,
+    "stdev": 20.612406330235547,
+    "min": 2.595416968688369,
+    "max": 91.70454100240022,
+    "p50": 2.8324579761829227,
+    "p95": 47.28764008905273,
+    "p99": 90.8076572540449,
+    "provisional": false
+  },
+  "N5_host_metrics_warm": {
+    "n": 50,
+    "mean": 0.0070950191002339125,
+    "stdev": 0.00046724002567336855,
+    "min": 0.006749993190169334,
+    "max": 0.00925001222640276,
+    "p50": 0.006916496204212308,
+    "p95": 0.007985220872797072,
+    "p99": 0.008882509428076444,
+    "provisional": false
+  },
+  "N20_host_metrics_warm": {
+    "n": 50,
+    "mean": 0.007379164453595877,
+    "stdev": 0.00047846210280192195,
+    "min": 0.006749993190169334,
+    "max": 0.00962504418566823,
+    "p50": 0.007333001121878624,
+    "p95": 0.008106566383503377,
+    "p99": 0.009175712475553153,
+    "provisional": false
+  },
+  "host_metrics_cold_ms": {
+    "N5": 2.2165420232340693,
+    "N20": 2.334958000574261
+  },
+  "samples": {
+    "N5": {
+      "statuses_len": 10,
+      "claims_len": 5,
+      "keys": [
+        "benchmark",
+        "controller_root",
+        "discovery",
+        "integrations",
+        "profiles_dir",
+        "statuses"
+      ]
+    },
+    "N20": {
+      "statuses_len": 25,
+      "claims_len": 5,
+      "keys": [
+        "benchmark",
+        "controller_root",
+        "discovery",
+        "integrations",
+        "profiles_dir",
+        "statuses"
+      ]
+    },
+    "host_metrics": {
+      "host": "Adityas-MacBook-Pro-5.local",
+      "cpu_percent": 10.9,
+      "gpu_source": "unavailable",
+      "gpus_len": 0
+    },
+    "N50": {
+      "statuses_len": 55,
+      "claims_len": 5,
+      "keys": [
+        "benchmark",
+        "controller_root",
+        "discovery",
+        "integrations",
+        "profiles_dir",
+        "statuses"
+      ]
+    }
+  },
+  "C.scaling_ratio_p95_N20_over_N5": 1.8307343540418135,
+  "N50_status_payload": {
+    "n": 30,
+    "mean": 24.068537507749472,
+    "stdev": 46.95907199208264,
+    "min": 5.332291999366134,
+    "max": 242.53075005253777,
+    "p50": 5.774250021204352,
+    "p95": 75.0178957940078,
+    "p99": 199.6412241063082,
+    "provisional": false
+  },
+  "C.scaling_ratio_p95_N50_over_N5": 2.9043073145410188,
+  "C.scaling_ratio_mean_N20_over_N5": 2.0273262195398907,
+  "C.scaling_ratio_mean_N50_over_N5": 4.9364101663211954
+}
