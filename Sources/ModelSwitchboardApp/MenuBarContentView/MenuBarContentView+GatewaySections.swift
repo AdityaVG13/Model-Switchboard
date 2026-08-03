@@ -16,10 +16,19 @@ extension MenuBarContentView {
                 .padding(.horizontal, 10)
                 .padding(.top, 4)
         }
+        // When This Mac has no local hero, the first remote ready model is
+        // featured in the ACTIVE ON … card — omit that same profile from the
+        // gateway list so it does not appear twice.
+        let featuredRemote = heroProfile == nil ? remoteActiveSummary : nil
         ForEach(hub.enabledRemoteRuntimes) { runtime in
+            let excludeProfile: String? = {
+                guard let featuredRemote, featuredRemote.name == runtime.name else { return nil }
+                return featuredRemote.profile.profile
+            }()
             RemoteGatewaySectionView(
                 runtime: runtime,
                 filter: profileFilter,
+                excludeProfileID: excludeProfile,
                 theme: theme,
                 accent: accent
             )
@@ -32,6 +41,8 @@ extension MenuBarContentView {
 struct RemoteGatewaySectionView: View {
     @Bindable var runtime: GatewayRuntime
     let filter: MenuBarContentView.ProfileFilter
+    /// Profile id already shown in the hero ACTIVE ON … card (if any).
+    var excludeProfileID: String? = nil
     let theme: DashboardTheme
     let accent: Color
 
@@ -39,15 +50,18 @@ struct RemoteGatewaySectionView: View {
 
     private var visibleProfiles: [ModelProfileStatus] {
         store.sortedStatuses.filter { status in
+            if let excludeProfileID, status.profile == excludeProfileID {
+                return false
+            }
             switch filter {
             case .all:
-                true
+                return true
             case .running:
-                MenuBarContentView.isDisplayedRunning(status, in: store) || store.isBusy(profile: status.profile)
+                return MenuBarContentView.isDisplayedRunning(status, in: store) || store.isBusy(profile: status.profile)
             case .mlx:
-                MenuBarContentView.runtimeKind(status) == .mlx
+                return MenuBarContentView.runtimeKind(status) == .mlx
             case .llamaCpp:
-                MenuBarContentView.runtimeKind(status) == .llamaCpp
+                return MenuBarContentView.runtimeKind(status) == .llamaCpp
             }
         }
     }
@@ -207,7 +221,8 @@ struct RemoteProfileRowView: View {
         guard isDisplayedRunning, profile.ready else { return nil }
         let servedModel = profile.serverIDs.first ?? profile.serverModelID
         guard let url = runtime.reachableEndpointURL(for: profile) else {
-            return "\(servedModel) · \(profile.host):\(profile.port) (remote-only)"
+            let why = runtime.config.kind == .ssh ? "not forwarded to this Mac" : "bound on host only"
+            return "\(servedModel) · \(profile.host):\(profile.port) (\(why))"
         }
         return "\(servedModel) · \(url)"
     }
@@ -228,10 +243,13 @@ struct RemoteProfileRowView: View {
         if let pending {
             parts.append(pending.lowercased() + "…")
         } else if let rssMB = profile.rssMB, isDisplayedRunning {
-            parts.append(String(format: "%.1f GB", rssMB / 1024))
+            // Process RSS only — not GPU VRAM. Unified-memory hosts still report
+            // host process RSS; do not present this as "model size on GPU".
+            parts.append(String(format: "%.1f GB RSS", rssMB / 1024))
         }
         if isDisplayedRunning, runtime.reachableEndpointURL(for: profile) == nil {
-            parts.append("remote-only")
+            // Endpoint is loopback-on-remote (or not forwarded yet). Not a model class.
+            parts.append(runtime.config.kind == .ssh ? "not forwarded" : "host-local bind")
         }
         return parts.joined(separator: " · ")
     }

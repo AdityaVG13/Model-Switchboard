@@ -87,3 +87,6 @@ refactor/artifacts/
 
 # Local profiling artifacts (profiling-software-performance skill)
 tests/artifacts/
+
+# Local session state for Mac↔spark ModelSwitchboard coordination (never commit)
+.ms-session/

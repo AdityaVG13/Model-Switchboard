@@ -90,7 +90,7 @@ extension MenuBarContentView {
 
     /// First remote gateway that currently shows a running/ready model, for the
     /// hero strip when This Mac is idle.
-    private var remoteActiveSummary: (name: String, profile: ModelProfileStatus)? {
+    var remoteActiveSummary: (name: String, profile: ModelProfileStatus)? {
         for runtime in hub.enabledRemoteRuntimes {
             if let status = runtime.store.sortedStatuses.first(where: {
                 MenuBarContentView.isDisplayedRunning($0, in: runtime.store)
