@@ -1612,7 +1612,7 @@ def _list_listening_tcp_uncached() -> list[dict[str, Any]]:
             return None
         # System / clearly non-model ports and this agent: no /proc|ps.
         # Do not cache a miss for skip ports -- same pid may need resolve later.
-        if port in SKIP_LISTEN_PORTS or (port == DEFAULT_PORT and pid == self_pid):
+        if port in SKIP_LISTEN_PORTS or pid == self_pid:
             return cmd_by_pid.get(pid)
         if pid not in cmd_by_pid:
             cmd_by_pid[pid] = process_command(pid)
@@ -2094,20 +2094,18 @@ def discover_live_model_endpoints(
     probes_left = DISCOVERY_PROBE_BUDGET
 
     self_pid = os.getpid()
+    agent_ports = {DEFAULT_PORT}
     for listener in (listeners if listeners is not None else list_listening_tcp()):
         port = int(listener["port"])
         if port in SKIP_LISTEN_PORTS:
             continue
         # Skip the agent itself: prefer pid (works without cmdline resolution).
         listener_pid = listener.get("pid")
-        if (
-            port == DEFAULT_PORT
-            and listener_pid is not None
-            and int(listener_pid) == self_pid
-        ):
+        if listener_pid is not None and int(listener_pid) == self_pid:
+            agent_ports.add(port)
             continue
         # Fallback when pid missing: cmdline name (if list_listening resolved it).
-        if port == DEFAULT_PORT and command_looks_like_model_server(
+        if port in agent_ports and command_looks_like_model_server(
             listener.get("command") or ""
         ) is False:
             command = (listener.get("command") or "").lower()
@@ -3570,18 +3568,25 @@ class AgentService:
         if time.monotonic() < self._watchdog_suppressed_until:
             return
         for name in list(self._supervised):
-            try:
-                profile = self.resolve_profile(name)
-            except AgentError:
-                self._supervised.discard(name)
-                continue
-            current = self.status(profile)
-            if current["ready"] or current["running"]:
-                continue
-            try:
-                self.start(name)
-            except AgentError:
-                pass
+            with self._mutation_lock:
+                # Re-check under the lock: a concurrent stop may have suppressed
+                # the watchdog and discarded supervision after our snapshot.
+                if time.monotonic() < self._watchdog_suppressed_until:
+                    return
+                if name not in self._supervised:
+                    continue
+                try:
+                    profile = self.resolve_profile(name)
+                except AgentError:
+                    self._supervised.discard(name)
+                    continue
+                current = self.status(profile)
+                if current["ready"] or current["running"]:
+                    continue
+                try:
+                    self.start(name)
+                except AgentError:
+                    pass
 
     def start_watchdog(self) -> None:
         def tick() -> None:
@@ -3606,6 +3611,11 @@ class AgentService:
             return None
 
     def _process_matches(self, pid: int, profile: Profile) -> bool:
+        # Never treat the agent process as a model server — profile PORT equal
+        # to the agent bind would otherwise match `serve --port N` and stop
+        # would SIGKILL the agent itself.
+        if pid == os.getpid():
+            return False
         command = (process_command(pid) or "").lower()
         if not command:
             return False
@@ -3675,7 +3685,8 @@ class AgentService:
         *,
         force: bool = False,
     ) -> None:
-        if primary_pid:
+        self_pid = os.getpid()
+        if primary_pid and primary_pid != self_pid:
             if process_is_zombie(primary_pid):
                 reap_child(primary_pid)
             else:
@@ -3685,7 +3696,12 @@ class AgentService:
         # `force` only strengthens the signal — never skips ownership matching
         # (Swift terminateProfileProcesses always requires processMatches).
         listener = listener_pid(profile.endpoint_port)
-        if listener and listener != primary_pid and self._process_matches(listener, profile):
+        if (
+            listener
+            and listener != primary_pid
+            and listener != self_pid
+            and self._process_matches(listener, profile)
+        ):
             if process_is_zombie(listener):
                 reap_child(listener)
             else:

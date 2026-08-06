@@ -2291,5 +2291,97 @@ class LifecycleSafetyTests(unittest.TestCase):
                 server.shutdown()
 
 
+    def test_process_matches_never_claims_agent_self(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_profile(
+                root,
+                "stub",
+                {
+                    "REQUEST_MODEL": "stub-model",
+                    "SERVER_MODEL_ID": "stub-model",
+                    "PORT": "8877",
+                    "START_COMMAND": "true",
+                    "HEALTHCHECK_MODE": "disabled",
+                },
+            )
+            harness = AgentHarness(root)
+            try:
+                profile = harness.service.profiles.profile("stub")
+                self_pid = os.getpid()
+                with unittest.mock.patch.object(
+                    agent,
+                    "process_command",
+                    return_value=f"python model_switchboard_agent.py serve --port 8877",
+                ):
+                    self.assertFalse(harness.service._process_matches(self_pid, profile))
+                killed: list[int] = []
+
+                def fake_terminate(pid: int, force: bool = False) -> None:
+                    killed.append(pid)
+
+                with (
+                    unittest.mock.patch.object(agent, "listener_pid", return_value=self_pid),
+                    unittest.mock.patch.object(
+                        harness.service, "_process_matches", return_value=True
+                    ),
+                    unittest.mock.patch.object(
+                        agent, "terminate_process_tree", side_effect=fake_terminate
+                    ),
+                    unittest.mock.patch.object(agent, "process_is_zombie", return_value=False),
+                ):
+                    harness.service._terminate_profile_processes(
+                        profile, primary_pid=self_pid, force=True
+                    )
+                self.assertEqual(killed, [])
+            finally:
+                harness.close()
+
+    def test_watchdog_respects_suppression_under_lock(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_profile(
+                root,
+                "stub",
+                {
+                    "REQUEST_MODEL": "stub-model",
+                    "SERVER_MODEL_ID": "stub-model",
+                    "PORT": str(free_port()),
+                    "START_COMMAND": "true",
+                    "HEALTHCHECK_MODE": "disabled",
+                },
+            )
+            harness = AgentHarness(root)
+            try:
+                harness.service._supervised.add("stub")
+                started: list[str] = []
+
+                def tracking_start(name: str) -> None:
+                    started.append(name)
+
+                harness.service.start = tracking_start  # type: ignore[method-assign]
+                with unittest.mock.patch.object(
+                    harness.service,
+                    "status",
+                    return_value={"ready": False, "running": False},
+                ):
+                    # Simulate stop racing the watchdog: suppress + discard after
+                    # the tick's initial gate would have passed.
+                    harness.service._watchdog_suppressed_until = 0
+                    original_list = list
+
+                    def racing_list(iterable):  # type: ignore[no-untyped-def]
+                        names = original_list(iterable)
+                        harness.service._suppress_watchdog()
+                        harness.service._supervised.discard("stub")
+                        return names
+
+                    with unittest.mock.patch("builtins.list", side_effect=racing_list):
+                        harness.service.watchdog_tick()
+                self.assertEqual(started, [])
+            finally:
+                harness.close()
+
+
 if __name__ == "__main__":
     unittest.main()

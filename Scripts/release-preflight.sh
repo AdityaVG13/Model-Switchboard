@@ -34,6 +34,8 @@ require_file ".github/workflows/release.yml"
 require_file "README.md"
 require_file "project.yml"
 require_file "CHANGELOG.md"
+require_file "RemoteAgent/model_switchboard_agent.py"
+require_file "RemoteAgent/install-remote-agent.sh"
 pass "required release files"
 
 require_executable "Scripts/build-app.sh"

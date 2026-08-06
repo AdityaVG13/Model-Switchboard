@@ -144,3 +144,18 @@ import Testing
     #expect(!GatewayConfig.isTailscaleCGNATAddress("10.0.0.9"))
     #expect(!GatewayConfig.isTailscaleCGNATAddress("spark.tail1234.ts.net"))
 }
+
+@Test func linkCodeRejectsOutOfRangePorts() {
+    #expect(GatewayLinkCode.parse(
+        "modelswitchboard-gateway://spark.local?agent_port=0"
+    ) == nil)
+    #expect(GatewayLinkCode.parse(
+        "modelswitchboard-gateway://spark.local?agent_port=999999"
+    ) == nil)
+    #expect(GatewayLinkCode.parse(
+        "modelswitchboard-gateway://spark.local:70000?agent_port=8877"
+    ) == nil)
+    #expect(GatewayLinkCode.parse(
+        "modelswitchboard-gateway://spark.local?agent_port=8877"
+    ) != nil)
+}

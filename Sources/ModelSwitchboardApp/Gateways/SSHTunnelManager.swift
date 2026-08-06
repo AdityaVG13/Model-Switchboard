@@ -57,8 +57,9 @@ actor SSHTunnelManager {
 
     nonisolated let gatewayID: String
     nonisolated let configuration: Configuration
-    /// Stable across restarts so the store's base URL never changes mid-session.
-    nonisolated let localPort: UInt16
+    /// Sticky local agent forward port. May be reassigned if the previous
+    /// ephemeral bind is stolen before ssh starts (Address already in use).
+    nonisolated(unsafe) private(set) var localPort: UInt16
     /// Per-instance control socket leaf name. Must not be keyed only by gateway
     /// id: teardown is fire-and-forget, and a replacement manager for the same
     /// gateway would otherwise race ControlMaster on the old path.
@@ -66,6 +67,7 @@ actor SSHTunnelManager {
 
     private let executableURL: URL
     private let onStateChange: @Sendable (UUID, State) async -> Void
+    private let onLocalPortChange: @Sendable (UUID, UInt16) async -> Void
     private(set) var state: State = .idle
     private(set) var activeForwards: Set<Int> = []
 
@@ -82,12 +84,14 @@ actor SSHTunnelManager {
         gatewayID: String,
         configuration: Configuration,
         executableURL: URL = URL(fileURLWithPath: "/usr/bin/ssh"),
-        onStateChange: @escaping @Sendable (UUID, State) async -> Void = { _, _ in }
+        onStateChange: @escaping @Sendable (UUID, State) async -> Void = { _, _ in },
+        onLocalPortChange: @escaping @Sendable (UUID, UInt16) async -> Void = { _, _ in }
     ) {
         self.gatewayID = gatewayID
         self.configuration = configuration
         self.executableURL = executableURL
         self.onStateChange = onStateChange
+        self.onLocalPortChange = onLocalPortChange
         // Stable identity so Hub can ignore stale callbacks after a rebuild
         // replaces this tunnel while the old stop() is still finishing.
         self.instanceID = UUID()
@@ -139,6 +143,7 @@ actor SSHTunnelManager {
 
     /// Runs one ssh process to termination. Returns the user-facing failure text.
     private func runTunnelOnce() async -> String {
+        await reallocateLocalPortIfTaken()
         stderrTail = []
         let process = Process()
         process.executableURL = executableURL
@@ -189,7 +194,22 @@ actor SSHTunnelManager {
         }
         self.process = nil
         activeForwards = []
-        return Self.classifyFailure(stderrLines: stderrTail)
+        let failure = Self.classifyFailure(stderrLines: stderrTail)
+        if Self.looksLikeLocalPortInUse(stderrLines: stderrTail) {
+            await reallocateLocalPortIfTaken(force: true)
+        }
+        return failure
+    }
+
+    /// If our sticky local port was stolen after allocateLoopbackPort closed the
+    /// probe socket, pick a new free port and notify the hub so the store URL
+    /// stays aligned.
+    private func reallocateLocalPortIfTaken(force: Bool = false) async {
+        if !force, Self.isLoopbackPortFree(localPort) { return }
+        let newPort = Self.allocateLoopbackPort()
+        guard newPort != 0, newPort != localPort else { return }
+        localPort = newPort
+        await onLocalPortChange(instanceID, newPort)
     }
 
     /// The `-L` listener only opens after authentication succeeds. Require both
@@ -366,6 +386,31 @@ actor SSHTunnelManager {
             }
         }
         return result == 0
+    }
+
+    /// True when nothing is currently bound to `127.0.0.1:port`.
+    static func isLoopbackPortFree(_ port: UInt16) -> Bool {
+        guard port != 0 else { return false }
+        let socketFD = socket(AF_INET, SOCK_STREAM, 0)
+        guard socketFD >= 0 else { return false }
+        defer { close(socketFD) }
+        var address = sockaddr_in()
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = port.bigEndian
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        let bindResult = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                bind(socketFD, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        return bindResult == 0
+    }
+
+    static func looksLikeLocalPortInUse(stderrLines: [String]) -> Bool {
+        let joined = stderrLines.joined(separator: "\n").lowercased()
+        return joined.contains("address already in use")
+            || joined.contains("bind: address already in use")
+            || joined.contains("cannot bind")
     }
 
     static func backoffDelay(afterFailures failures: Int, jitter: Double = .random(in: 0.8...1.2)) -> TimeInterval {

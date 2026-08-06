@@ -207,6 +207,13 @@ final class GatewayHub {
                         tunnelID: tunnelID,
                         state: state
                     )
+                },
+                onLocalPortChange: { tunnelID, port in
+                    await hubReference.value?.tunnelLocalPortChanged(
+                        gatewayID: config.id,
+                        tunnelID: tunnelID,
+                        localPort: port
+                    )
                 }
             )
             let store = remoteStoreFactory(config, tunnel.localBaseURL, token)
@@ -260,18 +267,37 @@ final class GatewayHub {
         }
     }
 
+    func tunnelLocalPortChanged(gatewayID: String, tunnelID: UUID, localPort: UInt16) {
+        guard let runtime = remoteRuntimes.first(where: { $0.id == gatewayID }) else { return }
+        guard let current = runtime.tunnel, current.instanceID == tunnelID else { return }
+        let baseURL = "http://127.0.0.1:\(localPort)"
+        guard runtime.store.controllerBaseURL != baseURL else { return }
+        runtime.store.controllerBaseURL = baseURL
+        Task { await runtime.store.refresh() }
+    }
+
     private func startForwardSync(for runtime: GatewayRuntime) {
         runtime.forwardSyncTask?.cancel()
         guard let tunnel = runtime.tunnel else { return }
+        let tunnelID = tunnel.instanceID
         runtime.forwardSyncTask = Task { [weak runtime] in
             while !Task.isCancelled {
                 guard let runtime else { return }
+                guard runtime.tunnel?.instanceID == tunnelID,
+                      runtime.tunnelState == .established
+                else { return }
                 let runningPorts = Set(
                     runtime.store.statuses
                         .filter { $0.running || $0.ready }
                         .compactMap { Int($0.port) }
                 )
                 let forwarded = await tunnel.syncForwards(remotePorts: runningPorts)
+                // A cancelled / replaced tunnel must not repopulate forwardedPorts
+                // with stale specs (Copy Endpoint would lie).
+                guard !Task.isCancelled else { return }
+                guard runtime.tunnel?.instanceID == tunnelID,
+                      runtime.tunnelState == .established
+                else { return }
                 if runtime.forwardedPorts != forwarded {
                     runtime.forwardedPorts = forwarded
                 }
@@ -346,6 +372,9 @@ final class GatewayHub {
         sessionConfiguration.timeoutIntervalForRequest = 5
         sessionConfiguration.timeoutIntervalForResource = 15
         sessionConfiguration.waitsForConnectivity = false
+        // Bypass system HTTP(S) proxies so tunnel loopback / Tailscale direct
+        // agent traffic cannot be diverted off-box.
+        sessionConfiguration.connectionProxyDictionary = [:]
         let session = URLSession(configuration: sessionConfiguration)
         return SwitchboardStore(
             controllerBaseURL: baseURL,

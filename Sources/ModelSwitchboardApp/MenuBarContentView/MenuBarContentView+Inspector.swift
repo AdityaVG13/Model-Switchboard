@@ -86,6 +86,8 @@ extension MenuBarContentView {
                 theme: theme,
                 accent: accent,
                 runBenchmark: {
+                    // Footer CTA is scoped to This Mac — remote suites are started
+                    // from each gateway's row/hero actions, not this inspector button.
                     Task { await store.quickBenchmark() }
                 }
             )

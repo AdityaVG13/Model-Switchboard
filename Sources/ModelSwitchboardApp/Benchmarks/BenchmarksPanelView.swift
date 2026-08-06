@@ -290,9 +290,9 @@ struct BenchmarksPanelView: View {
     private var runButtonTitle: String {
         if benchmark?.running == true { return "Benchmark Running\u{2026}" }
         if let suite = benchmark?.latest?.suite, !suite.isEmpty {
-            return "Run Suite: \(BenchmarkMetricFormatting.suiteLabel(suite).lowercased())"
+            return "Run Suite on This Mac: \(BenchmarkMetricFormatting.suiteLabel(suite).lowercased())"
         }
-        return "Run Benchmark"
+        return "Run Benchmark on This Mac"
     }
 
     private var benchmarkCooldownLabel: String? {

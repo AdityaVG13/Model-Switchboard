@@ -134,6 +134,9 @@ public enum GatewayLinkCode {
         }
         let name = value("name").flatMap { $0.isEmpty ? nil : $0 } ?? host
         let agentPort = value("agent_port").flatMap(Int.init) ?? 8877
+        guard (1...65535).contains(agentPort) else { return nil }
+        let sshPort = components.port ?? 22
+        guard (1...65535).contains(sshPort) else { return nil }
         if value("mode")?.lowercased() == "direct" {
             return GatewayConfig(
                 name: name,
@@ -147,7 +150,7 @@ public enum GatewayLinkCode {
             kind: .ssh,
             sshUser: components.user ?? "",
             sshHost: host,
-            sshPort: components.port ?? 22,
+            sshPort: sshPort,
             remotePort: agentPort
         )
     }
