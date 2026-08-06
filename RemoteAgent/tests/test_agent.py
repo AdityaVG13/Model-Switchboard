@@ -2242,5 +2242,54 @@ class LifecycleSafetyTests(unittest.TestCase):
                 harness.close()
 
 
+    def test_health_probe_ignores_http_proxy_env(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            class OkHandler(http.server.BaseHTTPRequestHandler):
+                def do_GET(self) -> None:  # noqa: N802
+                    self.send_response(200)
+                    self.end_headers()
+                    self.wfile.write(b"ok")
+
+                def log_message(self, format: str, *args: object) -> None:  # noqa: A003
+                    return
+
+            server = http.server.HTTPServer(("127.0.0.1", 0), OkHandler)
+            port = server.server_address[1]
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                write_profile(
+                    root,
+                    "stub",
+                    {
+                        "REQUEST_MODEL": "stub-model",
+                        "SERVER_MODEL_ID": "stub-model",
+                        "PORT": str(port),
+                        "HEALTHCHECK_MODE": "http-200",
+                        "HEALTHCHECK_URL": f"http://127.0.0.1:{port}/health",
+                        "START_COMMAND": "true",
+                    },
+                )
+                harness = AgentHarness(root)
+                try:
+                    profile = harness.service.profiles.profile("stub")
+                    old_proxy = os.environ.get("HTTP_PROXY")
+                    os.environ["HTTP_PROXY"] = "http://127.0.0.1:9"
+                    try:
+                        ready, _ = harness.service._probe_health(profile)
+                    finally:
+                        if old_proxy is None:
+                            os.environ.pop("HTTP_PROXY", None)
+                        else:
+                            os.environ["HTTP_PROXY"] = old_proxy
+                    self.assertTrue(ready)
+                finally:
+                    harness.close()
+            finally:
+                server.shutdown()
+
+
 if __name__ == "__main__":
     unittest.main()

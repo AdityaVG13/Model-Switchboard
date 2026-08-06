@@ -244,7 +244,12 @@ class _NoHTTPRedirectHandler(urllib.request.HTTPRedirectHandler):
 
 
 def _urlopen_no_redirect(request: urllib.request.Request, timeout: float):
-    opener = urllib.request.build_opener(_NoHTTPRedirectHandler())
+    # Empty ProxyHandler so HTTP(S)_PROXY cannot pull loopback health/discovery
+    # (or benchmark prompts) off-box on corp GPU hosts.
+    opener = urllib.request.build_opener(
+        _NoHTTPRedirectHandler(),
+        urllib.request.ProxyHandler({}),
+    )
     return opener.open(request, timeout=timeout)
 
 
