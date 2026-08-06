@@ -149,11 +149,15 @@ private func waitFor(
 }
 
 @Test func tunnelBecomesEstablishedWhenForwardPortListens() async throws {
-    // A stand-in for ssh: parse the -L spec and listen on the local port,
-    // exactly like a real tunnel after successful auth.
+    // Stand-in for ssh: listen on the -L local port (post-auth tunnel), and
+    // succeed ControlMaster `-O check` so establish cannot TOCTOU on a squatter.
     let fakeSSH = try writeExecutable(
         """
         #!/bin/bash
+        if printf '%s' "$*" | grep -q -- '-O'; then
+          if printf '%s' "$*" | grep -q check; then exit 0; fi
+          exit 0
+        fi
         SPEC=""
         while [ $# -gt 0 ]; do
           case "$1" in

@@ -236,6 +236,18 @@ def is_loopback(host: str) -> bool:
     return host.strip().strip("[]").lower() in LOOPBACK_HOSTS
 
 
+class _NoHTTPRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Refuse redirects so loopback-only health/discovery cannot SSRF off-box."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[override]
+        return None
+
+
+def _urlopen_no_redirect(request: urllib.request.Request, timeout: float):
+    opener = urllib.request.build_opener(_NoHTTPRedirectHandler())
+    return opener.open(request, timeout=timeout)
+
+
 def is_tailscale_ip(address: str) -> bool:
     """Tailscale assigns IPv4 from the CGNAT range 100.64.0.0/10."""
     parts = address.split(".")
@@ -1790,7 +1802,7 @@ def probe_model_endpoint(port: int, host: str = "127.0.0.1") -> dict[str, Any]:
     for url in health_urls:
         try:
             request = urllib.request.Request(url, headers={"Accept": "application/json"})
-            with urllib.request.urlopen(request, timeout=DISCOVERY_PROBE_TIMEOUT) as response:
+            with _urlopen_no_redirect(request, DISCOVERY_PROBE_TIMEOUT) as response:
                 if 200 <= response.status < 300:
                     result["health_ok"] = True
                     break
@@ -1800,7 +1812,7 @@ def probe_model_endpoint(port: int, host: str = "127.0.0.1") -> dict[str, Any]:
     models_url = f"http://{host}:{port}/v1/models"
     try:
         request = urllib.request.Request(models_url, headers={"Accept": "application/json"})
-        with urllib.request.urlopen(request, timeout=DISCOVERY_PROBE_TIMEOUT) as response:
+        with _urlopen_no_redirect(request, DISCOVERY_PROBE_TIMEOUT) as response:
             body = response.read()
         parsed = json.loads(body)
         entries = parsed.get("data", []) if isinstance(parsed, dict) else []
@@ -2178,21 +2190,9 @@ def status_dict_from_discovery(
     pid = item.get("pid")
     if pid is None and listeners is not None:
         pid = listener_pid_from_inventory(port, listeners)
-    if pid:
-        alive = process_is_alive(pid)
-    elif ready:
-        if listeners is not None:
-            alive = port_listening_from_inventory(port, listeners)
-        else:
-            alive = port_is_listening(port)
-    else:
-        alive = False
-    if ready and not pid:
-        if listeners is None:
-            # Live path only when no shared inventory (avoid N× lsof on status).
-            pid = listener_pid(port)
-            alive = process_is_alive(pid) if pid else ready
-        # With inventory: port known listening without pid still counts ready below.
+    # Ownership only — ready listeners without an attributed pid stay
+    # ready=true / running=false (same contract as profile status()).
+    alive = bool(pid) and process_is_alive(pid)
 
     request_model = item.get("request_model") or item.get("model_hint") or f"port-{port}"
     if isinstance(request_model, str) and request_model and not item.get("request_model"):
@@ -2200,11 +2200,11 @@ def status_dict_from_discovery(
         pass
     display = item.get("display_name") or Path(str(request_model)).name or f"Port {port}"
     name = profile_name or f"discovered-{port}"
+    # Mirror profile status(): ready can be visible without claiming ownership.
+    # Do not force running=True / pid attribution for unmatched ready listeners.
     state = process_lifecycle_state(pid if alive else None, ready=ready and alive)
     if ready and not alive:
-        # Health answered; treat as ready even if we could not attribute a pid.
         state = "ready"
-        alive = True
 
     return {
         "profile": name,
@@ -3220,7 +3220,7 @@ class AgentService:
         )
         started = time.perf_counter()
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:
+            with _urlopen_no_redirect(request, 30) as response:
                 raw = response.read()
             elapsed_s = max(time.perf_counter() - started, 1e-6)
             payload = json.loads(raw.decode("utf-8"))
@@ -3389,20 +3389,28 @@ class AgentService:
             self._suppress_watchdog()
             profile = self.resolve_profile(name)
             canonical = profile.name
+            was_supervised = canonical in self._supervised
             self._supervised.discard(canonical)
             self._clear_active_profile(if_matching=canonical)
             current = self.status(profile)
             primary_pid = current.get("pid")
-            # Never terminate an unmatched primary — status() may still report
-            # ready for a foreign listener without owning its pid.
+            # Pid-file children we started this session are trusted even without
+            # cmdline match. Leftover pid files from prior boots must look like
+            # a model server — never killpg a reused unrelated PID.
             if primary_pid and not self._process_matches(primary_pid, profile):
-                # Pid-file child we started should match; if it does not, prefer
-                # the pid-file value only when it is still our recorded child.
                 owned = self._read_pid(canonical)
-                if owned and owned == primary_pid and process_is_alive(owned):
+                if (
+                    owned
+                    and owned == primary_pid
+                    and process_is_alive(owned)
+                    and (
+                        was_supervised
+                        or command_looks_like_model_server(process_command(owned) or "")
+                    )
+                ):
                     pass
                 else:
-                    primary_pid = owned if (owned and process_is_alive(owned)) else None
+                    primary_pid = None
             stop_error: Exception | None = None
 
             stop_command = (profile.get("STOP_COMMAND") or "").strip()
@@ -3464,15 +3472,13 @@ class AgentService:
             loaded[profile.name] = profile
             self.profiles.ensure_unique(profile.name, "activate", loaded)
             # Mirror macOS controller: exclusive switch only stops managed
-            # profiles / session-supervised claims — never discovered listeners
-            # (those are foreign model servers we merely observe).
+            # profiles / session-supervised claims — never discovered listeners.
             managed_names = set(loaded.keys()) | set(self._supervised)
             for item in self.status_payload()["statuses"]:
                 other = item["profile"]
                 if other == canonical or not item["running"]:
                     continue
-                source = item.get("discovery_source")
-                if source == "profile" or other in managed_names:
+                if other in managed_names:
                     self.stop(other)
             self.start(canonical)
             self.configuration.run_directory.mkdir(parents=True, exist_ok=True)
@@ -3498,10 +3504,13 @@ class AgentService:
                     self.stop(name, force=force)
                 except ProfileNotFoundError:
                     # Durable pid file from a prior claim/session with no live
-                    # profile/claim to resolve — still reap the recorded pid.
+                    # profile/claim to resolve — only reap if cmdline still looks
+                    # like a model server (guards against PID reuse after reboot).
                     orphan = self._read_pid(name)
                     if orphan and process_is_alive(orphan):
-                        terminate_process_tree(orphan, force=force)
+                        cmd = process_command(orphan) or ""
+                        if command_looks_like_model_server(cmd):
+                            terminate_process_tree(orphan, force=force)
                     self._pid_file(name).unlink(missing_ok=True)
                 except AgentError as error:
                     failures.append(f"{name}: {error.message}")
@@ -3635,7 +3644,7 @@ class AgentService:
             return False, []
         request = urllib.request.Request(url, headers={"Accept": "application/json"})
         try:
-            with urllib.request.urlopen(request, timeout=HEALTH_TIMEOUT_SECONDS) as response:
+            with _urlopen_no_redirect(request, HEALTH_TIMEOUT_SECONDS) as response:
                 body = response.read()
         except (urllib.error.URLError, OSError, ValueError):
             return False, []

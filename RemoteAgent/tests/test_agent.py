@@ -7,6 +7,7 @@ Stdlib-only (unittest), mirroring Scripts/tests style. Includes:
 """
 
 import http.client
+import http.server
 import importlib.util
 import json
 import os
@@ -2168,6 +2169,77 @@ class LifecycleSafetyTests(unittest.TestCase):
             ports = {int(item["port"]) for item in found}
             self.assertIn(9999, ports)
             self.assertNotIn(22, ports)
+
+
+    def test_health_probe_does_not_follow_offbox_redirect(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            class RedirectHandler(http.server.BaseHTTPRequestHandler):
+                def do_GET(self) -> None:  # noqa: N802
+                    self.send_response(302)
+                    self.send_header("Location", "http://example.com/secret")
+                    self.end_headers()
+
+                def log_message(self, format: str, *args: object) -> None:  # noqa: A003
+                    return
+
+            redirector = http.server.HTTPServer(("127.0.0.1", 0), RedirectHandler)
+            port = redirector.server_address[1]
+            thread = threading.Thread(target=redirector.serve_forever, daemon=True)
+            thread.start()
+            try:
+                write_profile(
+                    root,
+                    "stub",
+                    {
+                        "REQUEST_MODEL": "stub-model",
+                        "SERVER_MODEL_ID": "stub-model",
+                        "PORT": str(port),
+                        "HEALTHCHECK_MODE": "http-200",
+                        "HEALTHCHECK_URL": f"http://127.0.0.1:{port}/health",
+                        "START_COMMAND": "true",
+                    },
+                )
+                harness = AgentHarness(root)
+                try:
+                    profile = harness.service.profiles.profile("stub")
+                    ready, _ = harness.service._probe_health(profile)
+                    self.assertFalse(ready)
+                finally:
+                    harness.close()
+            finally:
+                redirector.shutdown()
+
+    def test_stale_pid_file_without_model_cmdline_is_not_killed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_profile(
+                root,
+                "stub",
+                {
+                    "REQUEST_MODEL": "stub-model",
+                    "SERVER_MODEL_ID": "stub-model",
+                    "PORT": str(free_port()),
+                    "START_COMMAND": "true",
+                    "HEALTHCHECK_MODE": "disabled",
+                },
+            )
+            harness = AgentHarness(root)
+            try:
+                victim = subprocess.Popen(["sleep", "30"])
+                run_dir = harness.service.configuration.run_directory
+                run_dir.mkdir(parents=True, exist_ok=True)
+                (run_dir / "stub.pid").write_text(f"{victim.pid}\n", encoding="utf-8")
+                with unittest.mock.patch.object(
+                    harness.service, "_process_matches", return_value=False
+                ):
+                    harness.service.stop("stub", force=True)
+                self.assertIsNone(victim.poll(), "stale reused pid must not be killed")
+                victim.terminate()
+                victim.wait(timeout=2)
+            finally:
+                harness.close()
 
 
 if __name__ == "__main__":
