@@ -3647,8 +3647,11 @@ class AgentService:
                     return True
             if re.search(rf"(?<!\d):{re.escape(port)}(?!\d)", command):
                 return True
-        return command_looks_like_model_server(command) and port_is_listening(port)
-            and (listener_pid(port) == pid)
+        return (
+            command_looks_like_model_server(command)
+            and port_is_listening(port)
+            and listener_pid(port) == pid
+        )
 
     def _probe_health(self, profile: Profile) -> tuple[bool, list[str]]:
         if profile.healthcheck_mode == "disabled":
