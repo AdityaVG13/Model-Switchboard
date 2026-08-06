@@ -22,7 +22,7 @@ extension MenuBarContentView {
         let featuredRemote = heroProfile == nil ? remoteActiveSummary : nil
         ForEach(hub.enabledRemoteRuntimes) { runtime in
             let excludeProfile: String? = {
-                guard let featuredRemote, featuredRemote.name == runtime.name else { return nil }
+                guard let featuredRemote, featuredRemote.gatewayID == runtime.id else { return nil }
                 return featuredRemote.profile.profile
             }()
             RemoteGatewaySectionView(

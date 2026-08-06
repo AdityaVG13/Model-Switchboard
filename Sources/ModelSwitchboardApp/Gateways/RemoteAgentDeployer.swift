@@ -8,6 +8,8 @@ import OSLog
 actor RemoteAgentDeployer {
     struct Result: Sendable, Equatable {
         let pairingLink: String?
+        /// Bearer token printed by the Tailscale installer (empty for unauthenticated installs).
+        let authToken: String?
         let log: String
     }
 
@@ -75,7 +77,36 @@ actor RemoteAgentDeployer {
             .split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .first { $0.hasPrefix("\(GatewayLinkCode.scheme)://") }
-        return Result(pairingLink: pairingLink, log: output)
+        let authToken = Self.extractAuthToken(from: output)
+        return Result(pairingLink: pairingLink, authToken: authToken, log: output)
+    }
+
+    /// Prefer a machine-readable `AUTH_TOKEN=` line; fall back to the human
+    /// "Paste this bearer token" block the installer prints for Tailscale.
+    nonisolated static func extractAuthToken(from output: String) -> String? {
+        let lines = output.split(whereSeparator: \.isNewline).map {
+            $0.trimmingCharacters(in: .whitespaces)
+        }
+        for line in lines {
+            if line.hasPrefix("AUTH_TOKEN="), line.count > "AUTH_TOKEN=".count {
+                let value = String(line.dropFirst("AUTH_TOKEN=".count))
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if !value.isEmpty { return value }
+            }
+        }
+        if let hintIndex = lines.firstIndex(where: {
+            $0.localizedCaseInsensitiveContains("Paste this bearer token")
+        }) {
+            for line in lines.dropFirst(hintIndex + 1) {
+                if line.isEmpty { continue }
+                if line.hasPrefix("[") { break }
+                if line.hasPrefix("Token file:") { break }
+                if line.hasPrefix("modelswitchboard-gateway://") { continue }
+                let candidate = line.trimmingCharacters(in: CharacterSet(charactersIn: "` "))
+                if candidate.count >= 16 { return candidate }
+            }
+        }
+        return nil
     }
 
     private func runSSH(

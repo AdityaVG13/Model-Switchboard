@@ -1916,5 +1916,170 @@ class DiscoveryTests(unittest.TestCase):
         self.assertTrue(status["log_path"])
 
 
+class LifecycleSafetyTests(unittest.TestCase):
+    def test_switch_does_not_stop_discovered_listeners(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_profile(
+                root,
+                "managed",
+                {
+                    "REQUEST_MODEL": "managed-model",
+                    "SERVER_MODEL_ID": "managed-model",
+                    "PORT": str(free_port()),
+                    "START_COMMAND": f"exec {sys.executable} -c \"import time; time.sleep(30)\"",
+                    "HEALTHCHECK_MODE": "disabled",
+                },
+            )
+            harness = AgentHarness(root)
+            try:
+                stopped: list[str] = []
+                original_stop = harness.service.stop
+
+                def tracking_stop(name: str, force: bool = False) -> None:
+                    stopped.append(name)
+                    original_stop(name, force=force)
+
+                harness.service.stop = tracking_stop  # type: ignore[method-assign]
+                with unittest.mock.patch.object(
+                    harness.service,
+                    "status_payload",
+                    return_value={
+                        "statuses": [
+                            {
+                                "profile": "managed",
+                                "running": False,
+                                "discovery_source": "profile",
+                            },
+                            {
+                                "profile": "discovered-11434",
+                                "running": True,
+                                "discovery_source": "discovered",
+                            },
+                        ]
+                    },
+                ):
+                    with unittest.mock.patch.object(harness.service, "start"):
+                        harness.service.switch_profile("managed")
+                self.assertNotIn("discovered-11434", stopped)
+            finally:
+                harness.close()
+
+    def test_force_stop_requires_process_match_for_listeners(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            port = free_port()
+            write_profile(
+                root,
+                "stub",
+                {
+                    "REQUEST_MODEL": "stub-model",
+                    "SERVER_MODEL_ID": "stub-model",
+                    "PORT": str(port),
+                    "START_COMMAND": "true",
+                    "HEALTHCHECK_MODE": "disabled",
+                },
+            )
+            harness = AgentHarness(root)
+            try:
+                profile = harness.service.profiles.profile("stub")
+                killed: list[int] = []
+
+                def fake_terminate(pid: int, force: bool = False) -> None:
+                    killed.append(pid)
+
+                with (
+                    unittest.mock.patch.object(agent, "listener_pid", return_value=666),
+                    unittest.mock.patch.object(
+                        harness.service, "_process_matches", return_value=False
+                    ),
+                    unittest.mock.patch.object(
+                        agent, "terminate_process_tree", side_effect=fake_terminate
+                    ),
+                    unittest.mock.patch.object(agent, "process_is_zombie", return_value=False),
+                ):
+                    harness.service._terminate_profile_processes(
+                        profile, primary_pid=None, force=True
+                    )
+                self.assertEqual(killed, [])
+            finally:
+                harness.close()
+
+    def test_double_start_is_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            port = free_port()
+            write_profile(
+                root,
+                "stub",
+                {
+                    "REQUEST_MODEL": "stub-model",
+                    "SERVER_MODEL_ID": "stub-model",
+                    "PORT": str(port),
+                    "START_COMMAND": (
+                        f"exec {sys.executable} -c "
+                        f"\"import time; time.sleep(60)\""
+                    ),
+                    "HEALTHCHECK_MODE": "disabled",
+                },
+            )
+            harness = AgentHarness(root)
+            try:
+                harness.service.start("stub")
+                first_pid = harness.service._read_pid("stub")
+                self.assertIsNotNone(first_pid)
+                harness.service.start("stub")
+                second_pid = harness.service._read_pid("stub")
+                self.assertEqual(first_pid, second_pid)
+                self.assertTrue(agent.process_is_alive(first_pid))
+            finally:
+                try:
+                    harness.service.stop_all(force=True)
+                except agent.AgentError:
+                    pass
+                harness.close()
+
+    def test_process_matches_port_is_token_safe(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_profile(
+                root,
+                "stub",
+                {
+                    "REQUEST_MODEL": "stub-model",
+                    "SERVER_MODEL_ID": "stub-model",
+                    "PORT": "80",
+                    "START_COMMAND": "true",
+                    "HEALTHCHECK_MODE": "disabled",
+                },
+            )
+            harness = AgentHarness(root)
+            try:
+                profile = harness.service.profiles.profile("stub")
+                with unittest.mock.patch.object(
+                    agent, "process_command", return_value="python -m vllm --port 8080"
+                ):
+                    self.assertFalse(harness.service._process_matches(1, profile))
+                with unittest.mock.patch.object(
+                    agent, "process_command", return_value="python -m vllm --port 80"
+                ):
+                    self.assertTrue(harness.service._process_matches(1, profile))
+            finally:
+                harness.close()
+
+    def test_claim_ignores_mismatched_flags_port(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            claim = root / "claims" / "9999"
+            claim.mkdir(parents=True)
+            (claim / "flags.env").write_text("PORT=22\nMODEL=demo\n", encoding="utf-8")
+            (claim / "launch.sh").write_text("#!/bin/sh\necho hi\n", encoding="utf-8")
+            (claim / "launch.sh").chmod(0o755)
+            found = agent.scan_port_claim_directories(roots=[root / "claims"], max_depth=2)
+            ports = {int(item["port"]) for item in found}
+            self.assertIn(9999, ports)
+            self.assertNotIn(22, ports)
+
+
 if __name__ == "__main__":
     unittest.main()

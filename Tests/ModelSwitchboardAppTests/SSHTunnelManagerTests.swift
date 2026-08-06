@@ -134,7 +134,7 @@ private func waitFor(
         gatewayID: "gw-denied",
         configuration: .init(destination: "gpuadmin@spark"),
         executableURL: fakeSSH,
-        onStateChange: { state in await recorder.record(state) }
+        onStateChange: { _, state in await recorder.record(state) }
     )
 
     await manager.start()
@@ -178,7 +178,7 @@ private func waitFor(
         gatewayID: "gw-up",
         configuration: .init(destination: "gpuadmin@spark"),
         executableURL: fakeSSH,
-        onStateChange: { state in await recorder.record(state) }
+        onStateChange: { _, state in await recorder.record(state) }
     )
 
     await manager.start()

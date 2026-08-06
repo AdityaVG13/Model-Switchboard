@@ -57,11 +57,9 @@ extension MenuBarContentView {
             }
 
             if features.supportsBenchmarks {
-                if hub.hasRemoteGateways, let remoteUtil = primaryRemoteUtilization {
-                    remoteUtilizationGrid(remoteUtil)
-                } else {
-                    utilizationGrid
-                }
+                // Always keep This Mac utilization visible; remote host metrics
+                // live in gateway section chips / Remote Hosts, not here.
+                utilizationGrid
             }
 
             DashboardSegmentedTabs(
@@ -120,69 +118,6 @@ extension MenuBarContentView {
                     ? "GPU percentage unavailable on this macOS API path."
                     : "")
         )
-    }
-
-
-    /// First enabled remote with a live host-metrics snapshot (SparkDash path).
-    var primaryRemoteUtilization: (name: String, metrics: HostMetricsPayload)? {
-        for runtime in hub.enabledRemoteRuntimes {
-            if let metrics = hostMetricsMonitor.entry(forGatewayID: runtime.id).metrics {
-                return (runtime.name, metrics)
-            }
-        }
-        return nil
-    }
-
-    func remoteUtilizationGrid(_ remote: (name: String, metrics: HostMetricsPayload)) -> some View {
-        let metrics = remote.metrics
-        return VStack(alignment: .leading, spacing: 4) {
-            Text("HOST · \(remote.name.uppercased())")
-                .font(.system(size: 9, weight: .semibold))
-                .kerning(0.5)
-                .foregroundStyle(theme.faint)
-            HStack(spacing: 6) {
-                utilizationCell(
-                    label: "CPU",
-                    value: metrics.cpuPercent,
-                    history: [],
-                    helpText: "Remote host CPU from agent /api/host/metrics"
-                )
-                utilizationCell(
-                    label: "RAM",
-                    value: metrics.memory?.percent,
-                    history: [],
-                    helpText: {
-                        if let used = metrics.memory?.usedMB, let total = metrics.memory?.totalMB {
-                            return String(format: "Remote RAM %.0f/%.0f GB", used / 1024, total / 1024)
-                        }
-                        return "Remote host RAM from agent /api/host/metrics"
-                    }()
-                )
-                utilizationCell(
-                    label: "GPU",
-                    value: HostMetricsPresentation.hostGPUUtilPercent(metrics),
-                    history: [],
-                    helpText: {
-                        var parts = ["Remote GPU util from nvidia-smi"]
-                        if let temp = HostMetricsPresentation.hostGPUTempC(metrics) {
-                            parts.append(String(format: "%.0f°C", temp))
-                        }
-                        if let name = HostMetricsPresentation.primaryGPU(metrics)?.name {
-                            parts.append(name)
-                        }
-                        return parts.joined(separator: " · ")
-                    }()
-                )
-                utilizationCell(
-                    label: "VRAM",
-                    value: HostMetricsPresentation.hostVRAMPercent(metrics),
-                    history: [],
-                    helpText: HostMetricsPresentation.hostVRAMUsedTotalLabel(metrics).map {
-                        "Remote VRAM used/total (not process RSS): \($0)"
-                    } ?? "Remote VRAM from nvidia-smi"
-                )
-            }
-        }
     }
 
 }

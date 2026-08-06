@@ -201,8 +201,12 @@ final class GatewayHub {
                 gatewayID: config.id,
                 configuration: .init(config: config),
                 executableURL: sshExecutableURL,
-                onStateChange: { state in
-                    await hubReference.value?.tunnelStateChanged(gatewayID: config.id, state: state)
+                onStateChange: { tunnelID, state in
+                    await hubReference.value?.tunnelStateChanged(
+                        gatewayID: config.id,
+                        tunnelID: tunnelID,
+                        state: state
+                    )
                 }
             )
             let store = remoteStoreFactory(config, tunnel.localBaseURL, token)
@@ -219,14 +223,24 @@ final class GatewayHub {
         if let tunnel = runtime.tunnel {
             // Instance-unique control sockets mean a replacement tunnel for the
             // same gateway id can start immediately without racing this stop.
+            // State callbacks are filtered by tunnel.instanceID so the old
+            // stop()'s terminal .idle cannot poison the replacement.
             Task { await tunnel.stop() }
         }
     }
 
     // MARK: - Tunnel state
 
-    func tunnelStateChanged(gatewayID: String, state: SSHTunnelManager.State) {
+    func tunnelStateChanged(
+        gatewayID: String,
+        tunnelID: UUID? = nil,
+        state: SSHTunnelManager.State
+    ) {
         guard let runtime = remoteRuntimes.first(where: { $0.id == gatewayID }) else { return }
+        // Ignore late events from a tunnel that was replaced for this gateway.
+        if let tunnelID, let current = runtime.tunnel, current.instanceID != tunnelID {
+            return
+        }
         runtime.tunnelState = state
         switch state {
         case .established:

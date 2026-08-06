@@ -90,20 +90,20 @@ extension MenuBarContentView {
 
     /// First remote gateway that currently shows a running/ready model, for the
     /// hero strip when This Mac is idle.
-    var remoteActiveSummary: (name: String, profile: ModelProfileStatus)? {
+    var remoteActiveSummary: (gatewayID: String, name: String, profile: ModelProfileStatus)? {
         for runtime in hub.enabledRemoteRuntimes {
             if let status = runtime.store.sortedStatuses.first(where: {
                 MenuBarContentView.isDisplayedRunning($0, in: runtime.store)
             }) {
-                return (runtime.name, status)
+                return (runtime.id, runtime.name, status)
             }
         }
         return nil
     }
 
-    private func remoteActiveCard(_ summary: (name: String, profile: ModelProfileStatus)) -> some View {
+    private func remoteActiveCard(_ summary: (gatewayID: String, name: String, profile: ModelProfileStatus)) -> some View {
         let profile = summary.profile
-        let runtime = hub.enabledRemoteRuntimes.first { $0.name == summary.name }
+        let runtime = hub.enabledRemoteRuntimes.first { $0.id == summary.gatewayID }
         let store = runtime?.store
         let hostMetrics = runtime.map { hostMetricsMonitor.entry(forGatewayID: $0.id).metrics } ?? nil
         let label = profile.ready ? "ACTIVE ON \(summary.name.uppercased())" : "STARTING ON \(summary.name.uppercased())"
@@ -338,8 +338,17 @@ extension MenuBarContentView {
     var modelListSection: some View {
         // Multi-gateway: if This Mac has no profiles at all, skip the empty
         // "MODELS · 0" block — remote sections already carry the list.
+        // Still show a compact offline notice when the local controller failed.
         if store.sortedStatuses.isEmpty && hub.hasRemoteGateways {
-            EmptyView()
+            if store.lastError != nil {
+                Text(localEmptyMessage)
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.sub)
+                    .padding(EdgeInsets(top: 8, leading: 14, bottom: 4, trailing: 14))
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                EmptyView()
+            }
         } else {
             VStack(alignment: .leading, spacing: 0) {
                 DashboardSectionLabel(

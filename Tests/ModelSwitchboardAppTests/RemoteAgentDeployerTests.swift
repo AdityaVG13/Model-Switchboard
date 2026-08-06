@@ -139,6 +139,57 @@ private func makeSources() throws -> (agent: URL, installer: URL, base: URL) {
     }
 }
 
+@Test func deployExtractsTailscaleAuthToken() async throws {
+    let fixture = try FakeSSHFixture()
+    defer { fixture.cleanup() }
+    // Override fake-ssh to emit AUTH_TOKEN= on the installer step.
+    let script = """
+    #!/bin/bash
+    dir="\(fixture.directory.path)"
+    n=$(ls "$dir" | grep -c '^args-' || true)
+    printf '%s\\n' "$@" > "$dir/args-$n"
+    cat > "$dir/stdin-$n"
+    if printf '%s' "$*" | grep -q 'bash -s'; then
+      echo "modelswitchboard-gateway://spark.tail1234.ts.net?mode=direct&agent_port=8877"
+      echo "AUTH_TOKEN=tailscale-token-0123456789"
+    fi
+    exit 0
+    """
+    try script.write(to: fixture.executable, atomically: true, encoding: .utf8)
+
+    let sources = try makeSources()
+    defer { try? FileManager.default.removeItem(at: sources.base) }
+    let deployer = RemoteAgentDeployer(
+        executableURL: fixture.executable,
+        agentSourceURL: sources.agent,
+        installerURL: sources.installer
+    )
+    let result = try await deployer.deploy(
+        to: GatewayConfig(name: "Spark", kind: .ssh, sshUser: "a", sshHost: "spark"),
+        useTailscale: true
+    )
+    #expect(result.authToken == "tailscale-token-0123456789")
+    #expect(result.pairingLink?.contains("mode=direct") == true)
+}
+
+@Test func extractAuthTokenParsesMachineReadableAndHumanBlocks() {
+    let machine = """
+    [INFO] done
+    AUTH_TOKEN=abc123456789012345
+    Token file: /tmp/token
+    """
+    #expect(RemoteAgentDeployer.extractAuthToken(from: machine) == "abc123456789012345")
+
+    let human = """
+    [INFO] Paste this bearer token into the Mac gateway settings (keychain):
+
+      human-token-0123456789ab
+
+    Token file: /tmp/token
+    """
+    #expect(RemoteAgentDeployer.extractAuthToken(from: human) == "human-token-0123456789ab")
+}
+
 @Test func deployRequiresBundledResources() async throws {
     let deployer = RemoteAgentDeployer(
         executableURL: URL(fileURLWithPath: "/usr/bin/true"),

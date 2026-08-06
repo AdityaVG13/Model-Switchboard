@@ -65,7 +65,7 @@ actor SSHTunnelManager {
     nonisolated private let controlSocketFileName: String
 
     private let executableURL: URL
-    private let onStateChange: @Sendable (State) async -> Void
+    private let onStateChange: @Sendable (UUID, State) async -> Void
     private(set) var state: State = .idle
     private(set) var activeForwards: Set<Int> = []
 
@@ -75,16 +75,22 @@ actor SSHTunnelManager {
     private var consecutiveFailures = 0
     private var stderrTail: [String] = []
 
+    /// Per-instance id (not gateway id) — survives only for this manager object.
+    nonisolated let instanceID: UUID
+
     init(
         gatewayID: String,
         configuration: Configuration,
         executableURL: URL = URL(fileURLWithPath: "/usr/bin/ssh"),
-        onStateChange: @escaping @Sendable (State) async -> Void = { _ in }
+        onStateChange: @escaping @Sendable (UUID, State) async -> Void = { _, _ in }
     ) {
         self.gatewayID = gatewayID
         self.configuration = configuration
         self.executableURL = executableURL
         self.onStateChange = onStateChange
+        // Stable identity so Hub can ignore stale callbacks after a rebuild
+        // replaces this tunnel while the old stop() is still finishing.
+        self.instanceID = UUID()
         self.localPort = Self.allocateLoopbackPort()
         let shortID = String(gatewayID.replacingOccurrences(of: "-", with: "").prefix(12))
         let nonce = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(8))
@@ -97,6 +103,12 @@ actor SSHTunnelManager {
 
     func start() {
         guard !desiredActive else { return }
+        guard localPort != 0 else {
+            Task {
+                await transition(to: .failed("Could not allocate a local loopback port for the SSH tunnel."))
+            }
+            return
+        }
         desiredActive = true
         consecutiveFailures = 0
         supervisorTask = Task { await supervise() }
@@ -212,7 +224,7 @@ actor SSHTunnelManager {
         guard state != newState else { return }
         state = newState
         Self.logger.info("tunnel \(self.gatewayID, privacy: .public): \(String(describing: newState), privacy: .public)")
-        await onStateChange(newState)
+        await onStateChange(instanceID, newState)
     }
 
     // MARK: - Dynamic model-endpoint forwards

@@ -328,6 +328,14 @@ struct GatewaySettingsSection: View {
                 validationMessage = "SSH user/host cannot start with '-' (would be parsed as an ssh option)."
                 return
             }
+            guard (1...65535).contains(config.sshPort) else {
+                validationMessage = "SSH port must be between 1 and 65535."
+                return
+            }
+            guard (1...65535).contains(config.remotePort) else {
+                validationMessage = "Agent port must be between 1 and 65535."
+                return
+            }
         case .direct:
             guard let url = URL(string: config.baseURL),
                   let scheme = url.scheme?.lowercased(),
@@ -442,10 +450,19 @@ struct GatewaySettingsSection: View {
                         direct.name = config.name
                     }
                     draft = direct
+                    if let token = result.authToken, !token.isEmpty {
+                        draftToken = token
+                    }
+                    let tokenHint = (result.authToken?.isEmpty == false)
+                        ? " Bearer token captured into the form."
+                        : " Paste the bearer token from the host if auth is enabled."
                     deployState = .success(
-                        "Agent installed in Tailscale mode — gateway switched to direct URL \(direct.baseURL). Save to connect."
+                        "Agent installed in Tailscale mode — gateway switched to direct URL \(direct.baseURL).\(tokenHint) Save to connect."
                     )
                     return
+                }
+                if let token = result.authToken, !token.isEmpty {
+                    draftToken = token
                 }
                 let suffix = result.pairingLink == nil
                     ? "" : " The host printed its pairing code, so the connection details check out."

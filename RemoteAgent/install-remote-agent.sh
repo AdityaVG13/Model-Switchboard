@@ -231,7 +231,11 @@ if [ "$TAILSCALE" = "1" ]; then
         echo
         log "Paste this bearer token into the Mac gateway settings (keychain):"
         echo
-        echo "  $(cat "$AUTH_TOKEN_FILE")"
+        TOKEN_VALUE="$(cat "$AUTH_TOKEN_FILE")"
+        # Machine-readable line for in-app SSH deploy parsers.
+        echo "AUTH_TOKEN=$TOKEN_VALUE"
+        echo
+        echo "  $TOKEN_VALUE"
         echo
         log "Token file: $AUTH_TOKEN_FILE"
     fi

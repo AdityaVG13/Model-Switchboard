@@ -251,8 +251,10 @@ def is_tailscale_ip(address: str) -> bool:
 def tailscale_status() -> tuple[str | None, str | None]:
     """Return (ipv4, magic_dns_name) for this host's tailnet presence.
 
-    Prefers the tailscale CLI; falls back to scanning interfaces for a CGNAT
-    address so it works even when the CLI is not on PATH.
+    Requires the Tailscale CLI (`tailscale status` or `tailscale ip`). Interface
+    scans for any CGNAT address are intentionally not used for bind decisions —
+    that could treat a non-tailnet 100.64/10 address as "tailnet-only" and skip
+    the normal non-loopback auth rules.
     """
     try:
         result = subprocess.run(
@@ -279,18 +281,6 @@ def tailscale_status() -> tuple[str | None, str | None]:
                     return line.strip(), None
     except (OSError, subprocess.TimeoutExpired):
         pass
-    for command in (["ip", "-4", "addr"], ["ifconfig"]):
-        try:
-            result = subprocess.run(
-                command, capture_output=True, text=True, timeout=5, check=False,
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            continue
-        if result.returncode != 0:
-            continue
-        for match in re.finditer(r"inet (\d+\.\d+\.\d+\.\d+)", result.stdout):
-            if is_tailscale_ip(match.group(1)):
-                return match.group(1), None
     return None, None
 
 
@@ -1966,16 +1956,14 @@ def scan_port_claim_directories(
         markers = [m for m in PORT_CLAIM_MARKERS if (directory / m).is_file()]
         if not markers:
             return
+        # Directory name is the claim identity / managed port. A mismatched
+        # flags.env PORT= must not retarget the claim (e.g. folder 9999 with
+        # PORT=22 would otherwise become port-22 and force-stop listeners there).
         port = int(name)
         flags: dict[str, str] = {}
         flags_path = directory / "flags.env"
         if flags_path.is_file():
             flags = parse_loose_env_assignments(flags_path)
-        configured_port = flags.get("PORT") or str(port)
-        try:
-            port = int(str(configured_port).strip())
-        except ValueError:
-            port = int(name)
         model_hint = (
             flags.get("MODEL")
             or flags.get("MODEL_FILE")
@@ -3360,6 +3348,11 @@ class AgentService:
                 raise UnsupportedError(
                     f"{name}: discovered endpoint has no launch claim; cannot start from Switchboard"
                 )
+            # Idempotent: a second start must not orphan the first process tree.
+            current = self.status(profile)
+            if current.get("running") or current.get("ready"):
+                self._supervised.add(name)
+                return
             loaded = self.profiles.load()
             # Include synthetic claim profile for conflict checks on the port.
             loaded = dict(loaded)
@@ -3395,6 +3388,7 @@ class AgentService:
                 log_handle.close()
             self._pid_file(name).write_text(f"{process.pid}\n", encoding="utf-8")
             self._supervised.add(name)
+            clear_listening_tcp_cache()
 
     def stop(self, name: str, force: bool = False) -> None:
         with self._mutation_lock:
@@ -3444,6 +3438,7 @@ class AgentService:
                         f"failed to stop {name}: endpoint or process is still alive"
                     )
             self._pid_file(name).unlink(missing_ok=True)
+            clear_listening_tcp_cache()
             if stop_error is not None and not force:
                 raise OperationFailedError(f"STOP_COMMAND failed for {name}: {stop_error}")
 
@@ -3462,9 +3457,16 @@ class AgentService:
             loaded = dict(self.profiles.load())
             loaded[profile.name] = profile
             self.profiles.ensure_unique(profile.name, "activate", loaded)
+            # Mirror macOS controller: exclusive switch only stops managed
+            # profiles / session-supervised claims — never discovered listeners
+            # (those are foreign model servers we merely observe).
+            managed_names = set(loaded.keys()) | set(self._supervised)
             for item in self.status_payload()["statuses"]:
-                if item["profile"] != name and item["running"]:
-                    self.stop(item["profile"])
+                other = item["profile"]
+                if other == name or not item["running"]:
+                    continue
+                if item.get("discovery_source") == "profile" or other in managed_names:
+                    self.stop(other)
             self.start(name)
             self.configuration.run_directory.mkdir(parents=True, exist_ok=True)
             self.configuration.active_profile_file.write_text(f"{name}\n", encoding="utf-8")
@@ -3472,7 +3474,9 @@ class AgentService:
     def stop_all(self, force: bool = False) -> None:
         with self._mutation_lock:
             failures: list[str] = []
-            for name in sorted(self.profiles.load().keys()):
+            # Folder profiles plus any claim/synthetic names started this session.
+            names = set(self.profiles.load().keys()) | set(self._supervised)
+            for name in sorted(names):
                 try:
                     # Nested stop also takes the mutation lock (RLock).
                     self.stop(name, force=force)
@@ -3481,6 +3485,7 @@ class AgentService:
             # Clear any leftover active marker so a later watchdog cannot revive.
             self.configuration.active_profile_file.unlink(missing_ok=True)
             self._supervised.clear()
+            clear_listening_tcp_cache()
             if failures:
                 raise OperationFailedError("Failed to stop profiles: " + "; ".join(failures))
 
@@ -3576,12 +3581,20 @@ class AgentService:
         for marker in markers:
             if marker and len(marker) >= 4 and marker.lower() in command:
                 return True
-        # Port tokens common to llama-server / vllm argv.
+        # Port tokens common to llama-server / vllm argv — whole tokens only so
+        # PORT=80 does not match --port 8080 / http://host:8080.
         port = profile.endpoint_port
         if port:
-            if f"--port {port}" in command or f"--port={port}" in command:
-                return True
-            if f":{port}" in command:
+            try:
+                argv = shlex.split(command)
+            except ValueError:
+                argv = command.split()
+            for index, token in enumerate(argv):
+                if token == f"--port={port}":
+                    return True
+                if token == "--port" and index + 1 < len(argv) and argv[index + 1] == port:
+                    return True
+            if re.search(rf"(?<!\d):{re.escape(port)}(?!\d)", command):
                 return True
         return command_looks_like_model_server(command) and port_is_listening(port)
 
@@ -3632,13 +3645,14 @@ class AgentService:
                 terminate_process_tree(primary_pid, force=force)
         # Always re-check the listen port: vLLM may leave EngineCore on the
         # port under a different pid after the launcher shell exits.
+        # `force` only strengthens the signal — never skips ownership matching
+        # (Swift terminateProfileProcesses always requires processMatches).
         listener = listener_pid(profile.endpoint_port)
-        if listener and listener != primary_pid:
-            if force or self._process_matches(listener, profile):
-                if process_is_zombie(listener):
-                    reap_child(listener)
-                else:
-                    terminate_process_tree(listener, force=force)
+        if listener and listener != primary_pid and self._process_matches(listener, profile):
+            if process_is_zombie(listener):
+                reap_child(listener)
+            else:
+                terminate_process_tree(listener, force=force)
 
     def _wait_until_stopped(
         self,

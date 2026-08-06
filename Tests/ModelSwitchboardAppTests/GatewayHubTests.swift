@@ -203,6 +203,26 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
 }
 
 @MainActor
+@Test func staleTunnelCallbackIsIgnoredAfterReplacement() throws {
+    try withTestDefaults { defaults, service in
+        let hub = makeHub(defaults: defaults, keychainService: service)
+        let config = GatewayConfig(name: "Spark", kind: .ssh, sshUser: "a", sshHost: "spark.invalid")
+        hub.upsertGateway(config, token: "")
+        defer { hub.removeGateway(id: config.id) }
+
+        let runtime = try #require(hub.remoteRuntimes.first)
+        let liveID = try #require(runtime.tunnel?.instanceID)
+        hub.tunnelStateChanged(gatewayID: config.id, tunnelID: liveID, state: .established)
+        #expect(runtime.tunnelState == .established)
+
+        // A replaced tunnel's terminal .idle must not wipe the live runtime.
+        hub.tunnelStateChanged(gatewayID: config.id, tunnelID: UUID(), state: .idle)
+        #expect(runtime.tunnelState == .established)
+        #expect(runtime.store.refreshTask != nil)
+    }
+}
+
+@MainActor
 @Test func reachableEndpointURLHonorsForwardsAndDirectHosts() {
     let sshConfig = GatewayConfig(name: "Spark", kind: .ssh, sshUser: "a", sshHost: "spark")
     let sshStore = SwitchboardStore(

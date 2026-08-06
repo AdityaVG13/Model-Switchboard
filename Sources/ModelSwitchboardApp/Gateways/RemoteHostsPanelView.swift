@@ -193,7 +193,7 @@ struct RemoteHostsPanelView: View {
                                 .foregroundStyle(theme.label)
                                 .lineLimit(1)
                             Spacer(minLength: 0)
-                            Text(modelMemoryLabel(status))
+                            Text(modelMemoryLabel(status, metrics: metrics))
                                 .font(.system(size: 10.5, design: .monospaced))
                                 .foregroundStyle(theme.sub)
                         }
@@ -268,12 +268,16 @@ struct RemoteHostsPanelView: View {
         return parts.joined(separator: " · ")
     }
 
-    private func modelMemoryLabel(_ status: ModelProfileStatus) -> String {
-        if let vram = status.vramMB {
-            return String(format: "%.1f GB VRAM", vram / 1024)
-        }
-        if let rss = status.rssMB {
-            return String(format: "%.1f GB RSS", rss / 1024)
+    private func modelMemoryLabel(
+        _ status: ModelProfileStatus,
+        metrics: HostMetricsPayload?
+    ) -> String {
+        if let label = HostMetricsPresentation.profileMemoryLabel(
+            status: status,
+            metrics: metrics,
+            isRunning: true
+        ) {
+            return label
         }
         return "— · :" + status.port
     }
