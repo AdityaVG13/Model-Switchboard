@@ -239,8 +239,11 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
     )
 
     #expect(sshRuntime.reachableEndpointURL(for: loopbackStatus) == nil)
-    sshRuntime.forwardedPorts = [8081]
+    sshRuntime.forwardedPorts = [8081: 8081]
     #expect(sshRuntime.reachableEndpointURL(for: loopbackStatus) == "http://127.0.0.1:8081/v1")
+    // Remapped local port when the remote number is occupied on this Mac.
+    sshRuntime.forwardedPorts = [8081: 49152]
+    #expect(sshRuntime.reachableEndpointURL(for: loopbackStatus) == "http://127.0.0.1:49152/v1")
 
     let directConfig = GatewayConfig(name: "Lab", kind: .direct, baseURL: "http://10.0.0.9:8877")
     let directRuntime = GatewayRuntime(config: directConfig, store: sshStore, tunnel: nil)

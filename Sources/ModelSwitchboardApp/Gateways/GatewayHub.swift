@@ -12,8 +12,8 @@ final class GatewayRuntime: Identifiable {
     let store: SwitchboardStore
     let tunnel: SSHTunnelManager?
     var tunnelState: SSHTunnelManager.State = .idle
-    /// Remote model ports currently forwarded to the same local port.
-    var forwardedPorts: Set<Int> = []
+    /// Remote model port → local loopback port currently forwarded over SSH.
+    var forwardedPorts: [Int: Int] = [:]
     @ObservationIgnored var forwardSyncTask: Task<Void, Never>?
 
     init(config: GatewayConfig, store: SwitchboardStore, tunnel: SSHTunnelManager?) {
@@ -35,10 +35,15 @@ final class GatewayRuntime: Identifiable {
     func reachableEndpointURL(for status: ModelProfileStatus) -> String? {
         switch config.kind {
         case .ssh:
-            // Forwards map remote port N to local port N, so the remote's own
-            // loopback URL is exactly the working local URL once forwarded.
-            guard let port = Int(status.port), forwardedPorts.contains(port) else { return nil }
-            return status.baseURL
+            // Forwards may remap remote N → a different local port when N is
+            // already taken (second gateway, local server, etc.).
+            guard let remotePort = Int(status.port),
+                  let localPort = forwardedPorts[remotePort],
+                  var components = URLComponents(string: status.baseURL)
+            else { return nil }
+            components.host = "127.0.0.1"
+            components.port = localPort
+            return components.url?.absoluteString
         case .direct:
             if !status.usesLoopbackEndpoint {
                 return status.baseURL
@@ -259,11 +264,11 @@ final class GatewayHub {
             runtime.store.applyBootstrapDiagnostic(message)
             runtime.forwardSyncTask?.cancel()
             runtime.forwardSyncTask = nil
-            runtime.forwardedPorts = []
+            runtime.forwardedPorts = [:]
         case .connecting, .idle:
             runtime.forwardSyncTask?.cancel()
             runtime.forwardSyncTask = nil
-            runtime.forwardedPorts = []
+            runtime.forwardedPorts = [:]
         }
     }
 

@@ -45,15 +45,17 @@ private struct FakeSSHFixture {
     }
 }
 
-private func makeSources() throws -> (agent: URL, installer: URL, base: URL) {
+private func makeSources() throws -> (agent: URL, discovery: URL, installer: URL, base: URL) {
     let base = FileManager.default.temporaryDirectory
         .appendingPathComponent("msw-deployer-src-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
     let agent = base.appendingPathComponent("model_switchboard_agent.py")
+    let discovery = base.appendingPathComponent("discovery.py")
     let installer = base.appendingPathComponent("install-remote-agent.sh")
     try "AGENT-PY-CONTENT".write(to: agent, atomically: true, encoding: .utf8)
+    try "DISCOVERY-PY-CONTENT".write(to: discovery, atomically: true, encoding: .utf8)
     try "INSTALLER-SH-CONTENT".write(to: installer, atomically: true, encoding: .utf8)
-    return (agent, installer, base)
+    return (agent, discovery, installer, base)
 }
 
 @Test func deployPushesAgentThenRunsInstaller() async throws {
@@ -65,6 +67,7 @@ private func makeSources() throws -> (agent: URL, installer: URL, base: URL) {
     let deployer = RemoteAgentDeployer(
         executableURL: fixture.executable,
         agentSourceURL: sources.agent,
+        discoverySourceURL: sources.discovery,
         installerURL: sources.installer
     )
     let config = GatewayConfig(
@@ -75,18 +78,22 @@ private func makeSources() throws -> (agent: URL, installer: URL, base: URL) {
 
     let result = try await deployer.deploy(to: config)
 
-    let pushArguments = try fixture.recordedArguments(0)
-    #expect(pushArguments.contains("BatchMode=yes"))
-    #expect(pushArguments.contains("-p\n2222"))
-    #expect(pushArguments.contains("--\ngpuadmin@spark.local\n"))
+    let discoveryArguments = try fixture.recordedArguments(0)
+    #expect(discoveryArguments.contains("BatchMode=yes"))
+    #expect(discoveryArguments.contains("-p\n2222"))
+    #expect(discoveryArguments.contains("--\ngpuadmin@spark.local\n"))
+    #expect(discoveryArguments.contains("cat > ~/.local/share/model-switchboard-agent/discovery.py"))
+    #expect(try fixture.recordedStdin(0) == Data("DISCOVERY-PY-CONTENT".utf8))
+
+    let pushArguments = try fixture.recordedArguments(1)
     #expect(pushArguments.contains("cat > ~/.local/share/model-switchboard-agent/model_switchboard_agent.py"))
     #expect(pushArguments.contains("/.ssh/spark_key"))
-    #expect(try fixture.recordedStdin(0) == Data("AGENT-PY-CONTENT".utf8))
+    #expect(try fixture.recordedStdin(1) == Data("AGENT-PY-CONTENT".utf8))
 
-    let installArguments = try fixture.recordedArguments(1)
+    let installArguments = try fixture.recordedArguments(2)
     #expect(installArguments.contains("bash -s -- --port 9001"))
     #expect(!installArguments.contains("--tailscale"))
-    #expect(try fixture.recordedStdin(1) == Data("INSTALLER-SH-CONTENT".utf8))
+    #expect(try fixture.recordedStdin(2) == Data("INSTALLER-SH-CONTENT".utf8))
 
     #expect(result.pairingLink == "modelswitchboard-gateway://gpuadmin@spark.local?name=spark&agent_port=8877")
 }
@@ -100,13 +107,14 @@ private func makeSources() throws -> (agent: URL, installer: URL, base: URL) {
     let deployer = RemoteAgentDeployer(
         executableURL: fixture.executable,
         agentSourceURL: sources.agent,
+        discoverySourceURL: sources.discovery,
         installerURL: sources.installer
     )
     let config = GatewayConfig(name: "Spark", kind: .ssh, sshUser: "gpuadmin", sshHost: "spark.local")
 
     _ = try await deployer.deploy(to: config, useTailscale: true)
 
-    let installArguments = try fixture.recordedArguments(1)
+    let installArguments = try fixture.recordedArguments(2)
     #expect(installArguments.contains("bash -s -- --port 8877 --tailscale"))
 }
 
@@ -119,6 +127,7 @@ private func makeSources() throws -> (agent: URL, installer: URL, base: URL) {
     let deployer = RemoteAgentDeployer(
         executableURL: fixture.executable,
         agentSourceURL: sources.agent,
+        discoverySourceURL: sources.discovery,
         installerURL: sources.installer
     )
     let config = GatewayConfig(name: "Spark", kind: .ssh, sshUser: "gpuadmin", sshHost: "spark.local")
@@ -134,7 +143,7 @@ private func makeSources() throws -> (agent: URL, installer: URL, base: URL) {
             Issue.record("unexpected error \(error)")
             return
         }
-        #expect(step == "push agent")
+        #expect(step == "push discovery")
         #expect(message.contains("ssh-add"))
     }
 }
@@ -162,6 +171,7 @@ private func makeSources() throws -> (agent: URL, installer: URL, base: URL) {
     let deployer = RemoteAgentDeployer(
         executableURL: fixture.executable,
         agentSourceURL: sources.agent,
+        discoverySourceURL: sources.discovery,
         installerURL: sources.installer
     )
     let result = try await deployer.deploy(
@@ -194,6 +204,7 @@ private func makeSources() throws -> (agent: URL, installer: URL, base: URL) {
     let deployer = RemoteAgentDeployer(
         executableURL: URL(fileURLWithPath: "/usr/bin/true"),
         agentSourceURL: URL(fileURLWithPath: "/nonexistent/agent.py"),
+        discoverySourceURL: URL(fileURLWithPath: "/nonexistent/discovery.py"),
         installerURL: URL(fileURLWithPath: "/nonexistent/install.sh")
     )
     #expect(deployer.resourcesAvailable == false)

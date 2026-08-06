@@ -24,14 +24,20 @@ import unittest.mock
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-AGENT_PATH = REPO_ROOT / "RemoteAgent" / "model_switchboard_agent.py"
+REMOTE_AGENT_DIR = REPO_ROOT / "RemoteAgent"
+AGENT_PATH = REMOTE_AGENT_DIR / "model_switchboard_agent.py"
 FIXTURES_PATH = REPO_ROOT / "Controller" / "tests" / "conformance" / "fixtures" / "controller_api_cases.json"
+
+# discovery.py is a sibling import; ensure RemoteAgent is on sys.path.
+if str(REMOTE_AGENT_DIR) not in sys.path:
+    sys.path.insert(0, str(REMOTE_AGENT_DIR))
 
 _spec = importlib.util.spec_from_file_location("model_switchboard_agent", AGENT_PATH)
 assert _spec is not None and _spec.loader is not None
 agent = importlib.util.module_from_spec(_spec)
 sys.modules["model_switchboard_agent"] = agent
 _spec.loader.exec_module(agent)
+import discovery  # noqa: E402  — sibling module loaded via the agent
 
 CONFORMANCE_TOKEN = "conformance-token-0000000000000001"
 
@@ -539,6 +545,7 @@ class InstallerSourceResolutionTests(unittest.TestCase):
             script_dir.mkdir(parents=True)
             home.mkdir(parents=True)
             shutil.copy2(AGENT_PATH, script_dir / "model_switchboard_agent.py")
+            shutil.copy2(REMOTE_AGENT_DIR / "discovery.py", script_dir / "discovery.py")
 
             result = self.run_installer(script_dir, home)
 
@@ -558,6 +565,12 @@ class InstallerSourceResolutionTests(unittest.TestCase):
                 installed.read_text(encoding="utf-8"),
                 AGENT_PATH.read_text(encoding="utf-8"),
             )
+            installed_discovery = home / ".local/share/model-switchboard-agent/discovery.py"
+            self.assertTrue(installed_discovery.is_file())
+            self.assertEqual(
+                installed_discovery.read_text(encoding="utf-8"),
+                (REMOTE_AGENT_DIR / "discovery.py").read_text(encoding="utf-8"),
+            )
 
     def test_installs_from_prepushed_agent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -567,6 +580,7 @@ class InstallerSourceResolutionTests(unittest.TestCase):
             install_root = home / ".local/share/model-switchboard-agent"
             install_root.mkdir(parents=True)
             shutil.copy2(AGENT_PATH, install_root / "model_switchboard_agent.py")
+            shutil.copy2(REMOTE_AGENT_DIR / "discovery.py", install_root / "discovery.py")
 
             result = self.run_installer(script_dir, home)
 
@@ -939,7 +953,7 @@ class ListListeningTcpTests(unittest.TestCase):
     def _disable_proc_inventory(self):
         """Force ss/lsof path (macOS + unit tests that mock subprocess)."""
         return unittest.mock.patch.object(
-            agent, "_linux_proc_listening_endpoints", return_value=None
+            discovery, "_linux_proc_listening_endpoints", return_value=None
         )
 
     def test_ss_path_resolves_cmdline_once_per_unique_pid(self) -> None:
@@ -960,10 +974,10 @@ class ListListeningTcpTests(unittest.TestCase):
 
         with self._disable_proc_inventory():
             with unittest.mock.patch.object(
-                agent.subprocess, "run", side_effect=run_side_effect
+                discovery.subprocess, "run", side_effect=run_side_effect
             ) as run_mock:
                 with unittest.mock.patch.object(
-                    agent, "process_command", return_value="python -m server"
+                    discovery, "process_command", return_value="python -m server"
                 ) as cmd_mock:
                     rows = agent.list_listening_tcp()
 
@@ -1005,10 +1019,10 @@ class ListListeningTcpTests(unittest.TestCase):
 
         with self._disable_proc_inventory():
             with unittest.mock.patch.object(
-                agent.subprocess, "run", side_effect=run_side_effect
+                discovery.subprocess, "run", side_effect=run_side_effect
             ):
                 with unittest.mock.patch.object(
-                    agent, "process_command", return_value="/usr/bin/python3 app"
+                    discovery, "process_command", return_value="/usr/bin/python3 app"
                 ) as cmd_mock:
                     rows = agent.list_listening_tcp()
 
@@ -1036,10 +1050,10 @@ class ListListeningTcpTests(unittest.TestCase):
 
         with self._disable_proc_inventory():
             with unittest.mock.patch.object(
-                agent.subprocess, "run", side_effect=run_side_effect
+                discovery.subprocess, "run", side_effect=run_side_effect
             ):
                 with unittest.mock.patch.object(
-                    agent, "process_command", return_value="python -m vllm.entrypoints"
+                    discovery, "process_command", return_value="python -m vllm.entrypoints"
                 ) as cmd_mock:
                     rows = agent.list_listening_tcp()
 
@@ -1077,10 +1091,10 @@ class ListListeningTcpTests(unittest.TestCase):
 
         with self._disable_proc_inventory():
             with unittest.mock.patch.object(
-                agent.subprocess, "run", side_effect=run_side_effect
+                discovery.subprocess, "run", side_effect=run_side_effect
             ):
                 with unittest.mock.patch.object(
-                    agent, "process_command", return_value="python -m server"
+                    discovery, "process_command", return_value="python -m server"
                 ) as cmd_mock:
                     rows = agent.list_listening_tcp()
 
@@ -1124,17 +1138,17 @@ class ListListeningTcpTests(unittest.TestCase):
             def run_boom(*args, **kwargs):  # type: ignore[no-untyped-def]
                 raise AssertionError("ss/lsof must not run when /proc inventory works")
 
-            real_proc = agent._linux_proc_listening_endpoints
+            real_proc = discovery._linux_proc_listening_endpoints
 
             def fake_proc(proc_root=None):  # type: ignore[no-untyped-def]
                 return real_proc(proc_root=root)
 
             with unittest.mock.patch.object(
-                agent, "_linux_proc_listening_endpoints", side_effect=fake_proc
+                discovery, "_linux_proc_listening_endpoints", side_effect=fake_proc
             ):
-                with unittest.mock.patch.object(agent.subprocess, "run", side_effect=run_boom):
+                with unittest.mock.patch.object(discovery.subprocess, "run", side_effect=run_boom):
                     with unittest.mock.patch.object(
-                        agent, "process_command", return_value="python -m vllm"
+                        discovery, "process_command", return_value="python -m vllm"
                     ) as cmd_mock:
                         rows = agent.list_listening_tcp()
 
@@ -1158,7 +1172,7 @@ class ListListeningTcpTests(unittest.TestCase):
             "   1: 0100007F:1F90 00000000:0000 01 00000000:00000000 "
             "00:00000000 00000000     0        0 100 1 0000000000000000 100 0 0 10 0\n"
         )
-        rows = agent._parse_proc_net_tcp_table(table, ipv6=False)
+        rows = discovery._parse_proc_net_tcp_table(table, ipv6=False)
         self.assertEqual(len(rows), 1)
         port, bind, inode = rows[0]
         self.assertEqual(port, 22)
@@ -1168,7 +1182,7 @@ class ListListeningTcpTests(unittest.TestCase):
     def test_linux_proc_unavailable_returns_none(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             missing = Path(tmp) / "no-such-proc"
-            self.assertIsNone(agent._linux_proc_listening_endpoints(proc_root=missing))
+            self.assertIsNone(discovery._linux_proc_listening_endpoints(proc_root=missing))
 
 
     def test_discover_live_skips_agent_self_by_pid_without_command(self) -> None:
@@ -1210,13 +1224,13 @@ class ListListeningTcpTests(unittest.TestCase):
 
         with self._disable_proc_inventory():
             with unittest.mock.patch.object(
-                agent.time, "monotonic", side_effect=lambda: clock["t"]
+                discovery.time, "monotonic", side_effect=lambda: clock["t"]
             ):
                 with unittest.mock.patch.object(
-                    agent.subprocess, "run", side_effect=run_side_effect
+                    discovery.subprocess, "run", side_effect=run_side_effect
                 ) as run_mock:
                     with unittest.mock.patch.object(
-                        agent, "process_command", return_value="python -m server"
+                        discovery, "process_command", return_value="python -m server"
                     ):
                         first = agent.list_listening_tcp()
                         # Still well inside LISTENING_TCP_CACHE_TTL_SECONDS (2.0s).
@@ -1259,13 +1273,13 @@ class ListListeningTcpTests(unittest.TestCase):
 
         with self._disable_proc_inventory():
             with unittest.mock.patch.object(
-                agent.time, "monotonic", side_effect=lambda: clock["t"]
+                discovery.time, "monotonic", side_effect=lambda: clock["t"]
             ):
                 with unittest.mock.patch.object(
-                    agent.subprocess, "run", side_effect=run_side_effect
+                    discovery.subprocess, "run", side_effect=run_side_effect
                 ) as run_mock:
                     with unittest.mock.patch.object(
-                        agent, "process_command", return_value="python -m server"
+                        discovery, "process_command", return_value="python -m server"
                     ):
                         agent.list_listening_tcp()
                         clock["t"] = 1000.0 + agent.LISTENING_TCP_CACHE_TTL_SECONDS + 0.001
@@ -1321,7 +1335,7 @@ class ListListeningTcpTests(unittest.TestCase):
                     errors.append(exc)
 
         with unittest.mock.patch.object(
-            agent, "_list_listening_tcp_uncached", side_effect=fake_uncached
+            discovery, "_list_listening_tcp_uncached", side_effect=fake_uncached
         ):
             threads = [
                 threading.Thread(target=worker, name=f"ltcp-{i}")

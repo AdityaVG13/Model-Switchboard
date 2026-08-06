@@ -13,6 +13,7 @@ fi
 CONTROLLER_BIN="$APP_PATH/Contents/Resources/ModelSwitchboardController"
 CONTROLLER_PLIST="$APP_PATH/Contents/Library/LaunchAgents/io.modelswitchboard.controller.plist"
 REMOTE_AGENT_PY="$APP_PATH/Contents/Resources/RemoteAgent/model_switchboard_agent.py"
+REMOTE_AGENT_DISCOVERY="$APP_PATH/Contents/Resources/RemoteAgent/discovery.py"
 REMOTE_AGENT_INSTALLER="$APP_PATH/Contents/Resources/RemoteAgent/install-remote-agent.sh"
 
 [ -x "$CONTROLLER_BIN" ] || {
@@ -25,6 +26,10 @@ REMOTE_AGENT_INSTALLER="$APP_PATH/Contents/Resources/RemoteAgent/install-remote-
 }
 [ -f "$REMOTE_AGENT_PY" ] || {
   echo "embedded remote agent missing: $REMOTE_AGENT_PY" >&2
+  exit 1
+}
+[ -f "$REMOTE_AGENT_DISCOVERY" ] || {
+  echo "embedded remote agent discovery module missing: $REMOTE_AGENT_DISCOVERY" >&2
   exit 1
 }
 [ -x "$REMOTE_AGENT_INSTALLER" ] || {

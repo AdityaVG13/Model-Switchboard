@@ -14,7 +14,10 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-AGENT_PATH = REPO_ROOT / "RemoteAgent" / "model_switchboard_agent.py"
+REMOTE_AGENT_DIR = REPO_ROOT / "RemoteAgent"
+AGENT_PATH = REMOTE_AGENT_DIR / "model_switchboard_agent.py"
+if str(REMOTE_AGENT_DIR) not in sys.path:
+    sys.path.insert(0, str(REMOTE_AGENT_DIR))
 _spec = importlib.util.spec_from_file_location("model_switchboard_agent", AGENT_PATH)
 assert _spec and _spec.loader
 agent = importlib.util.module_from_spec(_spec)

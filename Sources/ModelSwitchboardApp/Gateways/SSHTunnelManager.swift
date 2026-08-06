@@ -69,7 +69,10 @@ actor SSHTunnelManager {
     private let onStateChange: @Sendable (UUID, State) async -> Void
     private let onLocalPortChange: @Sendable (UUID, UInt16) async -> Void
     private(set) var state: State = .idle
-    private(set) var activeForwards: Set<Int> = []
+    /// Remote model port → local loopback port. Local ports are unique per
+    /// tunnel so two gateways can expose the same remote port (e.g. 8080)
+    /// without colliding on this Mac.
+    private(set) var activeForwards: [Int: Int] = [:]
 
     private var desiredActive = false
     private var process: Process?
@@ -252,21 +255,23 @@ actor SSHTunnelManager {
 
     // MARK: - Dynamic model-endpoint forwards
 
-    /// Aligns per-model forwards with the given remote ports (same port number
-    /// locally, so displayed endpoint URLs stay predictable). Returns the ports
-    /// that are actually forwarded now.
+    /// Aligns per-model forwards with the given remote ports. Prefers mapping
+    /// remote N → local N when free; otherwise allocates an ephemeral local
+    /// port. Returns the remote→local map that is actually forwarded now.
     @discardableResult
-    func syncForwards(remotePorts: Set<Int>) async -> Set<Int> {
+    func syncForwards(remotePorts: Set<Int>) async -> [Int: Int] {
         guard state.isEstablished else { return activeForwards }
-        let stale = activeForwards.subtracting(remotePorts)
-        let missing = remotePorts.subtracting(activeForwards)
-        for port in stale {
-            _ = runControlCommand(["-O", "cancel", "-L", Self.forwardSpec(port: port)])
-            activeForwards.remove(port)
+        let stale = Set(activeForwards.keys).subtracting(remotePorts)
+        let missing = remotePorts.subtracting(activeForwards.keys)
+        for remotePort in stale {
+            guard let localPort = activeForwards[remotePort] else { continue }
+            _ = runControlCommand(["-O", "cancel", "-L", Self.forwardSpec(local: localPort, remote: remotePort)])
+            activeForwards.removeValue(forKey: remotePort)
         }
-        for port in missing {
-            if runControlCommand(["-O", "forward", "-L", Self.forwardSpec(port: port)]) {
-                activeForwards.insert(port)
+        for remotePort in missing {
+            guard let localPort = allocateForwardLocalPort(preferring: remotePort) else { continue }
+            if runControlCommand(["-O", "forward", "-L", Self.forwardSpec(local: localPort, remote: remotePort)]) {
+                activeForwards[remotePort] = localPort
             }
         }
         return activeForwards
@@ -274,10 +279,48 @@ actor SSHTunnelManager {
 
     private func restoreForwardsAfterReconnect() async {
         let wanted = activeForwards
-        activeForwards = []
-        if !wanted.isEmpty {
-            _ = await syncForwards(remotePorts: wanted)
+        activeForwards = [:]
+        guard state.isEstablished, !wanted.isEmpty else { return }
+        for (remotePort, preferredLocal) in wanted {
+            let localPort: Int
+            if isLocalPortAvailableForForward(preferredLocal) {
+                localPort = preferredLocal
+            } else if let allocated = allocateForwardLocalPort(preferring: remotePort) {
+                localPort = allocated
+            } else {
+                continue
+            }
+            if runControlCommand(["-O", "forward", "-L", Self.forwardSpec(local: localPort, remote: remotePort)]) {
+                activeForwards[remotePort] = localPort
+            }
         }
+    }
+
+    /// Local ports already claimed by this tunnel (agent forward + model forwards).
+    private var reservedLocalPorts: Set<Int> {
+        Set(activeForwards.values).union([Int(localPort)])
+    }
+
+    private func isLocalPortAvailableForForward(_ port: Int) -> Bool {
+        guard port > 0, port <= 65535 else { return false }
+        guard !reservedLocalPorts.contains(port) else { return false }
+        return Self.isLoopbackPortFree(UInt16(port))
+    }
+
+    /// Prefer the remote port number locally when free; otherwise ephemeral.
+    private func allocateForwardLocalPort(preferring remotePort: Int) -> Int? {
+        if isLocalPortAvailableForForward(remotePort) {
+            return remotePort
+        }
+        for _ in 0..<5 {
+            let allocated = Self.allocateLoopbackPort()
+            guard allocated != 0 else { return nil }
+            let asInt = Int(allocated)
+            if !reservedLocalPorts.contains(asInt) {
+                return asInt
+            }
+        }
+        return nil
     }
 
     private func runControlCommand(_ arguments: [String]) -> Bool {
@@ -298,8 +341,8 @@ actor SSHTunnelManager {
         return process.terminationStatus == 0
     }
 
-    private static func forwardSpec(port: Int) -> String {
-        "127.0.0.1:\(port):127.0.0.1:\(port)"
+    private static func forwardSpec(local: Int, remote: Int) -> String {
+        "127.0.0.1:\(local):127.0.0.1:\(remote)"
     }
 
     // MARK: - Arguments

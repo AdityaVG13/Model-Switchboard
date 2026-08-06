@@ -45,6 +45,7 @@ die() { printf '[ERR] %s\n' "$*" >&2; exit 1; }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 AGENT_SOURCE="$SCRIPT_DIR/model_switchboard_agent.py"
+DISCOVERY_SOURCE="$SCRIPT_DIR/discovery.py"
 INSTALL_ROOT="$HOME/.local/share/model-switchboard-agent"
 BIN_DIR="$HOME/.local/bin"
 BIN_PATH="$BIN_DIR/model-switchboard-agent"
@@ -85,6 +86,24 @@ mkdir -p "$PROFILES_DIR"
 # to the install root (the Mac app deploys it over SSH), or fetched from the
 # repo (curl | bash one-liner with no checkout at all).
 REPO_RAW_URL="${REPO_RAW_URL:-https://raw.githubusercontent.com/AdityaVG13/Model-Switchboard/main/RemoteAgent}"
+install_agent_module() {
+    local name="$1"
+    local adjacent="$2"
+    if [ -f "$adjacent" ]; then
+        install -m 0644 "$adjacent" "$INSTALL_ROOT/$name"
+    elif [ -f "$INSTALL_ROOT/$name" ]; then
+        chmod 0644 "$INSTALL_ROOT/$name" 2>/dev/null || true
+        log "Using $name already present at $INSTALL_ROOT"
+    else
+        command -v curl >/dev/null 2>&1 || die "no agent source found and curl is unavailable"
+        log "Downloading $name from $REPO_RAW_URL"
+        curl -fsSL "$REPO_RAW_URL/$name" -o "$INSTALL_ROOT/$name" \
+            || die "could not download $name"
+        chmod 0644 "$INSTALL_ROOT/$name"
+    fi
+}
+
+install_agent_module "discovery.py" "$DISCOVERY_SOURCE"
 if [ -f "$AGENT_SOURCE" ]; then
     install -m 0755 "$AGENT_SOURCE" "$INSTALL_ROOT/model_switchboard_agent.py"
 elif [ -f "$INSTALL_ROOT/model_switchboard_agent.py" ]; then
@@ -97,6 +116,7 @@ else
         || die "could not download the agent"
     chmod 0755 "$INSTALL_ROOT/model_switchboard_agent.py"
 fi
+[ -f "$INSTALL_ROOT/discovery.py" ] || die "discovery.py missing next to the agent"
 
 # Persist the profiles folder so `serve` (systemd) keeps using it without flags.
 python3 - "$INSTALL_ROOT" "$PROFILES_DIR" <<'PY'

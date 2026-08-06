@@ -3,7 +3,7 @@ import ModelSwitchboardCore
 import OSLog
 
 /// Deploys the bundled remote agent to an SSH gateway host, so the remote
-/// machine never downloads anything: the app pushes the single agent file and
+/// machine never downloads anything: the app pushes the agent modules and
 /// runs the bundled installer over the user's own SSH connection.
 actor RemoteAgentDeployer {
     struct Result: Sendable, Equatable {
@@ -23,15 +23,18 @@ actor RemoteAgentDeployer {
 
     private let executableURL: URL
     private let agentSourceURL: URL
+    private let discoverySourceURL: URL
     private let installerURL: URL
 
     init(
         executableURL: URL = URL(fileURLWithPath: "/usr/bin/ssh"),
         agentSourceURL: URL? = nil,
+        discoverySourceURL: URL? = nil,
         installerURL: URL? = nil
     ) {
         self.executableURL = executableURL
         self.agentSourceURL = agentSourceURL ?? Self.bundledResource("model_switchboard_agent.py")
+        self.discoverySourceURL = discoverySourceURL ?? Self.bundledResource("discovery.py")
         self.installerURL = installerURL ?? Self.bundledResource("install-remote-agent.sh")
     }
 
@@ -43,19 +46,27 @@ actor RemoteAgentDeployer {
 
     nonisolated var resourcesAvailable: Bool {
         FileManager.default.isReadableFile(atPath: agentSourceURL.path)
+            && FileManager.default.isReadableFile(atPath: discoverySourceURL.path)
             && FileManager.default.isReadableFile(atPath: installerURL.path)
     }
 
-    /// Pushes the agent and runs the installer on the gateway host. With
+    /// Pushes the agent modules and runs the installer on the gateway host. With
     /// `useTailscale` the agent is set up bound to the host's tailnet address
     /// and the returned pairing link describes a direct (tunnel-less) gateway.
     func deploy(to config: GatewayConfig, useTailscale: Bool = false) async throws -> Result {
         guard resourcesAvailable else { throw DeployError.missingResources }
         let agentData = try Data(contentsOf: agentSourceURL)
+        let discoveryData = try Data(contentsOf: discoverySourceURL)
         let installerData = try Data(contentsOf: installerURL)
 
-        // 1. Push the agent to the final location (the installer prefers a
-        //    pre-pushed agent over downloading anything).
+        // 1. Push discovery + agent into the install root (installer prefers
+        //    pre-pushed modules over downloading anything).
+        _ = try await runSSH(
+            config: config,
+            step: "push discovery",
+            remoteCommand: "mkdir -p ~/\(Self.remoteRoot) && cat > ~/\(Self.remoteRoot)/discovery.py",
+            stdin: discoveryData
+        )
         _ = try await runSSH(
             config: config,
             step: "push agent",

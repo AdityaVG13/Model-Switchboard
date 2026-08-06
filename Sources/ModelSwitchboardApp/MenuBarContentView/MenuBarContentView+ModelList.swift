@@ -102,192 +102,30 @@ extension MenuBarContentView {
     }
 
     private func remoteActiveCard(_ summary: (gatewayID: String, name: String, profile: ModelProfileStatus)) -> some View {
-        let profile = summary.profile
         let runtime = hub.enabledRemoteRuntimes.first { $0.id == summary.gatewayID }
-        let store = runtime?.store
+        let remoteStore = runtime?.store ?? store
         let hostMetrics = runtime.map { hostMetricsMonitor.entry(forGatewayID: $0.id).metrics } ?? nil
-        let label = profile.ready ? "ACTIVE ON \(summary.name.uppercased())" : "STARTING ON \(summary.name.uppercased())"
-        let isBusy = store?.isBusy(profile: profile.profile) == true
-        // Agent runs the suite on the remote host (loopback there). Mac-reachable
-        // model URL is only required for Copy Endpoint, not for agent benchmarks.
-        let canBenchmark = features.supportsBenchmarks
-            && profile.ready
-            && store?.canStartBenchmarkNow == true
-            && store?.isBenchmarkInFlight(for: profile.profile) != true
-        let memoryLabel = HostMetricsPresentation.profileMemoryLabel(
-            status: profile,
-            metrics: hostMetrics,
-            isRunning: true
-        ) ?? ":\(profile.port)"
-        let gpuStrip = HostMetricsPresentation.compactGPUStrip(hostMetrics)
-        let benchmarkHelp: String = {
-            if !profile.ready {
-                return "Benchmark disabled: model on :\(profile.port) is not ready yet."
-            }
-            if store?.canStartBenchmarkNow != true {
-                return "Benchmark cooling down or already running on \(summary.name)."
-            }
-            return "Run a quick benchmark on \(summary.name) via the remote agent (uses the model on that host)."
-        }()
-
-        return VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(DashboardTheme.runningGreen)
-                            .frame(width: 6, height: 6)
-                            .shadow(color: DashboardTheme.runningGreen.opacity(0.6), radius: 3)
-                        Text(label)
-                            .font(.system(size: 10, weight: .semibold))
-                            .kerning(0.8)
-                            .foregroundStyle(accent)
-                    }
-                    Text(profile.displayName)
-                        .font(.system(size: 14, weight: .semibold))
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                    .foregroundStyle(theme.label)
-                    Text("\(profile.runtimeLabel ?? profile.runtime) · \(memoryLabel) · \(summary.name)")
-                        .font(.system(size: 10.5, design: .monospaced))
-                        .foregroundStyle(theme.sub)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    if let gpuStrip {
-                        Text(gpuStrip)
-                            .font(.system(size: 10.5, design: .monospaced))
-                            .foregroundStyle(accent.opacity(0.95))
-                            .lineLimit(1)
-                            .accessibilityLabel("Remote host GPU: \(gpuStrip)")
-                    }
-                }
-                Spacer(minLength: 0)
-                if let pct = HostMetricsPresentation.hostVRAMPercent(hostMetrics) {
-                    VStack(alignment: .trailing, spacing: 0) {
-                        Text("\(Int(pct.rounded()))%")
-                            .font(.system(size: 20, weight: .bold).monospacedDigit())
-                            .foregroundStyle(accent)
-                        Text("VRAM")
-                            .font(.system(size: 10))
-                            .foregroundStyle(theme.sub)
-                        if let detail = HostMetricsPresentation.hostVRAMUsedTotalLabel(hostMetrics) {
-                            Text(detail)
-                                .font(.system(size: 9, design: .monospaced))
-                                .foregroundStyle(theme.faint)
-                        }
-                    }
-                    .accessibilityElement(children: .combine)
-                    .accessibilityLabel("Host VRAM \(HostMetricsPresentation.hostVRAMUsedTotalLabel(hostMetrics) ?? "")")
-                }
-            }
-
-            if let store {
-                HStack(spacing: 6) {
-                    heroButton("■ Stop", strong: true, disabled: isBusy) {
-                        Task { await store.stop(profile.profile) }
-                    }
-                    if features.supportsBenchmarks {
-                        heroButton(
-                            "Benchmark",
-                            disabled: isBusy || !canBenchmark
-                        ) {
-                            setInspectorPanel(.benchmarks)
-                            Task { await store.quickBenchmark([profile.profile]) }
-                        }
-                        .help(benchmarkHelp)
-                    }
-                }
-            }
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            LinearGradient(
-                colors: [accent.opacity(0.13), accent.opacity(0.05)],
-                startPoint: .top,
-                endPoint: .bottom
-            ),
-            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+        return ActiveProfileHeroView(
+            profile: summary.profile,
+            store: remoteStore,
+            context: .remote(gatewayName: summary.name),
+            hostMetrics: hostMetrics,
+            onOpenBenchmarks: { setInspectorPanel(.benchmarks) },
+            theme: theme,
+            accent: accent
         )
-        .overlay {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(accent.opacity(0.25), lineWidth: 1)
-        }
-        .padding(EdgeInsets(top: 8, leading: 10, bottom: 0, trailing: 10))
     }
 
     func heroCard(_ profile: ModelProfileStatus) -> some View {
-        let pending = store.pendingLabel(for: profile.profile)
-        let label = pending ?? (profile.ready ? "ACTIVE" : "STARTING")
-        let isBusy = store.isBusy(profile: profile.profile)
-
-        return VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(DashboardTheme.runningGreen)
-                            .frame(width: 6, height: 6)
-                            .shadow(color: DashboardTheme.runningGreen.opacity(0.6), radius: 3)
-                        Text(label)
-                            .font(.system(size: 10, weight: .semibold))
-                            .kerning(0.8)
-                            .foregroundStyle(accent)
-                    }
-                    Text(profile.displayName)
-                        .font(.system(size: 14, weight: .semibold))
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                    .foregroundStyle(theme.label)
-                    Text("\(runtimeName(profile)) · \(profile.baseURL)")
-                        .font(.system(size: 10.5, design: .monospaced))
-                        .foregroundStyle(theme.sub)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .textSelection(.enabled)
-                }
-                Spacer(minLength: 0)
-                if let tok = decodeTokensPerSecond(for: profile.profile) {
-                    VStack(alignment: .trailing, spacing: 0) {
-                        Text(String(format: "%.1f", tok))
-                            .font(.system(size: 20, weight: .bold).monospacedDigit())
-                            .foregroundStyle(accent)
-                        Text("tok/s")
-                            .font(.system(size: 10))
-                            .foregroundStyle(theme.sub)
-                    }
-                }
-            }
-
-            HStack(spacing: 6) {
-                heroButton("■ Stop", strong: true, disabled: isBusy) {
-                    Task { await store.stop(profile.profile) }
-                }
-                heroButton("↻ Restart", disabled: isBusy) {
-                    Task { await store.restart(profile.profile) }
-                }
-                if features.supportsBenchmarks {
-                    heroButton("Benchmark", disabled: isBusy || store.isBenchmarkInFlight(for: profile.profile)) {
-                        setInspectorPanel(.benchmarks)
-                        Task { await store.quickBenchmark([profile.profile]) }
-                    }
-                }
-            }
-        }
-        .padding(12)
-        .background(
-            LinearGradient(
-                colors: [accent.opacity(0.13), accent.opacity(0.05)],
-                startPoint: .top,
-                endPoint: .bottom
-            ),
-            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+        ActiveProfileHeroView(
+            profile: profile,
+            store: store,
+            context: .local,
+            decodeTokensPerSecond: decodeTokensPerSecond(for: profile.profile),
+            onOpenBenchmarks: { setInspectorPanel(.benchmarks) },
+            theme: theme,
+            accent: accent
         )
-        .overlay {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(accent.opacity(0.25), lineWidth: 1)
-        }
-        .padding(EdgeInsets(top: 8, leading: 10, bottom: 0, trailing: 10))
     }
 
     var reopenCard: some View {
@@ -388,120 +226,14 @@ extension MenuBarContentView {
     }
 
     func profileRow(_ profile: ModelProfileStatus) -> some View {
-        let pending = store.pendingLabel(for: profile.profile)
-        let isBusy = pending != nil
-
-        return HStack(spacing: 9) {
-            Circle()
-                .fill(rowDotColor(profile, pending: pending))
-                .frame(width: 7, height: 7)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(profile.displayName)
-                    .font(.system(size: 12.5, weight: .medium))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .foregroundStyle(theme.label)
-                Text(rowSubtitle(profile))
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(theme.sub)
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            HStack(spacing: 4) {
-                rowPrimaryButton(profile, pending: pending, isBusy: isBusy)
-                rowMenu(profile, isBusy: isBusy)
-            }
-        }
-        .padding(EdgeInsets(top: 7, leading: 6, bottom: 7, trailing: 6))
-        .contentShape(Rectangle())
-        .background(RowHoverHighlight(color: theme.hoverBg))
-    }
-
-    func rowDotColor(_ profile: ModelProfileStatus, pending: String?) -> Color {
-        switch store.profileBadgeState(for: profile, relativeTo: .now) {
-        case .pending:
-            return DashboardTheme.pendingOrange
-        case .running:
-            return DashboardTheme.runningGreen
-        case .stale, .notRunning:
-            break
-        }
-        return theme.dotOff
-    }
-
-    @ViewBuilder
-    func rowPrimaryButton(_ profile: ModelProfileStatus, pending: String?, isBusy: Bool) -> some View {
-        if isBusy {
-            rowIcon {
-                ProgressView()
-                    .controlSize(.mini)
-            }
-        } else if isDisplayedRunning(profile) {
-            rowActionIcon("stop.fill", color: DashboardTheme.stopRed, label: "Stop \(profile.displayName)") {
-                Task { await store.stop(profile.profile) }
-            }
-        } else {
-            rowActionIcon("play.fill", color: accent, label: "Activate \(profile.displayName)") {
-                Task { await store.activate(profile.profile) }
-            }
-        }
-    }
-
-    func rowMenu(_ profile: ModelProfileStatus, isBusy: Bool) -> some View {
-        Menu {
-            Button("Start (keep others running)") {
-                Task { await store.start(profile.profile) }
-            }
-            .disabled(isBusy || profile.running)
-            Button("Restart") {
-                Task { await store.restart(profile.profile) }
-            }
-            .disabled(isBusy)
-            if features.supportsBenchmarks {
-                Button("Benchmark") {
-                    setInspectorPanel(.benchmarks)
-                    Task { await store.quickBenchmark([profile.profile]) }
-                }
-                .disabled(isBusy || store.isBenchmarkInFlight(for: profile.profile))
-            }
-            Divider()
-            Button("Copy Endpoint URL") {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(profile.baseURL, forType: .string)
-            }
-        } label: {
-            Image(systemName: "ellipsis")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(theme.sub)
-                .frame(width: 26, height: 26)
-                .background(theme.btnBg, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                .contentShape(Rectangle())
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .accessibilityLabel("More actions for \(profile.displayName)")
-    }
-
-    func rowActionIcon(_ systemName: String, color: Color, label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            rowIcon {
-                Image(systemName: systemName)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(color)
-            }
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(label)
-    }
-
-    func rowIcon(@ViewBuilder content: () -> some View) -> some View {
-        content()
-            .frame(width: 26, height: 26)
-            .background(theme.btnBg, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-            .contentShape(Rectangle())
+        ProfileListRowView(
+            profile: profile,
+            store: store,
+            showReachability: false,
+            onOpenBenchmarks: { setInspectorPanel(.benchmarks) },
+            theme: theme,
+            accent: accent
+        )
     }
 }
 

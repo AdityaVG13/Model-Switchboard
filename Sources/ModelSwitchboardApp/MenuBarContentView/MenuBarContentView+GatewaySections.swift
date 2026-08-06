@@ -92,10 +92,16 @@ struct RemoteGatewaySectionView: View {
                 }
             } else {
                 ForEach(visibleProfiles) { profile in
-                    RemoteProfileRowView(
-                        runtime: runtime,
+                    ProfileListRowView(
                         profile: profile,
+                        store: store,
                         hostMetrics: hostMetrics,
+                        reachableEndpointURL: runtime.reachableEndpointURL(for: profile),
+                        showReachability: true,
+                        endpointUnavailableHint: runtime.config.kind == .ssh
+                            ? "not forwarded to this Mac"
+                            : "bound on host only",
+                        gatewayDisplayName: runtime.name,
                         theme: theme,
                         accent: accent
                     )
@@ -172,202 +178,5 @@ struct RemoteGatewaySectionView: View {
     private var connectionIssue: String? {
         if case .failed(let message) = runtime.tunnelState { return message }
         return store.lastError
-    }
-}
-
-/// A remote model row: same visual language as the local rows, with actions
-/// bound to the gateway's own store and a copyable, locally valid endpoint.
-struct RemoteProfileRowView: View {
-    @Bindable var runtime: GatewayRuntime
-    let profile: ModelProfileStatus
-    var hostMetrics: HostMetricsPayload? = nil
-    let theme: DashboardTheme
-    let accent: Color
-
-    private var store: SwitchboardStore { runtime.store }
-
-    var body: some View {
-        let pending = store.pendingLabel(for: profile.profile)
-        let isBusy = pending != nil
-
-        HStack(spacing: 9) {
-            Circle()
-                .fill(dotColor(pending: pending))
-                .frame(width: 7, height: 7)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(profile.displayName)
-                    .font(.system(size: 12.5, weight: .medium))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .foregroundStyle(theme.label)
-                Text(subtitle(pending: pending))
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(theme.sub)
-                    .lineLimit(1)
-                if let endpointLine {
-                    // Which model is live on which endpoint, as reachable from
-                    // this Mac (forwarded/tailnet URL, not the remote's view).
-                    Text(endpointLine)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(theme.sub)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .textSelection(.enabled)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            HStack(spacing: 4) {
-                primaryButton(pending: pending, isBusy: isBusy)
-                rowMenu(isBusy: isBusy)
-            }
-        }
-        .padding(EdgeInsets(top: 7, leading: 6, bottom: 7, trailing: 6))
-        .contentShape(Rectangle())
-        .background(RowHoverHighlight(color: theme.hoverBg))
-    }
-
-    private var isDisplayedRunning: Bool {
-        MenuBarContentView.isDisplayedRunning(profile, in: store)
-    }
-
-    /// `<served model id> · <URL usable from this Mac>` for live rows.
-    private var endpointLine: String? {
-        guard isDisplayedRunning, profile.ready else { return nil }
-        let servedModel = profile.serverIDs.first ?? profile.serverModelID
-        guard let url = runtime.reachableEndpointURL(for: profile) else {
-            let why = runtime.config.kind == .ssh ? "not forwarded to this Mac" : "bound on host only"
-            return "\(servedModel) · \(profile.host):\(profile.port) (\(why))"
-        }
-        return "\(servedModel) · \(url)"
-    }
-
-    private func dotColor(pending: String?) -> Color {
-        switch store.profileBadgeState(for: profile, relativeTo: .now) {
-        case .pending:
-            return DashboardTheme.pendingOrange
-        case .running:
-            return DashboardTheme.runningGreen
-        case .stale, .notRunning:
-            return theme.dotOff
-        }
-    }
-
-    private func subtitle(pending: String?) -> String {
-        var parts = [profile.runtimeLabel ?? profile.runtime, ":\(profile.port)"]
-        if let pending {
-            parts.append(pending.lowercased() + "…")
-        } else if let memory = HostMetricsPresentation.profileMemoryLabel(
-            status: profile,
-            metrics: hostMetrics,
-            isRunning: isDisplayedRunning
-        ) {
-            parts.append(memory)
-        }
-        if isDisplayedRunning, runtime.reachableEndpointURL(for: profile) == nil {
-            // Endpoint is loopback-on-remote (or not forwarded yet). Not a model class.
-            parts.append(runtime.config.kind == .ssh ? "not forwarded" : "host-local bind")
-        }
-        return parts.joined(separator: " · ")
-    }
-
-    @ViewBuilder
-    private func primaryButton(pending: String?, isBusy: Bool) -> some View {
-        if isBusy {
-            iconContainer {
-                ProgressView()
-                    .controlSize(.mini)
-            }
-        } else if isDisplayedRunning {
-            actionIcon("stop.fill", color: DashboardTheme.stopRed, label: "Stop \(profile.displayName)") {
-                Task { await store.stop(profile.profile) }
-            }
-        } else {
-            actionIcon("play.fill", color: accent, label: "Activate \(profile.displayName)") {
-                Task { await store.activate(profile.profile) }
-            }
-        }
-    }
-
-    private func rowMenu(isBusy: Bool) -> some View {
-        let endpointURL = runtime.reachableEndpointURL(for: profile)
-        // Agent-side quick benchmark does not need a Mac-forwarded model URL.
-        let canBenchmark = store.features.supportsBenchmarks
-            && profile.ready
-            && store.canStartBenchmarkNow
-            && !store.isBenchmarkInFlight(for: profile.profile)
-        return Menu {
-            Button("Start (keep others running)") {
-                Task { await store.start(profile.profile) }
-            }
-            .disabled(isBusy || profile.running)
-            Button("Restart") {
-                Task { await store.restart(profile.profile) }
-            }
-            .disabled(isBusy)
-            if store.features.supportsBenchmarks {
-                Divider()
-                if canBenchmark {
-                    Button("Benchmark on \(runtime.name)") {
-                        Task { await store.quickBenchmark([profile.profile]) }
-                    }
-                } else if !profile.ready {
-                    Button("Benchmark disabled · model not ready on :\(profile.port)") {}
-                        .disabled(true)
-                } else if store.benchmark?.running == true {
-                    Button("Benchmark running on \(runtime.name)…") {}
-                        .disabled(true)
-                } else if !store.canStartBenchmarkNow {
-                    Button("Benchmark cooling down") {}
-                        .disabled(true)
-                } else {
-                    Button("Benchmark unavailable") {}
-                        .disabled(true)
-                }
-            }
-            Divider()
-            if let endpointURL {
-                Button("Copy Endpoint URL") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(endpointURL, forType: .string)
-                }
-            } else {
-                Button("Endpoint not reachable from this Mac") {}
-                    .disabled(true)
-            }
-        } label: {
-            Image(systemName: "ellipsis")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(theme.sub)
-                .frame(width: 26, height: 26)
-                .background(theme.btnBg, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                .contentShape(Rectangle())
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .accessibilityLabel("More actions for \(profile.displayName)")
-    }
-
-    private func actionIcon(
-        _ systemName: String, color: Color, label: String, action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            iconContainer {
-                Image(systemName: systemName)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(color)
-            }
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(label)
-    }
-
-    private func iconContainer(@ViewBuilder content: () -> some View) -> some View {
-        content()
-            .frame(width: 26, height: 26)
-            .background(theme.btnBg, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-            .contentShape(Rectangle())
     }
 }
