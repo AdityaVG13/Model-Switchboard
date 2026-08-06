@@ -3510,7 +3510,11 @@ class AgentService:
                     # profile/claim to resolve — only reap if cmdline still looks
                     # like a model server (guards against PID reuse after reboot).
                     orphan = self._read_pid(name)
-                    if orphan and process_is_alive(orphan):
+                    if (
+                        orphan
+                        and orphan != os.getpid()
+                        and process_is_alive(orphan)
+                    ):
                         cmd = process_command(orphan) or ""
                         if command_looks_like_model_server(cmd):
                             terminate_process_tree(orphan, force=force)
@@ -3644,6 +3648,7 @@ class AgentService:
             if re.search(rf"(?<!\d):{re.escape(port)}(?!\d)", command):
                 return True
         return command_looks_like_model_server(command) and port_is_listening(port)
+            and (listener_pid(port) == pid)
 
     def _probe_health(self, profile: Profile) -> tuple[bool, list[str]]:
         if profile.healthcheck_mode == "disabled":
