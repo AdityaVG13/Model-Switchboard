@@ -177,9 +177,10 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
         hub.upsertGateway(config, token: "")
         defer { hub.removeGateway(id: config.id) }
 
-        hub.tunnelStateChanged(gatewayID: config.id, state: .failed("SSH auth failed."))
-
         let runtime = try #require(hub.remoteRuntimes.first)
+        let tunnelID = try #require(runtime.tunnel?.instanceID)
+        hub.tunnelStateChanged(gatewayID: config.id, tunnelID: tunnelID, state: .failed("SSH auth failed."))
+
         #expect(runtime.tunnelState == .failed("SSH auth failed."))
         #expect(runtime.store.lastError == "SSH auth failed.")
         #expect(hub.localStore.lastError == nil)
@@ -197,7 +198,8 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
         let runtime = try #require(hub.remoteRuntimes.first)
         #expect(runtime.store.refreshTask == nil)
 
-        hub.tunnelStateChanged(gatewayID: config.id, state: .established)
+        let tunnelID = try #require(runtime.tunnel?.instanceID)
+        hub.tunnelStateChanged(gatewayID: config.id, tunnelID: tunnelID, state: .established)
         #expect(runtime.store.refreshTask != nil)
     }
 }

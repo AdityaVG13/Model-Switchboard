@@ -135,3 +135,12 @@ import Testing
     #expect(customPort.sshDestination == "spark.local")
     #expect(customPort.endpointSummary == "ssh spark.local -p 2222 → 127.0.0.1:8877")
 }
+
+@Test func detectsTailscaleCGNATAddresses() {
+    #expect(GatewayConfig.isTailscaleCGNATAddress("100.64.0.1"))
+    #expect(GatewayConfig.isTailscaleCGNATAddress("100.101.102.103"))
+    #expect(GatewayConfig.isTailscaleCGNATAddress("100.127.255.255"))
+    #expect(!GatewayConfig.isTailscaleCGNATAddress("100.63.0.1"))
+    #expect(!GatewayConfig.isTailscaleCGNATAddress("10.0.0.9"))
+    #expect(!GatewayConfig.isTailscaleCGNATAddress("spark.tail1234.ts.net"))
+}

@@ -233,12 +233,12 @@ final class GatewayHub {
 
     func tunnelStateChanged(
         gatewayID: String,
-        tunnelID: UUID? = nil,
+        tunnelID: UUID,
         state: SSHTunnelManager.State
     ) {
         guard let runtime = remoteRuntimes.first(where: { $0.id == gatewayID }) else { return }
         // Ignore late events from a tunnel that was replaced for this gateway.
-        if let tunnelID, let current = runtime.tunnel, current.instanceID != tunnelID {
+        if let current = runtime.tunnel, current.instanceID != tunnelID {
             return
         }
         runtime.tunnelState = state

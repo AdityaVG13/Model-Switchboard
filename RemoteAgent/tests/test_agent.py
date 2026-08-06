@@ -1954,7 +1954,7 @@ class LifecycleSafetyTests(unittest.TestCase):
                             {
                                 "profile": "discovered-11434",
                                 "running": True,
-                                "discovery_source": "discovered",
+                                "discovery_source": "listening",
                             },
                         ]
                     },
@@ -1962,6 +1962,95 @@ class LifecycleSafetyTests(unittest.TestCase):
                     with unittest.mock.patch.object(harness.service, "start"):
                         harness.service.switch_profile("managed")
                 self.assertNotIn("discovered-11434", stopped)
+            finally:
+                harness.close()
+
+    def test_status_does_not_claim_unmatched_ready_listener_pid(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            port = free_port()
+            write_profile(
+                root,
+                "stub",
+                {
+                    "REQUEST_MODEL": "stub-model",
+                    "SERVER_MODEL_ID": "stub-model",
+                    "PORT": str(port),
+                    "START_COMMAND": "true",
+                    "HEALTHCHECK_MODE": "disabled",
+                },
+            )
+            harness = AgentHarness(root)
+            try:
+                profile = harness.service.profiles.profile("stub")
+                with (
+                    unittest.mock.patch.object(
+                        harness.service, "_probe_health", return_value=(True, ["stub-model"])
+                    ),
+                    unittest.mock.patch.object(agent, "listener_pid", return_value=4242),
+                    unittest.mock.patch.object(agent, "port_is_listening", return_value=True),
+                    unittest.mock.patch.object(
+                        harness.service, "_process_matches", return_value=False
+                    ),
+                    unittest.mock.patch.object(agent, "process_is_alive", return_value=False),
+                    unittest.mock.patch.object(agent, "process_is_zombie", return_value=False),
+                ):
+                    status = harness.service.status(profile)
+                self.assertTrue(status["ready"])
+                self.assertFalse(status["running"])
+                self.assertIsNone(status["pid"])
+
+                killed: list[int] = []
+
+                def fake_terminate(pid: int, force: bool = False) -> None:
+                    killed.append(pid)
+
+                with (
+                    unittest.mock.patch.object(agent, "listener_pid", return_value=4242),
+                    unittest.mock.patch.object(
+                        harness.service, "_process_matches", return_value=False
+                    ),
+                    unittest.mock.patch.object(
+                        agent, "terminate_process_tree", side_effect=fake_terminate
+                    ),
+                    unittest.mock.patch.object(agent, "process_is_zombie", return_value=False),
+                    unittest.mock.patch.object(
+                        harness.service, "status", return_value=status
+                    ),
+                ):
+                    harness.service.stop("stub", force=True)
+                self.assertEqual(killed, [])
+            finally:
+                harness.close()
+
+    def test_stop_all_includes_durable_pid_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_profile(
+                root,
+                "stub",
+                {
+                    "REQUEST_MODEL": "stub-model",
+                    "SERVER_MODEL_ID": "stub-model",
+                    "PORT": str(free_port()),
+                    "START_COMMAND": "true",
+                    "HEALTHCHECK_MODE": "disabled",
+                },
+            )
+            harness = AgentHarness(root)
+            try:
+                run_dir = harness.service.configuration.run_directory
+                run_dir.mkdir(parents=True, exist_ok=True)
+                (run_dir / "port-18001.pid").write_text("99999\n", encoding="utf-8")
+                stopped: list[str] = []
+
+                def tracking_stop(name: str, force: bool = False) -> None:
+                    stopped.append(name)
+
+                harness.service.stop = tracking_stop  # type: ignore[method-assign]
+                harness.service.stop_all()
+                self.assertIn("stub", stopped)
+                self.assertIn("port-18001", stopped)
             finally:
                 harness.close()
 

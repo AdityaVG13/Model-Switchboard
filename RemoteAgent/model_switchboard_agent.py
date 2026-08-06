@@ -3278,37 +3278,25 @@ class AgentService:
                 listener = listener_pid_from_inventory(profile.endpoint_port, listeners)
             else:
                 listener = listener_pid(profile.endpoint_port)
-            if listener is not None:
-                # Prefer cmdline match, but if health already succeeded on this
-                # port trust the listener — external launch scripts rarely share
-                # profile name tokens with the model process argv.
-                if self._process_matches(listener, profile) or ready:
-                    pid = listener
-                    zombie = process_is_zombie(pid)
+            # Ownership only — never adopt a listener just because health
+            # succeeded (that would make stop() SIGKILL foreign processes via
+            # primary_pid without _process_matches). Mirrors Swift ControllerService.
+            if listener is not None and self._process_matches(listener, profile):
+                pid = listener
+                zombie = process_is_zombie(pid)
         label, _, launch_mode = profile.runtime_spec
         alive = process_is_alive(pid)
-        # Healthy OpenAI/loopback endpoint on the claimed port counts as live
-        # even when we could not attribute a pid (permission / pid namespace).
-        if ready and not alive:
-            if listeners is not None:
-                listening = port_listening_from_inventory(
-                    profile.endpoint_port, listeners
-                )
-            else:
-                listening = port_is_listening(profile.endpoint_port)
-            if listening:
-                alive = True
-                if pid is None:
-                    if listeners is not None:
-                        pid = listener_pid_from_inventory(
-                            profile.endpoint_port, listeners
-                        )
-                    else:
-                        pid = listener_pid(profile.endpoint_port)
-                    zombie = bool(pid and process_is_zombie(pid))
-                    alive = process_is_alive(pid) or ready
+        listening = False
+        if listeners is not None:
+            listening = port_listening_from_inventory(profile.endpoint_port, listeners)
+        else:
+            listening = port_is_listening(profile.endpoint_port)
+        # Health can succeed on a foreign listener; keep ready visible without
+        # claiming ownership (running/pid stay unset) so stop stays safe.
         state = process_lifecycle_state(pid, ready=ready and alive)
         if ready and alive:
+            state = "ready"
+        elif ready and listening and not alive:
             state = "ready"
         if zombie and not process_is_alive(pid):
             state = "zombie"
@@ -3329,8 +3317,10 @@ class AgentService:
             "pid": pid if (alive or zombie) else None,
             "running": alive,
             "state": state,
-            "ready": bool(ready and alive),
-            "server_ids": server_ids if alive else [],
+            # Health alone when the port answers (Swift-like). Unowned ready
+            # endpoints stay stop-safe because pid/running stay false.
+            "ready": bool(ready and (alive or listening)),
+            "server_ids": server_ids if (alive or ready) else [],
             "rss_mb": process_rss_mb(pid) if alive and pid else None,
             # GPU VRAM when nvidia-smi can attribute memory to this pid (not RSS).
             "vram_mb": process_vram_mb(pid) if alive and pid else None,
@@ -3344,14 +3334,18 @@ class AgentService:
     def start(self, name: str) -> None:
         with self._mutation_lock:
             profile = self.resolve_profile(name)
+            # Always key pid files / supervision on the canonical profile name
+            # (claims resolve discovered-N → port-N).
+            canonical = profile.name
             if not (profile.get("START_COMMAND") or "").strip() and profile.runtime_spec[2] == "external":
                 raise UnsupportedError(
-                    f"{name}: discovered endpoint has no launch claim; cannot start from Switchboard"
+                    f"{canonical}: discovered endpoint has no launch claim; cannot start from Switchboard"
                 )
-            # Idempotent: a second start must not orphan the first process tree.
-            current = self.status(profile)
-            if current.get("running") or current.get("ready"):
-                self._supervised.add(name)
+            # Idempotent only when *this* agent owns a live pid file — not when a
+            # foreign listener happens to answer health on the profile port.
+            owned_pid = self._read_pid(canonical)
+            if owned_pid and process_is_alive(owned_pid):
+                self._supervised.add(canonical)
                 return
             loaded = self.profiles.load()
             # Include synthetic claim profile for conflict checks on the port.
@@ -3362,7 +3356,7 @@ class AgentService:
 
             environment = dict(os.environ)
             environment.update(profile.values)
-            environment["MODEL_PROFILE"] = name
+            environment["MODEL_PROFILE"] = canonical
             environment["MODEL_SWITCHBOARD_PROFILE_LOADED"] = "1"
             environment["MODEL_SWITCHBOARD_AGENT"] = "1"
 
@@ -3383,21 +3377,32 @@ class AgentService:
                     start_new_session=True,
                 )
             except OSError as error:
-                raise OperationFailedError(f"failed to launch {name}: {error}") from error
+                raise OperationFailedError(f"failed to launch {canonical}: {error}") from error
             finally:
                 log_handle.close()
-            self._pid_file(name).write_text(f"{process.pid}\n", encoding="utf-8")
-            self._supervised.add(name)
+            self._pid_file(canonical).write_text(f"{process.pid}\n", encoding="utf-8")
+            self._supervised.add(canonical)
             clear_listening_tcp_cache()
 
     def stop(self, name: str, force: bool = False) -> None:
         with self._mutation_lock:
             self._suppress_watchdog()
-            self._supervised.discard(name)
-            self._clear_active_profile(if_matching=name)
             profile = self.resolve_profile(name)
+            canonical = profile.name
+            self._supervised.discard(canonical)
+            self._clear_active_profile(if_matching=canonical)
             current = self.status(profile)
             primary_pid = current.get("pid")
+            # Never terminate an unmatched primary — status() may still report
+            # ready for a foreign listener without owning its pid.
+            if primary_pid and not self._process_matches(primary_pid, profile):
+                # Pid-file child we started should match; if it does not, prefer
+                # the pid-file value only when it is still our recorded child.
+                owned = self._read_pid(canonical)
+                if owned and owned == primary_pid and process_is_alive(owned):
+                    pass
+                else:
+                    primary_pid = owned if (owned and process_is_alive(owned)) else None
             stop_error: Exception | None = None
 
             stop_command = (profile.get("STOP_COMMAND") or "").strip()
@@ -3435,12 +3440,12 @@ class AgentService:
                     )
                 if not wait_ok:
                     raise OperationFailedError(
-                        f"failed to stop {name}: endpoint or process is still alive"
+                        f"failed to stop {canonical}: endpoint or process is still alive"
                     )
-            self._pid_file(name).unlink(missing_ok=True)
+            self._pid_file(canonical).unlink(missing_ok=True)
             clear_listening_tcp_cache()
             if stop_error is not None and not force:
-                raise OperationFailedError(f"STOP_COMMAND failed for {name}: {stop_error}")
+                raise OperationFailedError(f"STOP_COMMAND failed for {canonical}: {stop_error}")
 
     def restart(self, name: str) -> None:
         with self._mutation_lock:
@@ -3454,6 +3459,7 @@ class AgentService:
     def switch_profile(self, name: str) -> None:
         with self._mutation_lock:
             profile = self.resolve_profile(name)
+            canonical = profile.name
             loaded = dict(self.profiles.load())
             loaded[profile.name] = profile
             self.profiles.ensure_unique(profile.name, "activate", loaded)
@@ -3463,23 +3469,40 @@ class AgentService:
             managed_names = set(loaded.keys()) | set(self._supervised)
             for item in self.status_payload()["statuses"]:
                 other = item["profile"]
-                if other == name or not item["running"]:
+                if other == canonical or not item["running"]:
                     continue
-                if item.get("discovery_source") == "profile" or other in managed_names:
+                source = item.get("discovery_source")
+                if source == "profile" or other in managed_names:
                     self.stop(other)
-            self.start(name)
+            self.start(canonical)
             self.configuration.run_directory.mkdir(parents=True, exist_ok=True)
-            self.configuration.active_profile_file.write_text(f"{name}\n", encoding="utf-8")
+            self.configuration.active_profile_file.write_text(f"{canonical}\n", encoding="utf-8")
 
     def stop_all(self, force: bool = False) -> None:
         with self._mutation_lock:
             failures: list[str] = []
-            # Folder profiles plus any claim/synthetic names started this session.
+            # Folder profiles, session-supervised claims, and durable pid files
+            # left from a prior agent process (claims survive reboot of the agent).
             names = set(self.profiles.load().keys()) | set(self._supervised)
+            try:
+                for path in self.configuration.run_directory.glob("*.pid"):
+                    stem = path.stem
+                    if stem in {"benchmark", "active-profile"}:
+                        continue
+                    names.add(stem)
+            except OSError:
+                pass
             for name in sorted(names):
                 try:
                     # Nested stop also takes the mutation lock (RLock).
                     self.stop(name, force=force)
+                except ProfileNotFoundError:
+                    # Durable pid file from a prior claim/session with no live
+                    # profile/claim to resolve — still reap the recorded pid.
+                    orphan = self._read_pid(name)
+                    if orphan and process_is_alive(orphan):
+                        terminate_process_tree(orphan, force=force)
+                    self._pid_file(name).unlink(missing_ok=True)
                 except AgentError as error:
                     failures.append(f"{name}: {error.message}")
             # Clear any leftover active marker so a later watchdog cannot revive.

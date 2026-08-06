@@ -340,9 +340,15 @@ struct GatewaySettingsSection: View {
             guard let url = URL(string: config.baseURL),
                   let scheme = url.scheme?.lowercased(),
                   ["http", "https"].contains(scheme),
-                  url.host != nil
+                  let host = url.host
             else {
                 validationMessage = "Controller URL must be an http(s) URL."
+                return
+            }
+            // ATS allows .ts.net and RFC1918 local networking — not Tailscale
+            // CGNAT IPs. Prefer MagicDNS (or SSH) for cleartext agent HTTP.
+            if scheme == "http", GatewayConfig.isTailscaleCGNATAddress(host) {
+                validationMessage = "Use the host's MagicDNS name (.ts.net) for Tailscale direct mode — raw 100.x addresses are blocked by App Transport Security."
                 return
             }
         }

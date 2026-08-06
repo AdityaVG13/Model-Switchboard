@@ -81,6 +81,14 @@ public struct GatewayConfig: Codable, Identifiable, Equatable, Sendable {
             return "ssh \(destination)\(port) → 127.0.0.1:\(remotePort)"
         }
     }
+
+    /// Tailscale IPv4 CGNAT range 100.64.0.0/10 — not covered by ATS
+    /// `NSAllowsLocalNetworking`, so cleartext direct URLs must use MagicDNS.
+    public static func isTailscaleCGNATAddress(_ host: String) -> Bool {
+        let parts = host.split(separator: ".").compactMap { Int($0) }
+        guard parts.count == 4 else { return false }
+        return parts[0] == 100 && (64...127).contains(parts[1])
+    }
 }
 
 /// The identity a `SwitchboardStore` runs under.

@@ -192,12 +192,15 @@ actor SSHTunnelManager {
         return Self.classifyFailure(stderrLines: stderrTail)
     }
 
-    /// The `-L` listener only opens after authentication succeeds, so a
-    /// successful local connect proves the tunnel is up.
+    /// The `-L` listener only opens after authentication succeeds. Require both
+    /// a local connect *and* a live ControlMaster — bare TCP can succeed against
+    /// a port squatter while ssh is still authenticating.
     private func waitUntilEstablished(process: Process) async -> Bool {
         let deadline = Date().addingTimeInterval(Self.establishTimeoutSeconds)
         while Date() < deadline, process.isRunning, desiredActive {
-            if Self.canConnectLoopback(port: localPort) {
+            if Self.canConnectLoopback(port: localPort),
+               runControlCommand(["-O", "check"])
+            {
                 return true
             }
             try? await Task.sleep(for: .seconds(Self.establishPollSeconds))
