@@ -222,7 +222,7 @@ struct ProfileListRowView: View {
                     .foregroundStyle(color)
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(QuietCraftPressStyle())
         .accessibilityLabel(label)
     }
 
@@ -324,7 +324,6 @@ struct ActiveProfileHeroView: View {
                         Circle()
                             .fill(DashboardTheme.runningGreen)
                             .frame(width: 6, height: 6)
-                            .shadow(color: DashboardTheme.runningGreen.opacity(0.6), radius: 3)
                         Text(statusLabel)
                             .font(.system(size: 10, weight: .semibold))
                             .kerning(0.8)
@@ -441,7 +440,7 @@ struct ActiveProfileHeroView: View {
                 .foregroundStyle(strong ? theme.btnStrongFg : theme.btnFg)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(QuietCraftPressStyle())
         .disabled(disabled)
         .opacity(disabled ? 0.5 : 1)
     }

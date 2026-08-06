@@ -45,14 +45,12 @@ extension MenuBarContentView {
                         .frame(width: 16, height: 16)
                         .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(QuietCraftPressStyle())
                     .disabled(isRefreshing)
                     .accessibilityLabel(isRefreshing ? "Refreshing" : "Refresh")
                     .help(isRefreshing ? "Refresh in progress" : "Refresh all gateways")
                     .transaction { $0.animation = nil }
-                    Text("v\(Self.appVersion)")
-                        .font(.system(size: 11))
-                        .foregroundStyle(theme.faint)
+                    // Version lives in Settings — keep the ready count as the hero.
                 }
             }
 

@@ -23,7 +23,7 @@ extension MenuBarContentView {
                         }
                         .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(QuietCraftPressStyle())
                     .foregroundStyle(accent)
                     .accessibilityLabel("Close \(panel.title)")
                     Spacer()

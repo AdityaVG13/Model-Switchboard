@@ -165,6 +165,9 @@ struct DashboardSegmentedTabs<Option: Hashable>: View {
     @Binding var selection: Option
     let theme: DashboardTheme
 
+    @Namespace private var tabChipNamespace
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         HStack(spacing: 2) {
             ForEach(options, id: \.self) { option in
@@ -173,13 +176,25 @@ struct DashboardSegmentedTabs<Option: Hashable>: View {
                     .font(.system(size: 11.5, weight: isOn ? .semibold : .regular))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 4)
-                    .background(
-                        isOn ? theme.tabOnBg : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    )
                     .foregroundStyle(isOn ? theme.tabOnFg : theme.tabOffFg)
                     .contentShape(Rectangle())
-                    .onTapGesture { selection = option }
+                    .background {
+                        if isOn {
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(theme.tabOnBg)
+                                .matchedGeometryEffect(id: "selected-tab", in: tabChipNamespace)
+                        }
+                    }
+                    .onTapGesture {
+                        guard option != selection else { return }
+                        if reduceMotion {
+                            selection = option
+                        } else {
+                            withAnimation(.easeOut(duration: 0.18)) {
+                                selection = option
+                            }
+                        }
+                    }
                     .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
             }
         }

@@ -30,7 +30,8 @@ extension MenuBarContentView {
                     stopButtonTitle,
                     color: hasAnythingToStop ? DashboardTheme.stopRed : theme.faint,
                     isBusy: hub.isStopEverythingBusy,
-                    disabled: !hasAnythingToStop
+                    disabled: !hasAnythingToStop,
+                    holdToConfirm: true
                 ) {
                     Task { await hub.stopEverything() }
                 }
@@ -43,10 +44,14 @@ extension MenuBarContentView {
                 if let footerState = footerState(relativeTo: context.date) {
                     Text(footerState.label)
                         .font(.system(size: 9, weight: .bold))
+                        .kerning(0.6)
                         .lineLimit(1)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(footerState.color.opacity(0.16), in: Capsule())
+                        .padding(.leading, 6)
+                        .overlay(alignment: .leading) {
+                            Rectangle()
+                                .fill(footerState.color)
+                                .frame(width: 2)
+                        }
                         .foregroundStyle(footerState.color)
                         .help(hub.menuBarHelp)
                         .padding(.horizontal, 6)
@@ -109,33 +114,46 @@ extension MenuBarContentView {
         store.integrations.filter { $0.capabilities.contains("sync") }
     }
 
+    @ViewBuilder
     func footerTextButton(
         _ title: String,
         color: Color? = nil,
         isBusy: Bool = false,
         disabled: Bool = false,
+        holdToConfirm: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 4) {
-                if isBusy {
-                    ProgressView()
-                        .controlSize(.mini)
+        let resolved = color ?? theme.btnFg
+        if holdToConfirm {
+            HoldToConfirmTextButton(
+                title: title,
+                color: resolved,
+                isBusy: isBusy,
+                disabled: disabled,
+                action: action
+            )
+        } else {
+            Button(action: action) {
+                HStack(spacing: 4) {
+                    if isBusy {
+                        ProgressView()
+                            .controlSize(.mini)
+                    }
+                    Text(title)
+                        .font(.system(size: 11.5))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .allowsTightening(true)
                 }
-                Text(title)
-                    .font(.system(size: 11.5))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                    .allowsTightening(true)
+                .contentShape(Rectangle())
             }
-            .contentShape(Rectangle())
+            .buttonStyle(QuietCraftPressStyle())
+            .foregroundStyle(resolved)
+            .disabled(isBusy || disabled)
+            .opacity(disabled && !isBusy ? 0.4 : 1)
+            .accessibilityLabel(title)
+            .accessibilityHint(disabled ? "Nothing is running" : "")
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(color ?? theme.btnFg)
-        .disabled(isBusy || disabled)
-        .opacity(disabled && !isBusy ? 0.4 : 1)
-        .accessibilityLabel(title)
-        .accessibilityHint(disabled ? "Nothing is running" : "")
     }
 
     func footerIconButton(_ systemName: String, label: String, action: @escaping () -> Void) -> some View {
@@ -152,7 +170,7 @@ extension MenuBarContentView {
                 )
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(QuietCraftPressStyle())
         .accessibilityLabel(label)
         .help(label)
     }

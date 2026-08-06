@@ -165,7 +165,7 @@ extension MenuBarContentView {
                 .foregroundStyle(strong ? theme.btnStrongFg : theme.btnFg)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(QuietCraftPressStyle())
         .disabled(disabled)
         .opacity(disabled ? 0.5 : 1)
     }
