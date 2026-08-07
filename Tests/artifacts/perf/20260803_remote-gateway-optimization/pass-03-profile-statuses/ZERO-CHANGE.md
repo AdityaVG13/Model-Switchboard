@@ -55,7 +55,7 @@ There is no second per-profile inventory and no deliberate live path inside the 
 
 **Check 2 -- InventoryPortLookupTests already assert no live connect/lsof on that path**
 
-`RemoteAgent/tests/test_agent.py` class `InventoryPortLookupTests`:
+`InventoryPortLookupTests` (historical Python suite — removed; contracts now in Swift `RemoteAgentConformanceTests`):
 
 - `test_status_payload_skips_live_port_probes_when_inventory_known` patches `port_is_listening` / `listener_pid` with `AssertionError` and still gets pid/running from the inventory row.
 - `test_status_without_listeners_still_uses_live_checks` proves stop/start/watchdog `status()` without inventory still hits live `listener_pid` / `port_is_listening` (correct non-payload path).
@@ -119,7 +119,7 @@ Note (non-action): `discover_live_model_endpoints` still calls `port_is_listenin
 ## Evidence anchors
 
 - Agent: `RemoteAgent/model_switchboard_agent.py` -- `status_payload`, `status`, `_probe_health`, `port_listening_from_inventory`
-- Tests: `RemoteAgent/tests/test_agent.py` -- `InventoryPortLookupTests`
+- Tests: Swift `RemoteAgentConformanceTests` (Python `InventoryPortLookupTests` removed)
 - Profile: `HOTSPOTS.md` finding 2, `CPU-PROFILE.md` stage rank #2, `OPPORTUNITY-MATRIX.md` row score 2.67, H9 in `HYPOTHESIS-LEDGER.md`
 - Prior passes: pass-01 inventory TTL 0.075→2.0s; pass-02 parallel pollOnce (Mac)
 

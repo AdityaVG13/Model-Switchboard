@@ -132,7 +132,7 @@ Reference workload: **N=20** profiles, ~8 listeners, 3–8 claims, on-host agent
 | `C.scaling_ratio` p95(50)/p95(5) | Ratio | **≤ 12.0** | soft | Record; escalate if >> linear |
 | `C.list_listening_tcp_mean` | Inventory share | **≤ 50 ms** | stretch | Prior ~234 ms pre /proc opts; re-baseline |
 | `C.agent_rss_peak` | During microbench | **≤ 80 MB** | hard | Same agent ceiling |
-| `C.golden` | `test_perf_golden` + status shape | **pass** | hard | Behavior lock |
+| `C.golden` | Swift `RemoteAgentConformanceTests` + status shape | **pass** | hard | Behavior lock |
 
 ---
 
@@ -183,7 +183,7 @@ RSS is **peak during scenario window**, not idle minimum.
 | Status shape | `statuses` array; claim rows keep discovery fields; `log_path` string when applicable |
 | Host metrics shape | Decodes to `HostMetricsPayload`; units documented in model |
 | Unsupported metrics | Clear 404/not-found → unsupported message, no crash |
-| Unit + golden | `python3 -m unittest discover -s RemoteAgent/tests`; `test_perf_golden` green |
+| Unit + golden | Superseded by `swift test --filter RemoteAgentConformanceTests` (no Python unit suite) |
 | No home deep-walk hang | Full status must not return to multi-second $HOME walks |
 
 ---
