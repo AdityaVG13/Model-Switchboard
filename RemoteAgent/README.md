@@ -151,8 +151,12 @@ controller (see `SETUP.md` → "Controller API contract"): `/api/status`,
 `/api/stop-all`. Benchmarks and integrations are macOS-controller features;
 the agent answers those endpoints with structured "unsupported" responses.
 
-Tests: `python3 -m unittest discover -s RemoteAgent/tests -p 'test_*.py'`.
-Includes conformance cases shared with the reference controller.
+Contract coverage lives in native Swift tests (the real agent is the system
+under test; there is no Python unittest suite):
+
+```bash
+swift test --filter RemoteAgentConformanceTests
+```
 
 ## Discovery (host-generic)
 

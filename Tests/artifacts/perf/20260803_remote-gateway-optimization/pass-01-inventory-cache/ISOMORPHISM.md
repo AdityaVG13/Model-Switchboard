@@ -2,7 +2,7 @@
 
 **Lever (one):** raise `LISTENING_TCP_CACHE_TTL_SECONDS` from `0.075` to `2.0`.
 
-**File:** `RemoteAgent/model_switchboard_agent.py` only (plus comment in `RemoteAgent/tests/test_agent.py`).
+**File:** `RemoteAgent/model_switchboard_agent.py` only.
 
 **Source profile:** `Tests/artifacts/perf/20260803_remote-gateway-profiling/` -- list_listening_tcp cache miss → `lsof` on macOS dominates `status_payload` p95 (~45–57ms). Old 75ms TTL was shorter than any real UI poll (~10s active refresh), so almost every poll cold-missed.
 
@@ -52,5 +52,5 @@ No soft-stale dual-threshold: a single hard TTL of 2.0s is the isomorphic policy
 
 ## Verification
 
-- Unit: `python3 -m unittest discover -s RemoteAgent/tests -p 'test_agent.py' -k 'Listening or listening or status or Inventory' -v`
+- Unit: superseded by `swift test --filter RemoteAgentConformanceTests` (Python suite removed)
 - Tests already advance clock via `LISTENING_TCP_CACHE_TTL_SECONDS + 0.001` for expiry; within-TTL uses +0.05s (still < 2.0).

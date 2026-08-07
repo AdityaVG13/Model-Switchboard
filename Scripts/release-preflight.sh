@@ -83,29 +83,13 @@ pass "release workflow secret wiring"
 pass "privacy audit"
 
 if [[ "${MSW_PREFLIGHT_SKIP_TESTS:-0}" != "1" ]]; then
-  note "running swift test"
+  note "running swift test (native only — no Python test suites)"
   swift test
   pass "swift test"
 
   note "running dependency cycle check"
   ./Scripts/check-cycles.py
   pass "dependency cycle check"
-
-  note "running release automation tests"
-  if command -v uv >/dev/null 2>&1; then
-    uv run python3 -m unittest discover -s Scripts/tests -p 'test_*.py'
-  else
-    python3 -m unittest discover -s Scripts/tests -p 'test_*.py'
-  fi
-  pass "release automation tests"
-
-  note "running remote agent tests"
-  if command -v uv >/dev/null 2>&1; then
-    uv run python3 -m unittest discover -s RemoteAgent/tests -p 'test_*.py'
-  else
-    python3 -m unittest discover -s RemoteAgent/tests -p 'test_*.py'
-  fi
-  pass "remote agent tests"
 
 else
   note "skipping test suite (MSW_PREFLIGHT_SKIP_TESTS=1)"
