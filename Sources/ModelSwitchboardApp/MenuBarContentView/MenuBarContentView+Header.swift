@@ -42,7 +42,7 @@ extension MenuBarContentView {
                                     .controlSize(.mini)
                             }
                         }
-                        .frame(width: 16, height: 16)
+                        .frame(width: DashboardChromeMetrics.footerIconHitSize, height: DashboardChromeMetrics.footerIconHitSize)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(QuietCraftPressStyle())
@@ -110,12 +110,36 @@ extension MenuBarContentView {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(theme.panelBorder, lineWidth: 1)
         }
-        .help(
-            helpText
-                ?? (label == "GPU" && value == nil
-                    ? "GPU percentage unavailable on this macOS API path."
-                    : "")
-        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(utilizationAccessibilityLabel(label: label, value: value))
+        .modifier(OptionalHelp(text: utilizationHelp(label: label, value: value, helpText: helpText)))
     }
 
+    private func utilizationAccessibilityLabel(label: String, value: Double?) -> String {
+        if let value {
+            return "\(label) \(Int(value.rounded())) percent"
+        }
+        return "\(label) unavailable"
+    }
+
+    private func utilizationHelp(label: String, value: Double?, helpText: String?) -> String? {
+        if let helpText, !helpText.isEmpty { return helpText }
+        if label == "GPU", value == nil {
+            return "GPU percentage unavailable on this macOS API path."
+        }
+        return nil
+    }
+}
+
+private struct OptionalHelp: ViewModifier {
+    let text: String?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let text, !text.isEmpty {
+            content.help(text)
+        } else {
+            content
+        }
+    }
 }

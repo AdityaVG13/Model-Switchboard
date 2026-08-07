@@ -11,6 +11,7 @@ struct RemoteHostsPanelView: View {
     @State private var didCopyInstallCommand = false
     @State private var renamingGatewayID: String?
     @State private var renameDraft = ""
+    @State private var renameError: String?
 
     var body: some View {
         ScrollView(.vertical) {
@@ -42,6 +43,7 @@ struct RemoteHostsPanelView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("No remote gateways")
                 .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(theme.label)
             Text("Add a remote host in Settings to see GPU, VRAM, CPU, and RAM here.")
                 .font(.system(size: 11.5))
                 .foregroundStyle(theme.sub)
@@ -69,14 +71,15 @@ struct RemoteHostsPanelView: View {
                                 .font(.system(size: 13, weight: .semibold))
                                 .onSubmit { commitRename(id: runtime.id) }
                             Button("Save") { commitRename(id: runtime.id) }
-                                .buttonStyle(.plain)
+                                .buttonStyle(QuietCraftPressStyle())
                                 .font(.system(size: 11.5, weight: .semibold))
                                 .foregroundStyle(accent)
                             Button("Cancel") {
                                 renamingGatewayID = nil
                                 renameDraft = ""
+                                renameError = nil
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(QuietCraftPressStyle())
                             .font(.system(size: 11.5))
                             .foregroundStyle(theme.sub)
                         }
@@ -89,17 +92,23 @@ struct RemoteHostsPanelView: View {
                             Button {
                                 renamingGatewayID = runtime.id
                                 renameDraft = runtime.name
+                                renameError = nil
                             } label: {
                                 Image(systemName: "pencil")
                                     .font(.system(size: 10, weight: .semibold))
                                     .foregroundStyle(accent)
-                                    .frame(width: 20, height: 20)
+                                    .frame(width: 26, height: 26)
                                     .contentShape(Rectangle())
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(QuietCraftPressStyle())
                             .help("Rename this gateway")
                             .accessibilityLabel("Rename " + runtime.name)
                         }
+                    }
+                    if let renameError, renamingGatewayID == runtime.id {
+                        Text(renameError)
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(DashboardTheme.stopRed)
                     }
                     Text(subtitle(runtime: runtime, metrics: metrics))
                         .font(.system(size: 10.5, design: .monospaced))
@@ -232,6 +241,15 @@ struct RemoteHostsPanelView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(EdgeInsets(top: 7, leading: 8, bottom: 7, trailing: 8))
         .background(theme.panelBg.opacity(0.55), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(metricAccessibilityLabel(label: label, value: value, detail: detail))
+    }
+
+    private func metricAccessibilityLabel(label: String, value: String, detail: String?) -> String {
+        if let detail, !detail.trimmingCharacters(in: .whitespaces).isEmpty {
+            return "\(label) \(value), \(detail)"
+        }
+        return "\(label) \(value)"
     }
 
     private func percentLabel(_ value: Double?) -> String {
@@ -284,10 +302,14 @@ struct RemoteHostsPanelView: View {
 
     private func commitRename(id: String) {
         let trimmed = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty else {
+            renameError = "Give this gateway a name."
+            return
+        }
         _ = hub.renameGateway(id: id, to: trimmed)
         renamingGatewayID = nil
         renameDraft = ""
+        renameError = nil
     }
 
     private func agentUpgradeHint(for runtime: GatewayRuntime) -> String {
@@ -345,16 +367,7 @@ struct RemoteHostsPanelView: View {
     }
 
     private func connectionBadge(_ runtime: GatewayRuntime) -> String {
-        switch runtime.config.kind {
-        case .direct: return "DIRECT"
-        case .ssh:
-            switch runtime.tunnelState {
-            case .idle: return "SSH · OFF"
-            case .connecting: return "SSH · …"
-            case .established: return "SSH · UP"
-            case .failed: return "SSH · FAIL"
-            }
-        }
+        GatewayConnectionBadge.text(for: runtime)
     }
 
     private func statusColor(runtime: GatewayRuntime, entry: RemoteHostMetricsMonitor.Entry) -> Color {

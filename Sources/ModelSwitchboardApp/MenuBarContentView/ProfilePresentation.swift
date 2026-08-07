@@ -54,6 +54,8 @@ struct ProfileListRowView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(rowAccessibilityLabel)
 
             HStack(spacing: 4) {
                 primaryButton
@@ -92,15 +94,18 @@ struct ProfileListRowView: View {
                     .compactMap(\.decodeTokensPerSec)
                     .max() {
             parts.append(String(format: "%.1f t/s", tok))
-        } else if !showReachability,
-                  let rssMB = profile.rssMB,
-                  isDisplayedRunning {
-            parts.append(String(format: "%.1f GB", rssMB / 1024))
         }
         if showReachability, isDisplayedRunning, reachableEndpointURL == nil {
             parts.append(endpointUnavailableHint ?? "not reachable")
         }
         return parts.joined(separator: " · ")
+    }
+
+    private var rowAccessibilityLabel: String {
+        if let endpointLine {
+            return "\(profile.displayName), \(subtitle), \(endpointLine)"
+        }
+        return "\(profile.displayName), \(subtitle)"
     }
 
     /// `<served model id> · <URL usable from this Mac>` for live remote rows.
@@ -121,12 +126,20 @@ struct ProfileListRowView: View {
                 ProgressView()
                     .controlSize(.mini)
             }
+            .accessibilityLabel(
+                pending.map { "\($0) \(profile.displayName)" } ?? "Working on \(profile.displayName)"
+            )
         } else if isDisplayedRunning {
             actionIcon("stop.fill", color: DashboardTheme.stopRed, label: "Stop \(profile.displayName)") {
                 Task { await store.stop(profile.profile) }
             }
         } else {
-            actionIcon("play.fill", color: accent, label: "Activate \(profile.displayName)") {
+            actionIcon(
+                "play.fill",
+                color: accent,
+                label: "Activate \(profile.displayName)",
+                hint: "Stops other models on this gateway, then starts this one"
+            ) {
                 Task { await store.activate(profile.profile) }
             }
         }
@@ -144,7 +157,7 @@ struct ProfileListRowView: View {
             return "Benchmark"
         }()
         return Menu {
-            Button("Start (keep others running)") {
+            Button("Start without stopping others") {
                 Task { await store.start(profile.profile) }
             }
             .disabled(isBusy || profile.running)
@@ -153,32 +166,24 @@ struct ProfileListRowView: View {
             }
             .disabled(isBusy)
             if store.features.supportsBenchmarks {
-                if showReachability {
-                    Divider()
-                    if canBenchmark {
-                        Button(benchmarkLabel) {
-                            onOpenBenchmarks?()
-                            Task { await store.quickBenchmark([profile.profile]) }
-                        }
-                    } else if !profile.ready {
-                        Button("Benchmark disabled · model not ready on :\(profile.port)") {}
-                            .disabled(true)
-                    } else if store.benchmark?.running == true {
-                        Button("Benchmark running\(gatewayDisplayName.map { " on \($0)" } ?? "")…") {}
-                            .disabled(true)
-                    } else if !store.canStartBenchmarkNow {
-                        Button("Benchmark cooling down") {}
-                            .disabled(true)
-                    } else {
-                        Button("Benchmark unavailable") {}
-                            .disabled(true)
-                    }
-                } else {
-                    Button("Benchmark") {
+                Divider()
+                if canBenchmark {
+                    Button(benchmarkLabel) {
                         onOpenBenchmarks?()
                         Task { await store.quickBenchmark([profile.profile]) }
                     }
-                    .disabled(isBusy || store.isBenchmarkInFlight(for: profile.profile))
+                } else if !profile.ready {
+                    Button("Benchmark disabled · model not ready on :\(profile.port)") {}
+                        .disabled(true)
+                } else if store.benchmark?.running == true {
+                    Button("Benchmark running\(gatewayDisplayName.map { " on \($0)" } ?? "")…") {}
+                        .disabled(true)
+                } else if !store.canStartBenchmarkNow {
+                    Button("Benchmark cooling down") {}
+                        .disabled(true)
+                } else {
+                    Button("Benchmark unavailable") {}
+                        .disabled(true)
                 }
             }
             Divider()
@@ -213,7 +218,11 @@ struct ProfileListRowView: View {
     }
 
     private func actionIcon(
-        _ systemName: String, color: Color, label: String, action: @escaping () -> Void
+        _ systemName: String,
+        color: Color,
+        label: String,
+        hint: String? = nil,
+        action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             iconContainer {
@@ -224,6 +233,7 @@ struct ProfileListRowView: View {
         }
         .buttonStyle(QuietCraftPressStyle())
         .accessibilityLabel(label)
+        .accessibilityHint(hint ?? "")
     }
 
     private func iconContainer(@ViewBuilder content: () -> some View) -> some View {
@@ -246,6 +256,8 @@ struct ActiveProfileHeroView: View {
     var context: Context = .local
     var hostMetrics: HostMetricsPayload? = nil
     var decodeTokensPerSecond: Double? = nil
+    /// Mac-reachable URL for remote heroes (forwarded / rewritten).
+    var reachableEndpointURL: String? = nil
     var onOpenBenchmarks: (() -> Void)? = nil
     let theme: DashboardTheme
     let accent: Color
@@ -260,6 +272,9 @@ struct ActiveProfileHeroView: View {
             return store.pendingLabel(for: profile.profile)
                 ?? (profile.ready ? "ACTIVE" : "STARTING")
         case .remote(let name):
+            if let pending = store.pendingLabel(for: profile.profile) {
+                return "\(pending.uppercased()) ON \(name.uppercased())"
+            }
             return profile.ready
                 ? "ACTIVE ON \(name.uppercased())"
                 : "STARTING ON \(name.uppercased())"
@@ -270,13 +285,9 @@ struct ActiveProfileHeroView: View {
         switch context {
         case .local:
             return "\(profile.runtimeLabel ?? profile.runtime) · \(profile.baseURL)"
-        case .remote(let name):
-            let memory = HostMetricsPresentation.profileMemoryLabel(
-                status: profile,
-                metrics: hostMetrics,
-                isRunning: true
-            ) ?? ":\(profile.port)"
-            return "\(profile.runtimeLabel ?? profile.runtime) · \(memory) · \(name)"
+        case .remote:
+            let endpoint = reachableEndpointURL ?? "\(profile.host):\(profile.port)"
+            return "\(profile.runtimeLabel ?? profile.runtime) · \(endpoint)"
         }
     }
 
@@ -302,17 +313,12 @@ struct ActiveProfileHeroView: View {
         }
     }
 
-    private var showsLocalURLSelection: Bool {
+    private var showsURLSelection: Bool {
         switch context {
-        case .local: return true
-        case .remote: return false
-        }
-    }
-
-    private var showsRestart: Bool {
-        switch context {
-        case .local: return true
-        case .remote: return false
+        case .local:
+            return true
+        case .remote:
+            return reachableEndpointURL != nil
         }
     }
 
@@ -339,27 +345,25 @@ struct ActiveProfileHeroView: View {
                         .foregroundStyle(theme.sub)
                         .lineLimit(1)
                         .truncationMode(.middle)
-                        .modifier(LocalURLSelection(enabled: showsLocalURLSelection))
-                    if case .remote = context, let gpuStrip = HostMetricsPresentation.compactGPUStrip(hostMetrics) {
-                        Text(gpuStrip)
-                            .font(.system(size: 10.5, design: .monospaced))
-                            .foregroundStyle(accent.opacity(0.95))
-                            .lineLimit(1)
-                            .accessibilityLabel("Remote host GPU: \(gpuStrip)")
-                    }
+                        .modifier(LocalURLSelection(enabled: showsURLSelection))
                 }
                 Spacer(minLength: 0)
                 trailingMetric
             }
 
             HStack(spacing: 6) {
-                actionButton("■ Stop", strong: true, disabled: isBusy) {
+                HoldToConfirmTextButton(
+                    title: "Stop",
+                    color: DashboardTheme.stopRed,
+                    isBusy: isBusy,
+                    disabled: isBusy,
+                    helpDetail: isBusy ? "Busy" : "Stop \(profile.displayName)",
+                    chrome: .filled(background: theme.btnStrongBg, foreground: theme.btnStrongFg)
+                ) {
                     Task { await store.stop(profile.profile) }
                 }
-                if showsRestart {
-                    actionButton("↻ Restart", disabled: isBusy) {
-                        Task { await store.restart(profile.profile) }
-                    }
+                actionButton("Restart", disabled: isBusy) {
+                    Task { await store.restart(profile.profile) }
                 }
                 if store.features.supportsBenchmarks {
                     actionButton("Benchmark", disabled: isBusy || !canBenchmark) {
@@ -396,7 +400,7 @@ struct ActiveProfileHeroView: View {
                     Text(String(format: "%.1f", tok))
                         .font(.system(size: 20, weight: .bold).monospacedDigit())
                         .foregroundStyle(accent)
-                    Text("tok/s")
+                    Text("t/s")
                         .font(.system(size: 10))
                         .foregroundStyle(theme.sub)
                 }

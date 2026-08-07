@@ -7,6 +7,7 @@ extension MenuBarContentView {
             ZStack {
                 Text(panel.title)
                     .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(theme.label)
                 HStack {
                     Button {
                         inspectorCoordinator.requestDeferredClose(of: panel)
@@ -94,7 +95,9 @@ extension MenuBarContentView {
         case .help:
             HelpView(
                 exampleProfilesDirectory: store.resolvedExampleProfilesDirectory,
-                openExampleProfilesDirectory: store.openExampleProfilesDirectory
+                openExampleProfilesDirectory: store.openExampleProfilesDirectory,
+                theme: theme,
+                accent: accent
             )
             .padding(EdgeInsets(top: 10, leading: 14, bottom: 10, trailing: 14))
         case .remoteHosts:

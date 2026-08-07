@@ -72,9 +72,16 @@ struct BenchmarksPanelView: View {
             theme.line.frame(height: 1)
             panelFooter
         }
-        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { tick in
-            now = tick
-        }
+        .modifier(BenchmarkTickModifier(
+            needsTick: needsCountdownTick,
+            now: $now
+        ))
+    }
+
+    private var needsCountdownTick: Bool {
+        if cooldownEndsAt != nil { return true }
+        if benchmark?.running == true { return true }
+        return remoteSections.contains { $0.benchmark?.running == true || $0.cooldownEndsAt != nil }
     }
 
     // MARK: - Summary card
@@ -90,6 +97,7 @@ struct BenchmarksPanelView: View {
                     .foregroundStyle(theme.faint)
                 Text(BenchmarkMetricFormatting.benchmarkName(best))
                     .font(.system(size: 13.5, weight: .semibold))
+                    .foregroundStyle(theme.label)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(suiteLine(latest: latest, best: best, gatewayLabel: gatewayLabel))
@@ -115,7 +123,7 @@ struct BenchmarksPanelView: View {
         VStack(alignment: .leading, spacing: 1) {
             Text(value)
                 .font(.system(size: 14, weight: .bold).monospacedDigit())
-                .foregroundStyle(emphasized ? accent : .primary)
+                .foregroundStyle(emphasized ? accent : theme.label)
             Text(unit)
                 .font(.system(size: 9))
                 .foregroundStyle(theme.sub)
@@ -165,6 +173,7 @@ struct BenchmarksPanelView: View {
 
             Text("\(BenchmarkMetricFormatting.milliseconds(benchCase.ttftMS)) ms")
                 .font(.system(size: 11, design: .monospaced).monospacedDigit())
+                .foregroundStyle(theme.label)
                 .frame(width: 62, alignment: .trailing)
 
             Text("\(BenchmarkMetricFormatting.tokensPerSecond(benchCase.decodeTokensPerSec)) t/s")
@@ -206,6 +215,7 @@ struct BenchmarksPanelView: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(BenchmarkMetricFormatting.benchmarkName(row))
                     .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(theme.label)
                     .lineLimit(1)
                     .truncationMode(.tail)
                 HStack(spacing: 4) {
@@ -238,6 +248,7 @@ struct BenchmarksPanelView: View {
 
             Text("\(BenchmarkMetricFormatting.tokensPerSecond(row.decodeTokensPerSec)) t/s")
                 .font(.system(size: 11, design: .monospaced).monospacedDigit())
+                .foregroundStyle(theme.label)
                 .frame(width: 62, alignment: .trailing)
         }
         .padding(EdgeInsets(top: 7, leading: 6, bottom: 7, trailing: 6))
@@ -254,7 +265,7 @@ struct BenchmarksPanelView: View {
                     .font(.system(size: 11.5))
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(QuietCraftPressStyle())
             .foregroundStyle(canTriggerBenchmark ? theme.btnFg : theme.faint)
             .disabled(!canTriggerBenchmark)
 
@@ -266,13 +277,14 @@ struct BenchmarksPanelView: View {
                     exportNotice = notice
                 }
             } label: {
-                Text("Export CSV")
+                Text("Export This Mac CSV")
                     .font(.system(size: 11.5))
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(QuietCraftPressStyle())
             .foregroundStyle(canExport ? theme.btnFg : theme.faint)
             .disabled(!canExport)
+            .help("Exports the latest This Mac benchmark run. Remote results stay on their gateway sections.")
         }
         .padding(EdgeInsets(top: 9, leading: 14, bottom: 9, trailing: 14))
     }
@@ -355,5 +367,22 @@ struct BenchmarksPanelView: View {
 
     static func parsedGeneratedAt(_ value: String?) -> Date? {
         BenchmarkTimestampFormatting.parsedGeneratedAt(value)
+    }
+}
+
+/// Only ticks the countdown clock while a run or cooldown is active.
+private struct BenchmarkTickModifier: ViewModifier {
+    let needsTick: Bool
+    @Binding var now: Date
+
+    func body(content: Content) -> some View {
+        if needsTick {
+            content
+                .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { tick in
+                    now = tick
+                }
+        } else {
+            content
+        }
     }
 }

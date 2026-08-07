@@ -31,7 +31,8 @@ extension MenuBarContentView {
                 excludeProfileID: excludeProfile,
                 hostMetrics: hostMetricsMonitor.entry(forGatewayID: runtime.id).metrics,
                 theme: theme,
-                accent: accent
+                accent: accent,
+                onOpenBenchmarks: { setInspectorPanel(.benchmarks) }
             )
         }
     }
@@ -48,6 +49,7 @@ struct RemoteGatewaySectionView: View {
     var hostMetrics: HostMetricsPayload? = nil
     let theme: DashboardTheme
     let accent: Color
+    var onOpenBenchmarks: (() -> Void)? = nil
 
     private var store: SwitchboardStore { runtime.store }
 
@@ -70,51 +72,57 @@ struct RemoteGatewaySectionView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            sectionHeader
-            if let issue = connectionIssue {
-                Text(issue)
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(DashboardTheme.pendingOrange)
-                    .multilineTextAlignment(.leading)
-                    .lineLimit(4)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(EdgeInsets(top: 2, leading: 4, bottom: 6, trailing: 4))
-            }
-            if visibleProfiles.isEmpty {
-                if connectionIssue == nil {
-                    Text(emptyProfilesMessage)
-                        .font(.system(size: 11))
-                        .foregroundStyle(theme.sub)
+        // Header-only sections (hero stole the only row, or filter miss) are
+        // noise — keep the section only when there are rows, a real empty
+        // profiles directory, or a connection issue to surface.
+        let shouldRender = !visibleProfiles.isEmpty
+            || store.sortedStatuses.isEmpty
+            || connectionIssue != nil
+        if shouldRender {
+            VStack(alignment: .leading, spacing: 0) {
+                sectionHeader
+                if let issue = connectionIssue {
+                    Text(issue)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(DashboardTheme.pendingOrange)
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(4)
                         .fixedSize(horizontal: false, vertical: true)
-                        .padding(EdgeInsets(top: 2, leading: 4, bottom: 8, trailing: 4))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(EdgeInsets(top: 2, leading: 4, bottom: 6, trailing: 4))
                 }
-            } else {
-                ForEach(visibleProfiles) { profile in
-                    ProfileListRowView(
-                        profile: profile,
-                        store: store,
-                        hostMetrics: hostMetrics,
-                        reachableEndpointURL: runtime.reachableEndpointURL(for: profile),
-                        showReachability: true,
-                        endpointUnavailableHint: runtime.config.kind == .ssh
-                            ? "not forwarded to this Mac"
-                            : "bound on host only",
-                        gatewayDisplayName: runtime.name,
-                        theme: theme,
-                        accent: accent
-                    )
+                if visibleProfiles.isEmpty {
+                    if connectionIssue == nil, store.sortedStatuses.isEmpty {
+                        Text(emptyProfilesMessage)
+                            .font(.system(size: 11))
+                            .foregroundStyle(theme.sub)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(EdgeInsets(top: 2, leading: 4, bottom: 8, trailing: 4))
+                    }
+                } else {
+                    ForEach(visibleProfiles) { profile in
+                        ProfileListRowView(
+                            profile: profile,
+                            store: store,
+                            hostMetrics: hostMetrics,
+                            reachableEndpointURL: runtime.reachableEndpointURL(for: profile),
+                            showReachability: true,
+                            endpointUnavailableHint: runtime.config.kind == .ssh
+                                ? "not forwarded to this Mac"
+                                : "bound on host only",
+                            gatewayDisplayName: runtime.name,
+                            onOpenBenchmarks: onOpenBenchmarks,
+                            theme: theme,
+                            accent: accent
+                        )
+                    }
                 }
             }
+            .padding(EdgeInsets(top: 0, leading: 10, bottom: 6, trailing: 10))
         }
-        .padding(EdgeInsets(top: 0, leading: 10, bottom: 6, trailing: 10))
     }
 
     private var emptyProfilesMessage: String {
-        if !store.sortedStatuses.isEmpty {
-            return "No models match this filter."
-        }
         if let profilesDirectory = store.profilesDirectory, !profilesDirectory.isEmpty {
             return "No model profiles in \(profilesDirectory). Drop .env/.json launch files there, or re-run `model-switchboard-agent link` on the host to pick another folder."
         }
@@ -132,7 +140,7 @@ struct RemoteGatewaySectionView: View {
                     theme: theme
                 )
                 Spacer(minLength: 0)
-                Text(connectionBadge)
+                Text(GatewayConnectionBadge.text(for: runtime))
                     .font(.system(size: 9, weight: .semibold))
                     .kerning(0.5)
                     .foregroundStyle(theme.faint)
@@ -147,20 +155,10 @@ struct RemoteGatewaySectionView: View {
             }
         }
         .padding(EdgeInsets(top: 10, leading: 4, bottom: 4, trailing: 4))
-    }
-
-    private var connectionBadge: String {
-        switch runtime.config.kind {
-        case .direct:
-            return "DIRECT"
-        case .ssh:
-            switch runtime.tunnelState {
-            case .idle: return "SSH · OFF"
-            case .connecting: return "SSH · CONNECTING"
-            case .established: return "SSH · TUNNELED"
-            case .failed: return "SSH · FAILED"
-            }
-        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            "\(runtime.name), \(store.displayedReadyProfiles) of \(store.summary.totalProfiles) ready, \(GatewayConnectionBadge.text(for: runtime))"
+        )
     }
 
     private var statusColor: Color {

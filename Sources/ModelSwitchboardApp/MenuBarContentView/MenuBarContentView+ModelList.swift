@@ -5,9 +5,17 @@ import ModelSwitchboardCore
 extension MenuBarContentView {
     // MARK: - Selection helpers
 
-    /// The model featured in the hero card: the first running profile in display order.
+    /// The model featured in the hero card: first running profile that matches
+    /// the active filter (so an MLX filter never heroes a llama.cpp model).
+    /// Keep a busy/pending profile mounted so Stop/Restart hold chrome and
+    /// STOPPING/STARTING labels do not vanish mid-action.
     var heroProfile: ModelProfileStatus? {
-        store.sortedStatuses.first { isDisplayedRunning($0) }
+        if let running = store.sortedStatuses.first(where: { isDisplayedRunning($0) && matchesFilter($0) }) {
+            return running
+        }
+        return store.sortedStatuses.first(where: {
+            store.isBusy(profile: $0.profile) && matchesFilter($0)
+        })
     }
 
     var standbyProfiles: [ModelProfileStatus] {
@@ -18,16 +26,7 @@ extension MenuBarContentView {
     }
 
     func matchesFilter(_ status: ModelProfileStatus) -> Bool {
-        switch profileFilter {
-        case .all:
-            true
-        case .running:
-            isDisplayedRunning(status) || store.isBusy(profile: status.profile)
-        case .mlx:
-            Self.runtimeKind(status) == .mlx
-        case .llamaCpp:
-            Self.runtimeKind(status) == .llamaCpp
-        }
+        matchesFilter(status, in: store)
     }
 
     func isDisplayedRunning(_ status: ModelProfileStatus, relativeTo now: Date = .now) -> Bool {
@@ -62,18 +61,6 @@ extension MenuBarContentView {
         status.runtimeLabel ?? status.runtime
     }
 
-    func rowSubtitle(_ status: ModelProfileStatus) -> String {
-        var parts = [runtimeName(status), ":\(status.port)"]
-        if let pending = store.pendingLabel(for: status.profile) {
-            parts.append(pending.lowercased() + "…")
-        } else if let tok = decodeTokensPerSecond(for: status.profile) {
-            parts.append(String(format: "%.1f t/s", tok))
-        } else if let rssMB = status.rssMB, isDisplayedRunning(status) {
-            parts.append(String(format: "%.1f GB", rssMB / 1024))
-        }
-        return parts.joined(separator: " · ")
-    }
-
     // MARK: - Hero section
 
     @ViewBuilder
@@ -88,17 +75,37 @@ extension MenuBarContentView {
         }
     }
 
-    /// First remote gateway that currently shows a running/ready model, for the
-    /// hero strip when This Mac is idle.
+    /// First remote gateway that currently shows a running/ready model matching
+    /// the active filter, for the hero strip when This Mac is idle.
     var remoteActiveSummary: (gatewayID: String, name: String, profile: ModelProfileStatus)? {
         for runtime in hub.enabledRemoteRuntimes {
-            if let status = runtime.store.sortedStatuses.first(where: {
-                MenuBarContentView.isDisplayedRunning($0, in: runtime.store)
+            if let status = runtime.store.sortedStatuses.first(where: { status in
+                MenuBarContentView.isDisplayedRunning(status, in: runtime.store)
+                    && matchesFilter(status, in: runtime.store)
             }) {
                 return (runtime.id, runtime.name, status)
             }
+            if let busy = runtime.store.sortedStatuses.first(where: { status in
+                runtime.store.isBusy(profile: status.profile)
+                    && matchesFilter(status, in: runtime.store)
+            }) {
+                return (runtime.id, runtime.name, busy)
+            }
         }
         return nil
+    }
+
+    func matchesFilter(_ status: ModelProfileStatus, in store: SwitchboardStore) -> Bool {
+        switch profileFilter {
+        case .all:
+            true
+        case .running:
+            MenuBarContentView.isDisplayedRunning(status, in: store) || store.isBusy(profile: status.profile)
+        case .mlx:
+            Self.runtimeKind(status) == .mlx
+        case .llamaCpp:
+            Self.runtimeKind(status) == .llamaCpp
+        }
     }
 
     private func remoteActiveCard(_ summary: (gatewayID: String, name: String, profile: ModelProfileStatus)) -> some View {
@@ -110,6 +117,7 @@ extension MenuBarContentView {
             store: remoteStore,
             context: .remote(gatewayName: summary.name),
             hostMetrics: hostMetrics,
+            reachableEndpointURL: runtime?.reachableEndpointURL(for: summary.profile),
             onOpenBenchmarks: { setInspectorPanel(.benchmarks) },
             theme: theme,
             accent: accent
@@ -135,7 +143,7 @@ extension MenuBarContentView {
                 .kerning(0.8)
                 .foregroundStyle(theme.faint)
             heroButton(
-                "↻ Reopen Last Active",
+                "Reopen Last Active",
                 disabled: store.pendingGlobalActions.contains("reopen-last") || store.pendingGlobalActions.contains("stop-all")
             ) {
                 Task { await store.reopenLastActive() }
@@ -188,26 +196,34 @@ extension MenuBarContentView {
                 EmptyView()
             }
         } else {
-            VStack(alignment: .leading, spacing: 0) {
-                DashboardSectionLabel(
-                    text: heroProfile != nil ? "STANDBY · \(standbyProfiles.count)" : "MODELS · \(standbyProfiles.count)",
-                    theme: theme
-                )
-                .padding(EdgeInsets(top: 6, leading: 4, bottom: 4, trailing: 4))
+            // Suppress zero-count standby chrome when the hero already owns the
+            // only match, or remotes carry the filtered board.
+            let suppressLocalBlock = standbyProfiles.isEmpty && (
+                heroProfile != nil
+                    || (hub.hasRemoteGateways && !store.sortedStatuses.isEmpty)
+            )
+            if !suppressLocalBlock {
+                VStack(alignment: .leading, spacing: 0) {
+                    DashboardSectionLabel(
+                        text: heroProfile != nil ? "STANDBY · \(standbyProfiles.count)" : "MODELS · \(standbyProfiles.count)",
+                        theme: theme
+                    )
+                    .padding(EdgeInsets(top: 6, leading: 4, bottom: 4, trailing: 4))
 
-                if standbyProfiles.isEmpty {
-                    Text(localEmptyMessage)
-                        .font(.system(size: 11))
-                        .foregroundStyle(theme.sub)
-                        .padding(EdgeInsets(top: 2, leading: 4, bottom: 8, trailing: 4))
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    ForEach(standbyProfiles) { profile in
-                        profileRow(profile)
+                    if standbyProfiles.isEmpty {
+                        Text(localEmptyMessage)
+                            .font(.system(size: 11))
+                            .foregroundStyle(theme.sub)
+                            .padding(EdgeInsets(top: 2, leading: 4, bottom: 8, trailing: 4))
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        ForEach(standbyProfiles) { profile in
+                            profileRow(profile)
+                        }
                     }
                 }
+                .padding(EdgeInsets(top: 0, leading: 10, bottom: 6, trailing: 10))
             }
-            .padding(EdgeInsets(top: 0, leading: 10, bottom: 6, trailing: 10))
         }
     }
 

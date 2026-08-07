@@ -75,17 +75,26 @@ struct SettingsView: View {
             settingsRow("Accent color") {
                 HStack(spacing: 6) {
                     ForEach(DashboardAccent.allCases, id: \.rawValue) { choice in
-                        Circle()
-                            .fill(choice.color)
-                            .frame(width: 20, height: 20)
-                            .overlay {
-                                Circle()
-                                    .stroke(choice.rawValue == accentRaw ? Color.primary : .clear, lineWidth: 2)
-                            }
-                            .contentShape(Circle())
-                            .onTapGesture { accentRaw = choice.rawValue }
-                            .accessibilityLabel("\(choice.rawValue) accent")
-                            .accessibilityAddTraits(choice.rawValue == accentRaw ? [.isButton, .isSelected] : .isButton)
+                        Button {
+                            accentRaw = choice.rawValue
+                        } label: {
+                            Circle()
+                                .fill(choice.color)
+                                .frame(width: 18, height: 18)
+                                .frame(width: 26, height: 26)
+                                .overlay {
+                                    Circle()
+                                        .stroke(
+                                            choice.rawValue == accentRaw ? theme.label : .clear,
+                                            lineWidth: 2
+                                        )
+                                        .frame(width: 24, height: 24)
+                                }
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(QuietCraftPressStyle())
+                        .accessibilityLabel("\(choice.rawValue) accent")
+                        .accessibilityAddTraits(choice.rawValue == accentRaw ? [.isButton, .isSelected] : .isButton)
                     }
                 }
             }
@@ -161,7 +170,7 @@ struct SettingsView: View {
                 if let error = launchAtLoginManager.lastError {
                     settingsFootnote(error, color: DashboardTheme.stopRed)
                 }
-                settingsFootnote("The app is idle when closed in the menu bar. Open, it refreshes every 10 minutes while idle and every 30 seconds while a model is live.", color: theme.sub)
+                settingsFootnote("The app is idle when closed in the menu bar. Open, it refreshes every 10 minutes while idle and every 10 seconds while a model is live.", color: theme.sub)
             }
             .padding(EdgeInsets(top: 9, leading: 12, bottom: 9, trailing: 12))
         }
@@ -241,6 +250,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(diagnostic.displayName)
                 .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(theme.label)
             ForEach(diagnostic.errors, id: \.self) { error in
                 Label(error, systemImage: "xmark.octagon.fill")
                     .font(.system(size: 10.5))
@@ -280,6 +290,7 @@ struct SettingsView: View {
         HStack {
             Text(label)
                 .font(.system(size: 12.5))
+                .foregroundStyle(theme.label)
             Spacer()
             trailing()
         }
@@ -296,22 +307,29 @@ struct SettingsView: View {
         HStack(spacing: 2) {
             ForEach(Array(zip(options, labels)), id: \.0) { option, label in
                 let isOn = selection.wrappedValue == option
-                Text(label)
-                    .font(.system(size: 11, weight: isOn ? .semibold : .regular))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 3)
-                    .background(
-                        isOn ? theme.tabOnBg : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    )
-                    .foregroundStyle(isOn ? theme.tabOnFg : theme.tabOffFg)
-                    .contentShape(Rectangle())
-                    .onTapGesture { selection.wrappedValue = option }
-                    .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
+                Button {
+                    selection.wrappedValue = option
+                } label: {
+                    Text(label)
+                        .font(.system(size: 11, weight: isOn ? .semibold : .regular))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 5)
+                        .frame(minHeight: 24)
+                        .background(
+                            isOn ? theme.tabOnBg : Color.clear,
+                            in: RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        )
+                        .foregroundStyle(isOn ? theme.tabOnFg : theme.tabOffFg)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(QuietCraftPressStyle())
+                .accessibilityLabel(label)
+                .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
             }
         }
         .padding(2)
         .background(theme.btnBg, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .accessibilityElement(children: .contain)
     }
 
     private func toggleRow(_ label: String, subtitle: String, isOn: Binding<Bool>, disabled: Bool = false) -> some View {
@@ -319,6 +337,7 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(label)
                     .font(.system(size: 12.5))
+                    .foregroundStyle(theme.label)
                 Text(subtitle)
                     .font(.system(size: 10.5))
                     .foregroundStyle(theme.sub)
@@ -345,7 +364,7 @@ struct SettingsView: View {
                 .font(.system(size: 11.5, weight: emphasized ? .semibold : .regular))
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(QuietCraftPressStyle())
         .foregroundStyle(disabled ? theme.faint : (emphasized ? accent : theme.btnFg))
         .disabled(disabled)
     }

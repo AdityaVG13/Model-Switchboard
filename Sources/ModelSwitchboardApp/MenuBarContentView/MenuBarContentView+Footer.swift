@@ -31,33 +31,16 @@ extension MenuBarContentView {
                     color: hasAnythingToStop ? DashboardTheme.stopRed : theme.faint,
                     isBusy: hub.isStopEverythingBusy,
                     disabled: !hasAnythingToStop,
-                    holdToConfirm: true
+                    holdToConfirm: true,
+                    holdHelpDetail: stopButtonHelp
                 ) {
                     Task { await hub.stopEverything() }
                 }
-                .help(stopButtonHelp)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .layoutPriority(0)
 
-            TimelineView(.periodic(from: .now, by: 1)) { context in
-                if let footerState = footerState(relativeTo: context.date) {
-                    Text(footerState.label)
-                        .font(.system(size: 9, weight: .bold))
-                        .kerning(0.6)
-                        .lineLimit(1)
-                        .padding(.leading, 6)
-                        .overlay(alignment: .leading) {
-                            Rectangle()
-                                .fill(footerState.color)
-                                .frame(width: 2)
-                        }
-                        .foregroundStyle(footerState.color)
-                        .help(hub.menuBarHelp)
-                        .padding(.horizontal, 6)
-                }
-            }
-
+            footerFreshnessChip
             // Trailing icon rail: fixed size, always fully inside the panel
             // corner radius (continuous clip eats ~12pt at the bottom-right).
             HStack(spacing: 2) {
@@ -115,12 +98,51 @@ extension MenuBarContentView {
     }
 
     @ViewBuilder
+    private var footerFreshnessChip: some View {
+        // Only tick when something is non-fresh — avoid a forever 1 Hz timer
+        // while the board is healthy.
+        let needsWatch = hub.allStores.contains { store in
+            switch store.statusFreshness(relativeTo: .now) {
+            case .fresh: false
+            case .cached, .stale, .error: true
+            }
+        }
+        if needsWatch {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                if let state = footerState(relativeTo: context.date) {
+                    freshnessLabel(state)
+                }
+            }
+        }
+    }
+
+    private func freshnessLabel(_ state: (label: String, color: Color)) -> some View {
+        Text(state.label)
+            .font(.system(size: 9, weight: .bold))
+            .kerning(0.6)
+            .lineLimit(1)
+            .padding(.leading, 6)
+            .overlay(alignment: .leading) {
+                Rectangle()
+                    .fill(state.color)
+                    .frame(width: 2)
+            }
+            .foregroundStyle(state.color)
+            .help(hub.menuBarHelp)
+            .padding(.horizontal, 6)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(state.label == "ERROR" ? "Status error" : "Status stale")
+            .accessibilityValue(hub.menuBarHelp)
+    }
+
+    @ViewBuilder
     func footerTextButton(
         _ title: String,
         color: Color? = nil,
         isBusy: Bool = false,
         disabled: Bool = false,
         holdToConfirm: Bool = false,
+        holdHelpDetail: String? = nil,
         action: @escaping () -> Void
     ) -> some View {
         let resolved = color ?? theme.btnFg
@@ -130,6 +152,7 @@ extension MenuBarContentView {
                 color: resolved,
                 isBusy: isBusy,
                 disabled: disabled,
+                helpDetail: holdHelpDetail,
                 action: action
             )
         } else {
@@ -182,14 +205,13 @@ extension MenuBarContentView {
         if states.contains(.fresh) {
             return nil
         }
-        if states.contains(.cached) {
-            return ("CACHED", .orange)
-        }
-        if states.contains(.stale) {
-            return ("STALE", .orange)
-        }
         if states.contains(.error) {
-            return ("ERROR", .red)
+            return ("ERROR", DashboardTheme.stopRed)
+        }
+        // Collapse cached + stale into one quiet "STALE" signal — same urgency
+        // for the operator, less chrome to parse.
+        if states.contains(.cached) || states.contains(.stale) {
+            return ("STALE", DashboardTheme.pendingOrange)
         }
         return nil
     }

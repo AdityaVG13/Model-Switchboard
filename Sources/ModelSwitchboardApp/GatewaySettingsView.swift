@@ -84,14 +84,15 @@ struct GatewaySettingsSection: View {
                                 Button {
                                     renamingGatewayID = runtime.id
                                     renameDraft = runtime.name
+                                    validationMessage = nil
                                 } label: {
                                     Image(systemName: "pencil")
                                         .font(.system(size: 10, weight: .semibold))
                                         .foregroundStyle(accent)
-                                        .frame(width: 20, height: 20)
+                                        .frame(width: 26, height: 26)
                                         .contentShape(Rectangle())
                                 }
-                                .buttonStyle(.plain)
+                                .buttonStyle(QuietCraftPressStyle())
                                 .help("Rename this gateway")
                                 .accessibilityLabel("Rename \(runtime.name)")
                             }
@@ -101,6 +102,12 @@ struct GatewaySettingsSection: View {
                             .foregroundStyle(theme.sub)
                             .lineLimit(1)
                             .truncationMode(.middle)
+                        if renamingGatewayID == runtime.id, let validationMessage {
+                            Text(validationMessage)
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(DashboardTheme.stopRed)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                     Spacer(minLength: 0)
                     if renamingGatewayID == runtime.id {
@@ -197,12 +204,14 @@ struct GatewaySettingsSection: View {
             HStack(spacing: 8) {
                 Text("Connection")
                     .font(.system(size: 12.5))
-                Picker("", selection: binding.kind) {
-                    Text("SSH tunnel").tag(GatewayKind.ssh)
-                    Text("Direct URL").tag(GatewayKind.direct)
+                    .foregroundStyle(theme.label)
+                Spacer(minLength: 0)
+                HStack(spacing: 2) {
+                    connectionKindChip("SSH tunnel", kind: .ssh, selection: binding.kind)
+                    connectionKindChip("Direct URL", kind: .direct, selection: binding.kind)
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
+                .padding(2)
+                .background(theme.btnBg, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
             }
 
             switch binding.wrappedValue.kind {
@@ -242,6 +251,7 @@ struct GatewaySettingsSection: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Profiles folder (on host)")
                         .font(.system(size: 12.5))
+                        .foregroundStyle(theme.label)
                     Text(profilesDirectory)
                         .font(.system(size: 10.5, design: .monospaced))
                         .foregroundStyle(theme.sub)
@@ -254,6 +264,7 @@ struct GatewaySettingsSection: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Bearer token")
                     .font(.system(size: 12.5))
+                    .foregroundStyle(theme.label)
                 SecureField(
                     tokenFieldPrompt,
                     text: $draftToken
@@ -278,7 +289,11 @@ struct GatewaySettingsSection: View {
                 linkButton("Cancel") { closeEditor() }
                 Spacer()
                 if !draftIsNew {
-                    linkButton("Remove", color: DashboardTheme.stopRed) {
+                    HoldToConfirmTextButton(
+                        title: "Remove",
+                        color: DashboardTheme.stopRed,
+                        helpDetail: "Deletes this gateway and its keychain token"
+                    ) {
                         hub.removeGateway(id: config.id)
                         closeEditor()
                     }
@@ -410,9 +425,35 @@ struct GatewaySettingsSection: View {
                 .foregroundStyle(prominent ? accent : theme.btnFg)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(QuietCraftPressStyle())
         .disabled(disabled)
         .opacity(disabled ? 0.5 : 1)
+    }
+
+    private func connectionKindChip(
+        _ title: String,
+        kind: GatewayKind,
+        selection: Binding<GatewayKind>
+    ) -> some View {
+        let isOn = selection.wrappedValue == kind
+        return Button {
+            selection.wrappedValue = kind
+        } label: {
+            Text(title)
+                .font(.system(size: 11, weight: isOn ? .semibold : .regular))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .frame(minHeight: 24)
+                .background(
+                    isOn ? theme.tabOnBg : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 5, style: .continuous)
+                )
+                .foregroundStyle(isOn ? theme.tabOnFg : theme.tabOffFg)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(QuietCraftPressStyle())
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
     }
 
     /// Rendered outside the SSH-only controls so a Tailscale install that
@@ -511,9 +552,11 @@ struct GatewaySettingsSection: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label)
                 .font(.system(size: 12.5))
+                .foregroundStyle(theme.label)
             TextField(prompt, text: text)
                 .textFieldStyle(.roundedBorder)
                 .font(.system(size: 11.5, design: monospaced ? .monospaced : .default))
+                .foregroundStyle(theme.fieldFg)
         }
     }
 
@@ -521,6 +564,7 @@ struct GatewaySettingsSection: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label)
                 .font(.system(size: 12.5))
+                .foregroundStyle(theme.label)
             TextField(
                 "",
                 text: Binding(
@@ -530,6 +574,7 @@ struct GatewaySettingsSection: View {
             )
             .textFieldStyle(.roundedBorder)
             .font(.system(size: 11.5, design: .monospaced))
+            .foregroundStyle(theme.fieldFg)
             .frame(width: 90)
         }
     }
@@ -552,7 +597,7 @@ struct GatewaySettingsSection: View {
                 .font(.system(size: 11.5, weight: emphasized ? .semibold : .regular))
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(QuietCraftPressStyle())
         .foregroundStyle(color ?? (emphasized ? accent : theme.btnFg))
     }
 }

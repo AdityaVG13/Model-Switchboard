@@ -123,7 +123,7 @@ struct DashboardTheme {
 
     static let runningGreen = Color(.sRGB, red: 50 / 255, green: 215 / 255, blue: 75 / 255)
     static let stopRed = Color(.sRGB, red: 1.0, green: 105 / 255, blue: 97 / 255)
-    static let pendingOrange = Color.orange
+    static let pendingOrange = Color(.sRGB, red: 1.0, green: 0.58, blue: 0.0)
 }
 
 // MARK: - Sparkline
@@ -172,30 +172,34 @@ struct DashboardSegmentedTabs<Option: Hashable>: View {
         HStack(spacing: 2) {
             ForEach(options, id: \.self) { option in
                 let isOn = option == selection
-                Text(label(option))
-                    .font(.system(size: 11.5, weight: isOn ? .semibold : .regular))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 4)
-                    .foregroundStyle(isOn ? theme.tabOnFg : theme.tabOffFg)
-                    .contentShape(Rectangle())
-                    .background {
-                        if isOn {
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(theme.tabOnBg)
-                                .matchedGeometryEffect(id: "selected-tab", in: tabChipNamespace)
+                Button {
+                    guard option != selection else { return }
+                    if reduceMotion {
+                        selection = option
+                    } else {
+                        withAnimation(.easeOut(duration: 0.18)) {
+                            selection = option
                         }
                     }
-                    .onTapGesture {
-                        guard option != selection else { return }
-                        if reduceMotion {
-                            selection = option
-                        } else {
-                            withAnimation(.easeOut(duration: 0.18)) {
-                                selection = option
+                } label: {
+                    Text(label(option))
+                        .font(.system(size: 11.5, weight: isOn ? .semibold : .regular))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 5)
+                        .frame(minHeight: 24)
+                        .foregroundStyle(isOn ? theme.tabOnFg : theme.tabOffFg)
+                        .contentShape(Rectangle())
+                        .background {
+                            if isOn {
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(theme.tabOnBg)
+                                    .matchedGeometryEffect(id: "selected-tab", in: tabChipNamespace)
                             }
                         }
-                    }
-                    .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
+                }
+                .buttonStyle(QuietCraftPressStyle())
+                .accessibilityLabel(label(option))
+                .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
             }
         }
         .padding(2)
@@ -204,6 +208,8 @@ struct DashboardSegmentedTabs<Option: Hashable>: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(theme.panelBorder.opacity(0.8), lineWidth: 1)
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Filter")
     }
 }
 
