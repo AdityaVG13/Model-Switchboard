@@ -3,6 +3,7 @@ import SwiftUI
 /// Shared SSH / direct connection badge copy so the dashboard section and
 /// Remote Hosts panel never drift into different dialects.
 enum GatewayConnectionBadge {
+    @MainActor
     static func text(for runtime: GatewayRuntime) -> String {
         switch runtime.config.kind {
         case .direct:

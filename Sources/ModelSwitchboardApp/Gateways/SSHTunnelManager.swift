@@ -142,7 +142,7 @@ actor SSHTunnelManager {
         supervisorTask?.cancel()
         supervisorTask = nil
         terminateProcess()
-        activeForwards = []
+        activeForwards = [:]
         let socketPath = controlSocketPath()
         try? FileManager.default.removeItem(atPath: socketPath)
         await transition(to: .idle)
@@ -212,7 +212,7 @@ actor SSHTunnelManager {
             for await _ in terminated.stream { break }
         }
         self.process = nil
-        activeForwards = []
+        activeForwards = [:]
         let failure = Self.classifyFailure(stderrLines: stderrTail)
         if Self.looksLikeLocalPortInUse(stderrLines: stderrTail) {
             await reallocateLocalPortIfTaken(force: true)
