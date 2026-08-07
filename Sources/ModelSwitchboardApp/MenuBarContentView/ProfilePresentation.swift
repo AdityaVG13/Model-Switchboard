@@ -328,7 +328,7 @@ struct ActiveProfileHeroView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Circle()
-                            .fill(DashboardTheme.runningGreen)
+                            .fill(isBusy ? DashboardTheme.pendingOrange : DashboardTheme.runningGreen)
                             .frame(width: 6, height: 6)
                         Text(statusLabel)
                             .font(.system(size: 10, weight: .semibold))

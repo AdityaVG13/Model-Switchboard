@@ -8,9 +8,9 @@ extension MenuBarContentView {
     /// visually unchanged.
     @ViewBuilder
     var remoteGatewaySections: some View {
-        // Hairline only when local content sits above remotes (otherwise it
-        // double-divides under the filter tabs).
-        if !hub.enabledRemoteRuntimes.isEmpty, !store.sortedStatuses.isEmpty {
+        // Hairline only when the local list actually paints above remotes
+        // (otherwise it double-divides under the filter tabs on an empty board).
+        if !hub.enabledRemoteRuntimes.isEmpty, showsLocalModelList {
             theme.line
                 .frame(height: 1)
                 .padding(.horizontal, 10)

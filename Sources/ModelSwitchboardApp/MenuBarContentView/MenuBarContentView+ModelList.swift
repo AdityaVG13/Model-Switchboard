@@ -180,6 +180,38 @@ extension MenuBarContentView {
 
     // MARK: - Model list
 
+    /// Local standby/models block actually paints chrome (not EmptyView).
+    var showsLocalModelList: Bool {
+        if store.sortedStatuses.isEmpty && hub.hasRemoteGateways {
+            return store.lastError != nil
+        }
+        let suppressLocalBlock = standbyProfiles.isEmpty && (
+            heroProfile != nil
+                || (hub.hasRemoteGateways && !store.sortedStatuses.isEmpty)
+        )
+        return !suppressLocalBlock
+    }
+
+    /// True when hero, standby, or any remote section has a filter match.
+    var boardHasAnyFilterMatch: Bool {
+        if heroProfile != nil || !standbyProfiles.isEmpty { return true }
+        let featuredRemote = heroProfile == nil ? remoteActiveSummary : nil
+        if featuredRemote != nil { return true }
+        for runtime in hub.enabledRemoteRuntimes {
+            let excludeID: String? = {
+                guard let featuredRemote, featuredRemote.gatewayID == runtime.id else { return nil }
+                return featuredRemote.profile.profile
+            }()
+            if runtime.store.sortedStatuses.contains(where: { status in
+                if let excludeID, status.profile == excludeID { return false }
+                return matchesFilter(status, in: runtime.store)
+            }) {
+                return true
+            }
+        }
+        return false
+    }
+
     @ViewBuilder
     var modelListSection: some View {
         // Multi-gateway: if This Mac has no profiles at all, skip the empty
@@ -192,16 +224,15 @@ extension MenuBarContentView {
                     .foregroundStyle(theme.sub)
                     .padding(EdgeInsets(top: 8, leading: 14, bottom: 4, trailing: 14))
                     .fixedSize(horizontal: false, vertical: true)
+            } else if profileFilter != .all, !boardHasAnyFilterMatch {
+                filterMissMessage
             } else {
                 EmptyView()
             }
         } else {
             // Suppress zero-count standby chrome when the hero already owns the
             // only match, or remotes carry the filtered board.
-            let suppressLocalBlock = standbyProfiles.isEmpty && (
-                heroProfile != nil
-                    || (hub.hasRemoteGateways && !store.sortedStatuses.isEmpty)
-            )
+            let suppressLocalBlock = !showsLocalModelList
             if !suppressLocalBlock {
                 VStack(alignment: .leading, spacing: 0) {
                     DashboardSectionLabel(
@@ -223,8 +254,18 @@ extension MenuBarContentView {
                     }
                 }
                 .padding(EdgeInsets(top: 0, leading: 10, bottom: 6, trailing: 10))
+            } else if profileFilter != .all, !boardHasAnyFilterMatch {
+                filterMissMessage
             }
         }
+    }
+
+    private var filterMissMessage: some View {
+        Text("No models match this filter.")
+            .font(.system(size: 11))
+            .foregroundStyle(theme.sub)
+            .padding(EdgeInsets(top: 8, leading: 14, bottom: 4, trailing: 14))
+            .fixedSize(horizontal: false, vertical: true)
     }
 
 
