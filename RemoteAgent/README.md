@@ -4,17 +4,17 @@ Launch and monitor model servers on any Linux/Unix host (a DGX box, a lab
 workstation, a home server) from the Model Switchboard menu bar app on your
 Mac.
 
-The agent is a **single Python file with zero dependencies** (Python 3.10+,
-stdlib only). It speaks the same HTTP contract as the macOS controller,
-reads the same `model-profiles/*.env|*.json` profile format, and is what the
-app's **remote gateways** feature talks to.
+The agent is **stdlib-only Python** (3.10+): `model_switchboard_agent.py`
+plus the sibling `discovery.py` module. It speaks the same HTTP contract as
+the macOS controller, reads the same `model-profiles/*.env|*.json` profile
+format, and is what the app's **remote gateways** feature talks to.
 
 ## Install
 
 **Nothing to download on the remote host.** In Model Switchboard on your Mac:
 **Settings → Remote Gateways → Add Remote Gateway**, enter `user` + `host`,
-and click **Install Agent on Host**. The app pushes the bundled single-file
-agent over your own SSH connection and sets up its service.
+and click **Install Agent on Host**. The app pushes the bundled agent modules
+over your own SSH connection and sets up its service.
 
 Prefer to run something yourself in your existing SSH session? One line, no
 checkout:

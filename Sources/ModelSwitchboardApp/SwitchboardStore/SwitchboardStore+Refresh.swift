@@ -33,8 +33,12 @@ extension SwitchboardStore {
     }
 
     func refresh() async {
-        if isRefreshing { return }
+        if isRefreshing {
+            needsRefreshAgain = true
+            return
+        }
         isRefreshing = true
+        needsRefreshAgain = false
         // Measurement-only; default off. MSW_PERF_PROFILE=1 or MSW_AGENT_PERF=1.
         let perfOn = Self.perfProfileEnabled
         let t0 = perfOn ? CFAbsoluteTimeGetCurrent() : 0
@@ -48,6 +52,10 @@ extension SwitchboardStore {
                     extra: "\"n_statuses\":\(statuses.count)"
                 )
             }
+            if needsRefreshAgain {
+                needsRefreshAgain = false
+                Task { await self.refresh() }
+            }
         }
         do {
             let client = try self.client
@@ -56,7 +64,8 @@ extension SwitchboardStore {
             let payload = try await statusTask
             apply(payload: payload)
             cachePayload(payload, context: "refresh")
-            await probeLoopbackEndpointsIfNeeded()
+            // Refresh itself holds isRefreshing — allow the post-refresh probe.
+            await probeLoopbackEndpointsIfNeeded(allowDuringRefresh: true)
             if let report = try? await doctorTask {
                 apply(doctorReport: report)
             }

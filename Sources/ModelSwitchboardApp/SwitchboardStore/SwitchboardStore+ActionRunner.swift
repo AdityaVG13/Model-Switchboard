@@ -58,8 +58,8 @@ extension SwitchboardStore {
             actionName: Self.actionName(forPendingLabel: label),
             profile: profile
         )
-        if !succeeded, lastError != nil {
-            // Roll back optimistic running/ready flips when the controller call fails.
+        if !succeeded {
+            // Roll back optimistic running/ready flips on failure *or* cancel.
             statuses = previousStatuses
         }
     }

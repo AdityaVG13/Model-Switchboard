@@ -35,10 +35,14 @@ struct DroidSyncService {
       customModels.append(model)
     }
 
-    var indexByName = Dictionary(
-      uniqueKeysWithValues: customModels.enumerated().compactMap { index, model in
-        (model["displayName"] as? String).map { ($0, index) }
-      })
+    var indexByName: [String: Int] = [:]
+    for (index, model) in customModels.enumerated() {
+      guard let name = model["displayName"] as? String else { continue }
+      // Keep the first occurrence — duplicate display names must not trap.
+      if indexByName[name] == nil {
+        indexByName[name] = index
+      }
+    }
     var maximumIndex = customModels.compactMap { ($0["index"] as? NSNumber)?.intValue }.max() ?? -1
     for profile in managedProfiles {
       var entry = try buildEntry(profile)
@@ -100,7 +104,11 @@ struct DroidSyncService {
   private func readObject(_ url: URL) throws -> [String: Any] {
     guard fileManager.fileExists(atPath: url.path) else { return [:] }
     let data = try Data(contentsOf: url)
-    return try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+    guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+      throw ControllerError.operationFailed(
+        "\(url.lastPathComponent) must be a JSON object; refusing to overwrite it.")
+    }
+    return object
   }
 
   private func write(_ object: [String: Any], to url: URL) throws {

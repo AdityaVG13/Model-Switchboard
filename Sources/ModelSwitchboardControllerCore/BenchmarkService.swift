@@ -165,7 +165,10 @@ public final class BenchmarkService: @unchecked Sendable {
       result = try ProcessRunner.run(
         "/usr/bin/curl",
         [
-          "--fail", "--silent", "--show-error", "--max-time", "120",
+          "--fail", "--silent", "--show-error",
+          "--max-redirs", "0",
+          "--noproxy", "*",
+          "--max-time", "120",
           "--header", "Content-Type: application/json", "--data-binary",
           String(decoding: requestData, as: UTF8.self), endpoint.absoluteString,
         ])

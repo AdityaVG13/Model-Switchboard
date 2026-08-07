@@ -302,6 +302,11 @@ class ProfileConflictError(AgentError):
     code = "profile_conflict"
     public_message = "profile endpoint conflict"
 
+    def __init__(self, message: str):
+        super().__init__(message)
+        # Busy-port / ensure_unique detail is operator-actionable — surface it.
+        self.public_message = message
+
 
 class OperationFailedError(AgentError):
     http_status = 500
@@ -611,12 +616,16 @@ class ProfileRepository:
         )
         for file in files:
             name = file.stem
-            values = (
-                parse_json_profile(file)
-                if file.suffix.lower() == ".json"
-                else parse_env_profile(file)
-            )
-            profiles[name] = Profile(name=name, values=values)
+            try:
+                values = (
+                    parse_json_profile(file)
+                    if file.suffix.lower() == ".json"
+                    else parse_env_profile(file)
+                )
+                profiles[name] = Profile(name=name, values=values)
+            except (AgentError, OSError, ValueError, json.JSONDecodeError) as error:
+                # One bad file must not take down /api/status for the whole host.
+                sys.stderr.write(f"[profiles] skipping {file.name}: {error}\n")
         return profiles
 
     def profile(self, name: str) -> Profile:
@@ -2377,6 +2386,19 @@ class AgentService:
             self.profiles.ensure_unique(profile.name, "start", loaded)
             command = build_start_command(profile)
 
+            # Refuse to launch into a foreign listener (daemonized leftovers /
+            # another stack on the same PORT). Watchdog must not pile orphans.
+            port = profile.endpoint_port
+            if port and port_is_listening(port):
+                listener = listener_pid(port)
+                if listener and self._process_matches(listener, profile):
+                    self._supervised.add(canonical)
+                    return
+                detail = f" by pid {listener}" if listener else ""
+                raise ProfileConflictError(
+                    f"Cannot start {canonical}: port {port} is already in use{detail}."
+                )
+
             environment = dict(os.environ)
             environment.update(profile.values)
             environment["MODEL_PROFILE"] = canonical
@@ -2607,10 +2629,18 @@ class AgentService:
                 current = self.status(profile)
                 if current["ready"] or current["running"]:
                     continue
+                # Port held by a foreign process: drop supervision instead of
+                # re-launching into a busy endpoint every watchdog tick.
+                port = profile.endpoint_port
+                if port and port_is_listening(port):
+                    listener = listener_pid(port)
+                    if listener is None or not self._process_matches(listener, profile):
+                        self._supervised.discard(name)
+                        continue
                 try:
                     self.start(name)
-                except AgentError:
-                    pass
+                except AgentError as error:
+                    sys.stderr.write(f"[watchdog] failed to restart {name}: {error}\n")
 
     def start_watchdog(self) -> None:
         def tick() -> None:
@@ -2745,27 +2775,31 @@ class AgentService:
         while time.monotonic() < deadline:
             if primary_pid:
                 reap_child(primary_pid)
-            primary_gone = not process_is_alive(primary_pid)
-            if primary_gone:
-                if not port_is_listening(profile.endpoint_port):
-                    return True
-                listener = listener_pid(profile.endpoint_port)
-                if listener is None:
-                    return True
-                # Port held by an unrelated process — not our problem for stop.
-                if listener != primary_pid and not self._process_matches(listener, profile):
-                    return True
-                # Our listener is a zombie → treat as stopped for status.
-                if process_is_zombie(listener):
-                    reap_child(listener)
-                    return True
+            if process_is_alive(primary_pid):
+                time.sleep(0.2)
+                continue
+            # Prefer connect-only checks in the hot loop; resolve ownership via
+            # the shared listening-TCP inventory (cached) instead of N× lsof.
+            if not port_is_listening(profile.endpoint_port):
+                return True
+            listeners = list_listening_tcp()
+            listener = listener_pid_from_inventory(profile.endpoint_port, listeners)
+            if listener is None:
+                return True
+            # Port held by an unrelated process — not our problem for stop.
+            if listener != primary_pid and not self._process_matches(listener, profile):
+                return True
+            if process_is_zombie(listener):
+                reap_child(listener)
+                return True
             time.sleep(0.2)
         # Final assessment: zombies / free ports count as stopped.
         if process_is_alive(primary_pid):
             return False
         if not port_is_listening(profile.endpoint_port):
             return True
-        listener = listener_pid(profile.endpoint_port)
+        listeners = list_listening_tcp()
+        listener = listener_pid_from_inventory(profile.endpoint_port, listeners)
         if listener is None:
             return True
         if process_is_zombie(listener):
@@ -2978,14 +3012,6 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
             return service.action_response()
         return handle
 
-    def _plain_action(
-        self, action: Callable[[], None]
-    ) -> Callable[[dict[str, Any]], dict[str, Any]]:
-        def handle(payload: dict[str, Any]) -> dict[str, Any]:
-            action()
-            return self.service.action_response()
-        return handle
-
 
 def make_server(
     service: AgentService, verbose: bool = False
@@ -3120,7 +3146,13 @@ def build_parser() -> argparse.ArgumentParser:
 def build_configuration(args: argparse.Namespace) -> AgentConfiguration:
     token = args.auth_token
     if args.auth_token_file is not None:
-        token = args.auth_token_file.expanduser().read_text(encoding="utf-8").strip()
+        path = args.auth_token_file.expanduser()
+        try:
+            token = path.read_text(encoding="utf-8").strip()
+        except OSError as error:
+            raise InvalidConfigurationError(
+                f"cannot read auth token file {path}: {error}"
+            ) from error
     host = args.host
     unsafe = False
     tailscale = False

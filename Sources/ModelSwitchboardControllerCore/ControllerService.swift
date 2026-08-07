@@ -129,6 +129,19 @@ public final class ControllerService: @unchecked Sendable {
       clearActiveProfile(ifMatching: name)
       let profile = try profiles.profile(named: name)
       let currentStatus = status(for: profile)
+      // Never SIGTERM a stale pid-file PID that no longer looks like this profile
+      // (reused PIDs after reboot). Mirror RemoteAgent ownership rules.
+      var primaryPID = currentStatus.pid
+      if let pid = primaryPID, !processMatches(pid, profile: profile) {
+        let owned = readPID(name)
+        if owned == pid, ProcessRunner.processIsAlive(owned),
+          commandLooksLikeModelServer(processCommand(pid))
+        {
+          // Keep primary — leftover supervised model server.
+        } else {
+          primaryPID = nil
+        }
+      }
       var stopError: Error?
       if let command = profile["STOP_COMMAND"]?.trimmingCharacters(in: .whitespacesAndNewlines),
         !command.isEmpty
@@ -145,10 +158,13 @@ public final class ControllerService: @unchecked Sendable {
         }
       }
       if profile["STOP_COMMAND_ONLY"] != "1" {
-        terminateProfileProcesses(profile, primaryPID: currentStatus.pid)
-        guard waitUntilStopped(profile, primaryPID: currentStatus.pid) else {
-          throw ControllerError.operationFailed(
-            "failed to stop \(name): endpoint or process is still alive")
+        terminateProfileProcesses(profile, primaryPID: primaryPID)
+        if !waitUntilStopped(profile, primaryPID: primaryPID) {
+          terminateProfileProcesses(profile, primaryPID: primaryPID)
+          guard waitUntilStopped(profile, primaryPID: primaryPID, timeout: 24) else {
+            throw ControllerError.operationFailed(
+              "failed to stop \(name): endpoint or process is still alive")
+          }
         }
       }
       try? fileManager.removeItem(at: pidFile(name))
@@ -317,6 +333,8 @@ public final class ControllerService: @unchecked Sendable {
   }
 
   private func processMatches(_ pid: Int, profile: ControllerProfile) -> Bool {
+    // Never claim the controller process itself as a model server.
+    if pid == Int(ProcessInfo.processInfo.processIdentifier) { return false }
     guard let command = processCommand(pid)?.lowercased() else { return false }
     let markers = [
       profile.name, profile["MODEL_ALIAS"], profile.requestModel, profile.serverModelID,
@@ -325,6 +343,17 @@ public final class ControllerService: @unchecked Sendable {
     return markers.compactMap { $0?.lowercased() }.contains {
       $0.count >= 4 && command.contains($0)
     }
+  }
+
+  private func commandLooksLikeModelServer(_ command: String?) -> Bool {
+    guard let command, !command.isEmpty else { return false }
+    let lowered = command.lowercased()
+    let markers = [
+      "llama-server", "llama.cpp", "llamacpp", "vllm", "sglang", "ollama",
+      "tabbyapi", "aphrodite", "mlx", "mlc_llm", "kobold", "exllama",
+      "lmdeploy", "tensorrt", "trtllm", "localai", "gguf",
+    ]
+    return markers.contains { lowered.contains($0) }
   }
 
   private func probeHealth(_ profile: ControllerProfile) -> (ready: Bool, serverIDs: [String]) {
@@ -340,7 +369,10 @@ public final class ControllerService: @unchecked Sendable {
       let result = try? ProcessRunner.run(
         "/usr/bin/curl",
         [
-          "--fail", "--silent", "--show-error", "--max-time", "1.5", "--header",
+          "--fail", "--silent", "--show-error",
+          "--max-redirs", "0",
+          "--noproxy", "*",
+          "--max-time", "1.5", "--header",
           "Accept: application/json", url.absoluteString,
         ]
       )
@@ -371,8 +403,10 @@ public final class ControllerService: @unchecked Sendable {
     }
   }
 
-  private func waitUntilStopped(_ profile: ControllerProfile, primaryPID: Int?) -> Bool {
-    let deadline = Date().addingTimeInterval(8)
+  private func waitUntilStopped(
+    _ profile: ControllerProfile, primaryPID: Int?, timeout: TimeInterval = 90
+  ) -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
     while Date() < deadline {
       let listener = listenerPID(port: profile.endpointPort)
       let listenerAlive =

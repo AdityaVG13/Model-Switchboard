@@ -58,7 +58,7 @@ MODEL_SERVER_COMMAND_MARKERS = (
     "tabbyapi",
     "aphrodite",
     "tgi-",
-    "openai",
+    "openai-compatible",
     "mlc_llm",
     "koboldcpp",
     "kobold",

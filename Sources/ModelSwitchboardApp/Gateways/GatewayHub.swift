@@ -262,10 +262,15 @@ final class GatewayHub {
             startForwardSync(for: runtime)
         case .failed(let message):
             runtime.store.applyBootstrapDiagnostic(message)
+            runtime.store.stopAutoRefresh()
             runtime.forwardSyncTask?.cancel()
             runtime.forwardSyncTask = nil
             runtime.forwardedPorts = [:]
         case .connecting, .idle:
+            // Don't keep polling a dead/not-yet-ready forward.
+            if case .idle = state {
+                runtime.store.stopAutoRefresh()
+            }
             runtime.forwardSyncTask?.cancel()
             runtime.forwardSyncTask = nil
             runtime.forwardedPorts = [:]

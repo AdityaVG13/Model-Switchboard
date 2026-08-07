@@ -99,9 +99,14 @@ public final class ProfileRepository: @unchecked Sendable {
     var profiles: [String: ControllerProfile] = [:]
     for file in files {
       let name = file.deletingPathExtension().lastPathComponent
-      let values =
-        try file.pathExtension.lowercased() == "json" ? parseJSON(file) : parseEnvironment(file)
-      profiles[name] = try ControllerProfile(name: name, values: values)
+      do {
+        let values =
+          try file.pathExtension.lowercased() == "json" ? parseJSON(file) : parseEnvironment(file)
+        profiles[name] = try ControllerProfile(name: name, values: values)
+      } catch {
+        // One bad file must not take down GET /api/status for every profile.
+        fputs("[profiles] skipping \(file.lastPathComponent): \(error)\n", stderr)
+      }
     }
     return profiles
   }

@@ -22,4 +22,11 @@ public enum JSONSupport {
     }
     return object
   }
+
+  /// JSONSerialization yields NSNumber for booleans — `as? Bool` often fails.
+  public static func boolValue(_ value: Any?) -> Bool? {
+    if let bool = value as? Bool { return bool }
+    if let number = value as? NSNumber { return number.boolValue }
+    return nil
+  }
 }

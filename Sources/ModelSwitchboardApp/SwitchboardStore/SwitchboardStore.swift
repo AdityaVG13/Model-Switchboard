@@ -61,6 +61,8 @@ final class SwitchboardStore {
     /// Sticky bootstrap message that refresh failures must not clobber.
     var bootstrapDiagnostic: String?
     var isRefreshing = false
+    /// Coalesce overlapping refresh() calls into one follow-up instead of dropping them.
+    var needsRefreshAgain = false
     var isRunningControllerDoctor = false
     var lastUpdated: Date?
     var pendingProfileActions: [String: String] = [:]

@@ -95,8 +95,8 @@ public final class ControllerRouter: @unchecked Sendable {
         _ = try service.benchmarks.start(
           profiles: selected,
           suite: payload["suite"] as? String ?? "quick",
-          allowConcurrent: payload["allow_concurrent"] as? Bool ?? false,
-          keepRunning: payload["keep_running"] as? Bool ?? false
+          allowConcurrent: JSONSupport.boolValue(payload["allow_concurrent"]) ?? false,
+          keepRunning: JSONSupport.boolValue(payload["keep_running"]) ?? false
         )
         return try response(service.actionResponse())
       default:
@@ -111,7 +111,7 @@ public final class ControllerRouter: @unchecked Sendable {
           ?? fallback()
       case .profileConflict:
         return
-          (try? error(status: 409, code: "profile_conflict", message: "profile endpoint conflict"))
+          (try? error(status: 409, code: "profile_conflict", message: controllerError.description))
           ?? fallback()
       case .usage, .invalidConfiguration, .invalidProfile:
         return (try? error(status: 400, code: "invalid_request", message: "invalid request"))
@@ -121,7 +121,10 @@ public final class ControllerRouter: @unchecked Sendable {
           (try? error(status: 400, code: "unsupported_action", message: controllerError.description))
           ?? fallback()
       case .operationFailed:
-        return (try? error(status: 500, code: "internal_error", message: "internal server error"))
+        return (
+          try? error(
+            status: 500, code: "internal_error", message: controllerError.description)
+        )
           ?? fallback()
       }
     } catch {

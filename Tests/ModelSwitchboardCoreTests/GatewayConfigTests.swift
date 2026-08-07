@@ -35,13 +35,26 @@ import Testing
     #expect(GatewayConfigStore.load(from: defaults) == gateways)
 }
 
-@Test func gatewayConfigStoreIgnoresCorruptData() throws {
+@Test func gatewayConfigStoreQuarantinesCorruptDataWithoutWiping() throws {
     let suiteName = "io.modelswitchboard.tests.\(UUID().uuidString)"
     let defaults = try #require(UserDefaults(suiteName: suiteName))
     defer { defaults.removePersistentDomain(forName: suiteName) }
 
-    defaults.set(Data("not json".utf8), forKey: GatewayConfigStore.defaultsKey)
+    let corrupt = Data("not json".utf8)
+    defaults.set(corrupt, forKey: GatewayConfigStore.defaultsKey)
+    #expect(GatewayConfigStore.loadResult(from: defaults) == .corrupt)
     #expect(GatewayConfigStore.load(from: defaults).isEmpty)
+    #expect(defaults.data(forKey: GatewayConfigStore.corruptBackupKey) == corrupt)
+
+    // Accidental empty save must not clobber the corrupt blob.
+    GatewayConfigStore.save([], to: defaults)
+    #expect(defaults.data(forKey: GatewayConfigStore.defaultsKey) == corrupt)
+
+    // A real write replaces the blob and clears the quarantine.
+    let gateways = [GatewayConfig(name: "Spark", kind: .ssh, sshHost: "spark")]
+    GatewayConfigStore.save(gateways, to: defaults)
+    #expect(GatewayConfigStore.load(from: defaults) == gateways)
+    #expect(defaults.data(forKey: GatewayConfigStore.corruptBackupKey) == nil)
 }
 
 @Test func gatewayContextForConfigIsRemote() {

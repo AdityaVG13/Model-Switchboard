@@ -47,6 +47,14 @@ actor SSHTunnelManager {
             self.identityFile = identityFile
             self.identityAgent = identityAgent
         }
+
+        /// True when the destination would be parsed as an ssh option.
+        var isUnsafeDestination: Bool {
+            if GatewayConfig.looksLikeSSHOption(destination) { return true }
+            return destination.split(separator: "@").contains {
+                GatewayConfig.looksLikeSSHOption(String($0))
+            }
+        }
     }
 
     private static let logger = Logger(subsystem: "io.modelswitchboard.app", category: "ssh-tunnel")
@@ -110,6 +118,14 @@ actor SSHTunnelManager {
 
     func start() {
         guard !desiredActive else { return }
+        if configuration.isUnsafeDestination {
+            Task {
+                await transition(to: .failed(
+                    "SSH user/host cannot start with '-' (would be parsed as an ssh option)."
+                ))
+            }
+            return
+        }
         guard localPort != 0 else {
             Task {
                 await transition(to: .failed("Could not allocate a local loopback port for the SSH tunnel."))

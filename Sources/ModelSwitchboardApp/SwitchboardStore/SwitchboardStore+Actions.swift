@@ -48,12 +48,16 @@ extension SwitchboardStore {
         defer { pendingGlobalActions.remove("stop-all") }
         noteManagedLoopbackTransition()
         rememberLastActiveProfiles(from: statuses)
+        let previousStatuses = statuses
         let stoppingProfiles = Set(statuses.filter { $0.running || $0.ready }.map(\.profile))
         statuses = statuses.map { $0.updating(running: false, ready: false) }
-        await run(
+        let succeeded = await run(
             { try await $0.stopAll() },
             verify: { try await self.verifyProfilesStopped(stoppingProfiles, using: $0) }
         )
+        if !succeeded {
+            statuses = previousStatuses
+        }
     }
 
     func quickBenchmark(_ profiles: [String]? = nil) async {
@@ -90,6 +94,7 @@ extension SwitchboardStore {
         guard pendingGlobalActions.insert("reopen-last").inserted else { return }
         defer { pendingGlobalActions.remove("reopen-last") }
         noteManagedLoopbackTransition()
+        let previousStatuses = statuses
 
         for profile in profiles {
             pendingProfileActions[profile] = "STARTING"
@@ -109,7 +114,11 @@ extension SwitchboardStore {
             }
             await refresh()
         } catch {
-            if isBenignCancellation(error) { return }
+            if isBenignCancellation(error) {
+                statuses = previousStatuses
+                return
+            }
+            statuses = previousStatuses
             lastError = bootstrapDiagnostic ?? Self.userFacingErrorDescription(for: error)
         }
     }

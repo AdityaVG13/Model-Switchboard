@@ -158,9 +158,12 @@ public struct ControllerConfiguration: Sendable, Equatable {
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     let configURL = root.appendingPathComponent("config.json")
     var payload: [String: Any] = [:]
-    if let data = try? Data(contentsOf: configURL),
-      let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-    {
+    if FileManager.default.fileExists(atPath: configURL.path) {
+      let data = try Data(contentsOf: configURL)
+      guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        throw ControllerError.operationFailed(
+          "refusing to rewrite corrupt config.json: root value is not an object")
+      }
       payload = object
     }
     payload["profiles_dir"] = profilesDirectory.path

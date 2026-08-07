@@ -55,6 +55,12 @@ actor RemoteAgentDeployer {
     /// and the returned pairing link describes a direct (tunnel-less) gateway.
     func deploy(to config: GatewayConfig, useTailscale: Bool = false) async throws -> Result {
         guard resourcesAvailable else { throw DeployError.missingResources }
+        if config.hasUnsafeSSHDestination {
+            throw DeployError.sshFailed(
+                step: "validate",
+                message: "SSH user/host cannot start with '-' (would be parsed as an ssh option)."
+            )
+        }
         let agentData = try Data(contentsOf: agentSourceURL)
         let discoveryData = try Data(contentsOf: discoverySourceURL)
         let installerData = try Data(contentsOf: installerURL)
@@ -156,8 +162,16 @@ actor RemoteAgentDeployer {
         try process.run()
         // Feed stdin off the current task; FileHandle writes are blocking.
         let writeHandle = stdinPipe.fileHandleForWriting
-        try? writeHandle.write(contentsOf: stdin)
-        try? writeHandle.close()
+        do {
+            try writeHandle.write(contentsOf: stdin)
+            try writeHandle.close()
+        } catch {
+            process.terminate()
+            throw DeployError.sshFailed(
+                step: step,
+                message: "failed to write install payload over SSH: \(error.localizedDescription)"
+            )
+        }
 
         let stdout = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
         let stderr = stderrPipe.fileHandleForReading.readDataToEndOfFile()

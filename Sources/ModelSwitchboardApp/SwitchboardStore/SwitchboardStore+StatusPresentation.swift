@@ -3,20 +3,24 @@ import ModelSwitchboardCore
 
 extension SwitchboardStore {
     func menuBarHelp(relativeTo now: Date) -> String {
+        let scope = gateway.isLocal ? "Local" : gateway.name
         switch statusFreshness(relativeTo: now) {
         case .cached:
-            return "Cached local model state may be stale. Refresh to verify live status."
+            return "Cached \(scope) model state may be stale. Refresh to verify live status."
         case .stale:
-            return "Local model status is stale. Refresh to verify live status."
+            return "\(scope) model status is stale. Refresh to verify live status."
         case .error where !statuses.isEmpty:
-            return "Local model status is unavailable. Refresh to verify live status."
+            return "\(scope) model status is unavailable. Refresh to verify live status."
         case .error, .fresh:
             // Display order matters here (matches the menu list); sortedStatuses is cached.
             let running = sortedStatuses.filter(\.running)
             guard !running.isEmpty else {
-                return "No local models running"
+                return gateway.isLocal
+                    ? "No local models running"
+                    : "No models running on \(gateway.name)"
             }
-            return "Running: " + running.map(\.displayName).joined(separator: ", ")
+            let prefix = gateway.isLocal ? "Running" : "\(gateway.name)"
+            return "\(prefix): " + running.map(\.displayName).joined(separator: ", ")
         }
     }
 

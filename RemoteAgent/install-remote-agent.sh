@@ -129,10 +129,10 @@ payload = {}
 if path.is_file():
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        payload = {}
+    except Exception as exc:
+        raise SystemExit(f"refusing to rewrite corrupt config.json: {exc}") from None
 if not isinstance(payload, dict):
-    payload = {}
+    raise SystemExit("refusing to rewrite config.json: root value is not an object")
 payload["profiles_dir"] = str(profiles)
 path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 path.chmod(0o600)
@@ -223,8 +223,11 @@ RestartSec=3
 WantedBy=default.target
 EOF
     systemctl --user daemon-reload
-    systemctl --user enable --now model-switchboard-agent.service
-    log "systemd user service enabled and started ($SERVE_FLAGS)."
+    # enable --now is a no-op restart when already running with a stale
+    # ExecStart (token/port/tailscale changes). Always restart after rewrite.
+    systemctl --user enable model-switchboard-agent.service
+    systemctl --user restart model-switchboard-agent.service
+    log "systemd user service enabled and restarted ($SERVE_FLAGS)."
     log "Tip: 'loginctl enable-linger $USER' keeps it running after logout."
 else
     log "systemd not available; start the agent manually:"

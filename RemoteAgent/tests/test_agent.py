@@ -243,6 +243,16 @@ class ProfileParsingTests(unittest.TestCase):
         with self.assertRaises(agent.ProfileConflictError):
             repository.ensure_unique("a", "start", profiles)
 
+    def test_load_skips_bad_files_without_failing_all(self) -> None:
+        good = self.tmp / "good.env"
+        good.write_text("REQUEST_MODEL=m\nPORT=8080\n", encoding="utf-8")
+        bad = self.tmp / "bad.env"
+        bad.write_text("NOT_A_VALID_LINE\n", encoding="utf-8")
+        repository = agent.ProfileRepository(self.tmp)
+        profiles = repository.load()
+        self.assertIn("good", profiles)
+        self.assertNotIn("bad", profiles)
+
 
 class BuildStartCommandTests(unittest.TestCase):
     def test_start_command_takes_precedence(self) -> None:
