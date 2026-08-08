@@ -1787,13 +1787,18 @@ class AgentService:
                     for item in statuses
                     if str(item.get("port") or "").isdigit()
                 }
+                listening_by_port = {
+                    int(item["port"]): item
+                    for item in listening
+                    if str(item.get("port") or "").isdigit()
+                }
 
                 # Claimed port folders not already represented by a profile.
                 for claim in claims:
                     port = int(claim["port"])
                     if port in covered_ports:
                         continue
-                    live = next((item for item in listening if int(item["port"]) == port), None)
+                    live = listening_by_port.get(port)
                     merged = dict(claim)
                     if live:
                         merged.update(
@@ -1895,6 +1900,7 @@ class AgentService:
             listeners=listeners,
         )
         live_by_port = {int(item["port"]): item for item in live}
+        claims_by_port = {int(item["port"]): item for item in claims}
         ports: list[dict[str, Any]] = []
         for listener in listeners:
             port = int(listener["port"])
@@ -1905,10 +1911,7 @@ class AgentService:
                 "bind": listener.get("bind"),
                 "looks_like_model": command_looks_like_model_server(listener.get("command")),
                 "model": live_by_port.get(port),
-                "claimed": next(
-                    (claim for claim in claims if int(claim["port"]) == port),
-                    None,
-                ),
+                "claimed": claims_by_port.get(port),
             }
             ports.append(entry)
         # Claims with nothing listening yet still appear.
