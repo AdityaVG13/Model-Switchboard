@@ -915,7 +915,7 @@ def discover_live_model_endpoints(
                 "ready": bool(probe.get("ready")),
                 "health_ok": bool(probe.get("health_ok")),
                 "base_url": probe.get("base_url") or f"http://127.0.0.1:{port}/v1",
-                "source": "listening",
+                "source": "discovery",
             }
         )
     return discovered

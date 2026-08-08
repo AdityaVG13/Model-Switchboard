@@ -21,7 +21,7 @@ public struct ModelProfileStatus: Codable, Identifiable, Equatable, Sendable {
     public let vramMB: Double?
     public let command: String?
     public let logPath: String
-    /// Wire discriminator: `profile`, `claim`, or `discovery` (synthetic rows).
+    /// Status origin: profile, claim, or discovery.
     public let source: String?
 
     public var id: String { profile }

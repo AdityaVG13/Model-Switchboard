@@ -30,9 +30,7 @@ public struct ControllerStatusPayload: Codable, Equatable, Sendable {
     public let integrations: [ControllerIntegration]
     public let profilesDirectory: String?
     public let controllerRoot: String?
-    /// Agent-reported count of file-backed profiles (excludes claim/discovery rows).
     public let profileTotalCount: Int?
-    /// Agent-reported ready count among file-backed profiles only.
     public let profileReadyCount: Int?
 
     public init(

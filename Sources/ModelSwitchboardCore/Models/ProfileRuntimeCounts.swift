@@ -26,13 +26,13 @@ public struct ProfileRuntimeCounts: Equatable, Sendable {
 }
 
 extension ModelProfileStatus {
-    /// File-backed profiles only. Prefer wire `source`; fall back to port-/discovered- ids.
+    /// True for claim/discovery rows (not file-backed profiles).
     public var isSyntheticDiscoveryProfile: Bool {
         if let source {
             switch source {
             case "profile":
                 return false
-            case "claim", "discovery":
+            case "claim", "discovery", "listening":
                 return true
             default:
                 break
