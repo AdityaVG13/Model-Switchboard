@@ -30,19 +30,27 @@ public struct ControllerStatusPayload: Codable, Equatable, Sendable {
     public let integrations: [ControllerIntegration]
     public let profilesDirectory: String?
     public let controllerRoot: String?
+    /// Agent-reported count of file-backed profiles (excludes claim/discovery rows).
+    public let profileTotalCount: Int?
+    /// Agent-reported ready count among file-backed profiles only.
+    public let profileReadyCount: Int?
 
     public init(
         statuses: [ModelProfileStatus],
         benchmark: BenchmarkStatus?,
         integrations: [ControllerIntegration] = [],
         profilesDirectory: String? = nil,
-        controllerRoot: String? = nil
+        controllerRoot: String? = nil,
+        profileTotalCount: Int? = nil,
+        profileReadyCount: Int? = nil
     ) {
         self.statuses = statuses
         self.benchmark = benchmark
         self.integrations = integrations
         self.profilesDirectory = profilesDirectory
         self.controllerRoot = controllerRoot
+        self.profileTotalCount = profileTotalCount
+        self.profileReadyCount = profileReadyCount
     }
 
     enum CodingKeys: String, CodingKey {
@@ -51,6 +59,8 @@ public struct ControllerStatusPayload: Codable, Equatable, Sendable {
         case integrations
         case profilesDirectory = "profiles_dir"
         case controllerRoot = "controller_root"
+        case profileTotalCount = "profile_total_count"
+        case profileReadyCount = "profile_ready_count"
     }
 }
 
@@ -103,7 +113,15 @@ public struct DashboardSummary: Equatable, Sendable {
     public let benchmarkSuite: String?
 
     public init(payload: ControllerStatusPayload) {
-        self.init(counts: ProfileRuntimeCounts(statuses: payload.statuses), benchmark: payload.benchmark)
+        let counts = ProfileRuntimeCounts(statuses: payload.statuses)
+        self.init(
+            counts: ProfileRuntimeCounts(
+                total: payload.profileTotalCount ?? counts.total,
+                running: counts.running,
+                ready: payload.profileReadyCount ?? counts.ready
+            ),
+            benchmark: payload.benchmark
+        )
     }
 
     public init(counts: ProfileRuntimeCounts, benchmark: BenchmarkStatus?) {

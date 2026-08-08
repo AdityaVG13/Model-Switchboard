@@ -1841,7 +1841,7 @@ class AgentService:
                     statuses.append(
                         status_dict_from_discovery(
                             live,
-                            source="listening",
+                            source="discovery",
                             profile_name=f"discovered-{port}",
                             listeners=listeners,
                         )
@@ -1856,12 +1856,15 @@ class AgentService:
             span.tags["n_claims"] = len(claims)
             span.tags["n_live"] = len(listening)
             span.tags["full_discovery"] = selected is None
+            file_backed = [item for item in statuses if item.get("source") == "profile"]
             return {
                 "statuses": statuses,
                 "benchmark": benchmark,
                 "integrations": [],
                 "profiles_dir": str(self.configuration.profiles_directory),
                 "controller_root": str(self.configuration.root),
+                "profile_total_count": len(file_backed),
+                "profile_ready_count": sum(1 for item in file_backed if item.get("ready")),
                 "discovery": {
                     "listening": listening if selected is None else [],
                     "claims": [
@@ -2361,7 +2364,7 @@ class AgentService:
             "vram_mb": process_vram_mb(pid) if alive and pid else None,
             "command": process_command(pid) if ((alive or zombie) and pid) else None,
             "log_path": profile.log_path,
-            "discovery_source": "profile",
+            "source": "profile",
         }
 
     # -- lifecycle ---------------------------------------------------------

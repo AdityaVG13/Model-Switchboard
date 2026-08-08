@@ -244,6 +244,29 @@ struct RemoteAgentConformanceTests {
         }
     }
 
+    @Test func statusPayloadMarksProfilesAndReportsReadyCount() async throws {
+        guard FileManager.default.isReadableFile(atPath: Self.agentScript.path),
+              FileManager.default.isReadableFile(atPath: Self.discoveryScript.path)
+        else {
+            Issue.record("RemoteAgent python modules missing from repo checkout")
+            return
+        }
+
+        let harness = try AgentHarness()
+        defer { harness.shutdown() }
+        let client = try harness.makeClient()
+        try await Self.waitForAgent(client)
+
+        let status = try await client.fetchStatus()
+        let stub = try #require(status.statuses.first { $0.profile == "conformance-stub" })
+        #expect(stub.source == "profile")
+        #expect(status.profileTotalCount == status.statuses.filter { $0.source == "profile" }.count)
+        #expect(status.profileReadyCount == status.statuses.filter { $0.source == "profile" && $0.ready }.count)
+        let counts = ProfileRuntimeCounts(statuses: status.statuses)
+        #expect(counts.total == status.profileTotalCount)
+        #expect(counts.ready == status.profileReadyCount)
+    }
+
     @Test func sharedPortProfilesConflictOnSwitch() async throws {
         let stubPort = AgentHarness.freePort()
         // Two profiles claim the same port — switch must 409 before launch.

@@ -32,3 +32,30 @@ import ModelSwitchboardTestSupport
     #expect(counts.running == 1)
     #expect(counts.ready == 1)
 }
+
+
+@Test func profileRuntimeCountsPreferSourceOverName() {
+    let counts = ProfileRuntimeCounts(statuses: [
+        ModelFixtures.profileStatus(profile: "llama", running: true, ready: true, source: "profile"),
+        ModelFixtures.profileStatus(profile: "odd-name", running: true, ready: true, source: "discovery"),
+        ModelFixtures.profileStatus(profile: "port-like-but-real", running: false, ready: false, source: "profile"),
+    ])
+
+    #expect(counts.total == 2)
+    #expect(counts.running == 1)
+    #expect(counts.ready == 1)
+}
+
+@Test func dashboardSummaryPrefersAgentProfileReadyCount() {
+    let payload = ModelFixtures.statusPayload(
+        statuses: [
+            ModelFixtures.profileStatus(profile: "llama", running: true, ready: true, source: "profile"),
+            ModelFixtures.profileStatus(profile: "discovered-9", running: true, ready: true, source: "discovery"),
+        ],
+        profileTotalCount: 1,
+        profileReadyCount: 1
+    )
+    let summary = DashboardSummary(payload: payload)
+    #expect(summary.totalProfiles == 1)
+    #expect(summary.readyProfiles == 1)
+}

@@ -992,7 +992,7 @@ def status_dict_from_discovery(
             if port
             else f"/tmp/{name}.log"
         ),
-        "discovery_source": source,
+        "source": source,
         "claim_path": item.get("path"),
     }
 

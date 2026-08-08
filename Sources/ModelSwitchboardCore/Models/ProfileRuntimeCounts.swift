@@ -5,6 +5,12 @@ public struct ProfileRuntimeCounts: Equatable, Sendable {
     public let running: Int
     public let ready: Int
 
+    public init(total: Int, running: Int, ready: Int) {
+        self.total = total
+        self.running = running
+        self.ready = ready
+    }
+
     public init(statuses: [ModelProfileStatus]) {
         let fileBacked = statuses.filter { !$0.isSyntheticDiscoveryProfile }
         total = fileBacked.count
@@ -20,8 +26,18 @@ public struct ProfileRuntimeCounts: Equatable, Sendable {
 }
 
 extension ModelProfileStatus {
-    /// Agent discovery rows use `port-N` / `discovered-N` ids; they are not file-backed profiles.
+    /// File-backed profiles only. Prefer wire `source`; fall back to port-/discovered- ids.
     public var isSyntheticDiscoveryProfile: Bool {
-        profile.hasPrefix("port-") || profile.hasPrefix("discovered-")
+        if let source {
+            switch source {
+            case "profile":
+                return false
+            case "claim", "discovery":
+                return true
+            default:
+                break
+            }
+        }
+        return profile.hasPrefix("port-") || profile.hasPrefix("discovered-")
     }
 }

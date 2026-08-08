@@ -34,7 +34,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "ModelSwitchboardController",
-            dependencies: ["ModelSwitchboardControllerCore"]
+            dependencies: ["ModelSwitchboardControllerCore", "ModelSwitchboardCore"]
         ),
         .target(
             name: "BumpVersionCore",

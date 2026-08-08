@@ -21,6 +21,8 @@ public struct ModelProfileStatus: Codable, Identifiable, Equatable, Sendable {
     public let vramMB: Double?
     public let command: String?
     public let logPath: String
+    /// Wire discriminator: `profile`, `claim`, or `discovery` (synthetic rows).
+    public let source: String?
 
     public var id: String { profile }
 
@@ -43,7 +45,8 @@ public struct ModelProfileStatus: Codable, Identifiable, Equatable, Sendable {
         rssMB: Double?,
         vramMB: Double? = nil,
         command: String?,
-        logPath: String
+        logPath: String,
+        source: String? = nil
     ) {
         self.profile = profile
         self.displayName = displayName
@@ -64,6 +67,7 @@ public struct ModelProfileStatus: Codable, Identifiable, Equatable, Sendable {
         self.vramMB = vramMB
         self.command = command
         self.logPath = logPath
+        self.source = source
     }
 
     enum CodingKeys: String, CodingKey {
@@ -86,6 +90,7 @@ public struct ModelProfileStatus: Codable, Identifiable, Equatable, Sendable {
         case vramMB = "vram_mb"
         case command
         case logPath = "log_path"
+        case source
     }
 
     /// Tolerant decode: remote agents may omit or null `log_path` (discovery rows).
@@ -115,6 +120,7 @@ public struct ModelProfileStatus: Codable, Identifiable, Equatable, Sendable {
         } else {
             logPath = ""
         }
+        source = try container.decodeIfPresent(String.self, forKey: .source)
     }
 }
 
@@ -180,7 +186,8 @@ public extension ModelProfileStatus {
             rssMB: rssMB ?? self.rssMB,
             vramMB: vramMB ?? self.vramMB,
             command: command,
-            logPath: logPath
+            logPath: logPath,
+            source: source
         )
     }
 
