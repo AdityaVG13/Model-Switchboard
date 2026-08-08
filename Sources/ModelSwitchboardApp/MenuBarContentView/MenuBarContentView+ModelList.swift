@@ -5,23 +5,26 @@ import ModelSwitchboardCore
 extension MenuBarContentView {
     // MARK: - Selection helpers
 
-    /// The model featured in the hero card: first running profile that matches
-    /// the active filter (so an MLX filter never heroes a llama.cpp model).
-    /// Keep a busy/pending profile mounted so Stop/Restart hold chrome and
-    /// STOPPING/STARTING labels do not vanish mid-action.
-    var heroProfile: ModelProfileStatus? {
-        if let running = store.sortedStatuses.first(where: { isDisplayedRunning($0) && matchesFilter($0) }) {
-            return running
+    /// Local models featured as ACTIVE heroes: every running (or busy) profile
+    /// that matches the active filter. Multi-start gateways can show several.
+    var localHeroProfiles: [ModelProfileStatus] {
+        store.sortedStatuses.filter { status in
+            matchesFilter(status)
+                && (isDisplayedRunning(status) || store.isBusy(profile: status.profile))
         }
-        return store.sortedStatuses.first(where: {
-            store.isBusy(profile: $0.profile) && matchesFilter($0)
-        })
+    }
+
+    /// Back-compat alias for call sites that still ask for "the" hero.
+    var heroProfile: ModelProfileStatus? { localHeroProfiles.first }
+
+    var localHeroProfileIDs: Set<String> {
+        Set(localHeroProfiles.map(\.profile))
     }
 
     var standbyProfiles: [ModelProfileStatus] {
-        let hero = heroProfile?.profile
+        let heroes = localHeroProfileIDs
         return store.sortedStatuses.filter { status in
-            status.profile != hero && matchesFilter(status)
+            !heroes.contains(status.profile) && matchesFilter(status)
         }
     }
 
@@ -41,13 +44,9 @@ extension MenuBarContentView {
         store.profileBadgeState(for: status, relativeTo: now) == .running
     }
 
-    static func runtimeKind(_ status: ModelProfileStatus) -> ProfileFilter? {
-        let haystack = ([status.runtime, status.runtimeLabel ?? ""] + (status.runtimeTags ?? []))
-            .joined(separator: " ")
-            .lowercased()
-        if haystack.contains("llama") { return .llamaCpp }
-        if haystack.contains("mlx") { return .mlx }
-        return nil
+    /// Legacy mlx / llama.cpp classification for tests and older call sites.
+    static func runtimeKind(_ status: ModelProfileStatus) -> String? {
+        DashboardFilterPreferences.legacyRuntimeKind(status)
     }
 
     func decodeTokensPerSecond(for profile: String) -> Double? {
@@ -65,50 +64,78 @@ extension MenuBarContentView {
 
     @ViewBuilder
     var heroSection: some View {
-        if let hero = heroProfile {
-            heroCard(hero)
-        } else if let remoteActive = remoteActiveSummary {
-            remoteActiveCard(remoteActive)
+        let localHeroes = localHeroProfiles
+        let remotes = remoteHeroSummaries
+        if !localHeroes.isEmpty || !remotes.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(localHeroes) { hero in
+                    heroCard(hero)
+                }
+                ForEach(remotes, id: \.rowID) { summary in
+                    remoteActiveCard(summary)
+                }
+            }
         } else if store.canReopenLastActive, hub.displayedRunningProfiles == 0 {
             // Never claim "nothing running" while a remote gateway has models up.
             reopenCard
         }
     }
 
-    /// First remote gateway that currently shows a running/ready model matching
-    /// the active filter, for the hero strip when This Mac is idle.
-    var remoteActiveSummary: (gatewayID: String, name: String, profile: ModelProfileStatus)? {
+    /// Every remote running/busy profile matching the filter, for ACTIVE ON … cards.
+    /// When This Mac already has local heroes, remotes still get their own cards.
+    struct RemoteHeroSummary: Identifiable {
+        var id: String { rowID }
+        let rowID: String
+        let gatewayID: String
+        let name: String
+        let profile: ModelProfileStatus
+    }
+
+    var remoteHeroSummaries: [RemoteHeroSummary] {
+        var out: [RemoteHeroSummary] = []
         for runtime in hub.enabledRemoteRuntimes {
-            if let status = runtime.store.sortedStatuses.first(where: { status in
-                MenuBarContentView.isDisplayedRunning(status, in: runtime.store)
-                    && matchesFilter(status, in: runtime.store)
-            }) {
-                return (runtime.id, runtime.name, status)
-            }
-            if let busy = runtime.store.sortedStatuses.first(where: { status in
-                runtime.store.isBusy(profile: status.profile)
-                    && matchesFilter(status, in: runtime.store)
-            }) {
-                return (runtime.id, runtime.name, busy)
+            for status in runtime.store.sortedStatuses {
+                let running = MenuBarContentView.isDisplayedRunning(status, in: runtime.store)
+                let busy = runtime.store.isBusy(profile: status.profile)
+                guard running || busy else { continue }
+                guard matchesFilter(status, in: runtime.store) else { continue }
+                out.append(
+                    RemoteHeroSummary(
+                        rowID: "\(runtime.id)::\(status.profile)",
+                        gatewayID: runtime.id,
+                        name: runtime.name,
+                        profile: status
+                    )
+                )
             }
         }
-        return nil
+        return out
+    }
+
+    /// First remote hero (compat for older helpers).
+    var remoteActiveSummary: RemoteHeroSummary? {
+        remoteHeroSummaries.first
+    }
+
+    /// Profile ids already featured as remote ACTIVE heroes, keyed by gateway.
+    var remoteHeroProfileIDsByGateway: [String: Set<String>] {
+        var map: [String: Set<String>] = [:]
+        for summary in remoteHeroSummaries {
+            map[summary.gatewayID, default: []].insert(summary.profile.profile)
+        }
+        return map
     }
 
     func matchesFilter(_ status: ModelProfileStatus, in store: SwitchboardStore) -> Bool {
-        switch profileFilter {
-        case .all:
-            true
-        case .running:
-            MenuBarContentView.isDisplayedRunning(status, in: store) || store.isBusy(profile: status.profile)
-        case .mlx:
-            Self.runtimeKind(status) == .mlx
-        case .llamaCpp:
-            Self.runtimeKind(status) == .llamaCpp
-        }
+        DashboardFilterPreferences.matches(
+            status,
+            filterID: profileFilter,
+            isDisplayedRunning: MenuBarContentView.isDisplayedRunning(status, in: store),
+            isBusy: store.isBusy(profile: status.profile)
+        )
     }
 
-    private func remoteActiveCard(_ summary: (gatewayID: String, name: String, profile: ModelProfileStatus)) -> some View {
+    private func remoteActiveCard(_ summary: RemoteHeroSummary) -> some View {
         let runtime = hub.enabledRemoteRuntimes.first { $0.id == summary.gatewayID }
         let remoteStore = runtime?.store ?? store
         let hostMetrics = runtime.map { hostMetricsMonitor.entry(forGatewayID: $0.id).metrics } ?? nil
@@ -194,16 +221,13 @@ extension MenuBarContentView {
 
     /// True when hero, standby, or any remote section has a filter match.
     var boardHasAnyFilterMatch: Bool {
-        if heroProfile != nil || !standbyProfiles.isEmpty { return true }
-        let featuredRemote = heroProfile == nil ? remoteActiveSummary : nil
-        if featuredRemote != nil { return true }
+        if !localHeroProfiles.isEmpty || !standbyProfiles.isEmpty { return true }
+        if !remoteHeroSummaries.isEmpty { return true }
+        let excluded = remoteHeroProfileIDsByGateway
         for runtime in hub.enabledRemoteRuntimes {
-            let excludeID: String? = {
-                guard let featuredRemote, featuredRemote.gatewayID == runtime.id else { return nil }
-                return featuredRemote.profile.profile
-            }()
+            let excludeIDs = excluded[runtime.id] ?? []
             if runtime.store.sortedStatuses.contains(where: { status in
-                if let excludeID, status.profile == excludeID { return false }
+                if excludeIDs.contains(status.profile) { return false }
                 return matchesFilter(status, in: runtime.store)
             }) {
                 return true
@@ -224,7 +248,7 @@ extension MenuBarContentView {
                     .foregroundStyle(theme.sub)
                     .padding(EdgeInsets(top: 8, leading: 14, bottom: 4, trailing: 14))
                     .fixedSize(horizontal: false, vertical: true)
-            } else if profileFilter != .all, !boardHasAnyFilterMatch {
+            } else if profileFilter != DashboardFilterChip.all.id, !boardHasAnyFilterMatch {
                 filterMissMessage
             } else {
                 EmptyView()
@@ -254,7 +278,7 @@ extension MenuBarContentView {
                     }
                 }
                 .padding(EdgeInsets(top: 0, leading: 10, bottom: 6, trailing: 10))
-            } else if profileFilter != .all, !boardHasAnyFilterMatch {
+            } else if profileFilter != DashboardFilterChip.all.id, !boardHasAnyFilterMatch {
                 filterMissMessage
             }
         }

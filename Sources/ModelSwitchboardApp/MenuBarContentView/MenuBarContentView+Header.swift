@@ -50,7 +50,11 @@ extension MenuBarContentView {
                     .accessibilityLabel(isRefreshing ? "Refreshing" : "Refresh")
                     .help(isRefreshing ? "Refresh in progress" : "Refresh all gateways")
                     .transaction { $0.animation = nil }
-                    // Version lives in Settings — keep the ready count as the hero.
+
+                    Text("v\(Self.appVersion)")
+                        .font(.system(size: 10, weight: .medium).monospacedDigit())
+                        .foregroundStyle(theme.faint)
+                        .accessibilityLabel("Version \(Self.appVersion)")
                 }
             }
 
@@ -61,11 +65,21 @@ extension MenuBarContentView {
             }
 
             DashboardSegmentedTabs(
-                options: ProfileFilter.allCases,
-                label: \.rawValue,
+                options: visibleFilterChips.map(\.id),
+                label: { id in visibleFilterChips.first(where: { $0.id == id })?.label ?? id },
                 selection: $profileFilter,
                 theme: theme
             )
+            .onAppear {
+                if !visibleFilterChips.contains(where: { $0.id == profileFilter }) {
+                    profileFilter = DashboardFilterChip.all.id
+                }
+            }
+            .onChange(of: filterChipsRaw) { _, _ in
+                if !visibleFilterChips.contains(where: { $0.id == profileFilter }) {
+                    profileFilter = DashboardFilterChip.all.id
+                }
+            }
         }
         .padding(EdgeInsets(top: 14, leading: DashboardChromeMetrics.continuousCornerSafeInset + 2, bottom: 10, trailing: DashboardChromeMetrics.continuousCornerSafeInset + 2))
     }

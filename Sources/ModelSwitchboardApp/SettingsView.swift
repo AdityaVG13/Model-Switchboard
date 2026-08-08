@@ -28,6 +28,11 @@ struct SettingsView: View {
     @AppStorage(DashboardAppearanceKeys.menuBarShowsReadyCount)
     private var menuBarShowsReadyCount = true
 
+    @AppStorage(DashboardAppearanceKeys.filterChips)
+    private var filterChipsRaw: String = DashboardFilterPreferences.encodeChipIDs(
+        DashboardFilterPreferences.defaultChipIDs
+    )
+
     private let defaultControllerBaseURL = ControllerEndpointDefaults.baseURLString
 
     var body: some View {
@@ -109,7 +114,105 @@ struct SettingsView: View {
                     )
                 )
             }
+            groupDivider
+            filterChipsEditor
         }
+    }
+
+    private var selectedFilterChipIDs: [String] {
+        DashboardFilterPreferences.decodeChipIDs(filterChipsRaw)
+    }
+
+    private var availableRuntimeFilterChips: [DashboardFilterChip] {
+        let statuses = hub?.allStores.flatMap(\.sortedStatuses) ?? []
+        return DashboardFilterPreferences.availableRuntimeChips(fromStatuses: statuses)
+    }
+
+    private var filterChipsEditor: some View {
+        let selectedCount = selectedFilterChipIDs.count
+        let atCap = selectedCount >= DashboardFilterPreferences.maxChips
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("Dashboard filters")
+                .font(.system(size: 12.5))
+                .foregroundStyle(theme.label)
+            Text("Pick up to \(DashboardFilterPreferences.maxChips) chips for the dashboard strip (\(selectedCount)/\(DashboardFilterPreferences.maxChips)). All stays pinned.")
+                .font(.system(size: 10.5))
+                .foregroundStyle(theme.sub)
+                .fixedSize(horizontal: false, vertical: true)
+
+            filterChipToggle(
+                chip: .all,
+                selected: true,
+                locked: true,
+                blockAdd: false
+            )
+            filterChipToggle(
+                chip: .running,
+                selected: selectedFilterChipIDs.contains(DashboardFilterChip.running.id),
+                locked: false,
+                blockAdd: atCap
+            )
+
+            ForEach(availableRuntimeFilterChips) { chip in
+                filterChipToggle(
+                    chip: chip,
+                    selected: selectedFilterChipIDs.contains(chip.id),
+                    locked: false,
+                    blockAdd: atCap
+                )
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func filterChipToggle(
+        chip: DashboardFilterChip,
+        selected: Bool,
+        locked: Bool,
+        blockAdd: Bool
+    ) -> some View {
+        let cannotAdd = !selected && blockAdd
+        return Button {
+            guard !locked, !cannotAdd else { return }
+            toggleFilterChip(chip)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 14))
+                    .foregroundStyle(selected ? accent : theme.faint)
+                Text(chip.label)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(theme.label)
+                Spacer(minLength: 0)
+                if locked {
+                    Text("Required")
+                        .font(.system(size: 10))
+                        .foregroundStyle(theme.faint)
+                } else if cannotAdd {
+                    Text("Max \(DashboardFilterPreferences.maxChips)")
+                        .font(.system(size: 10))
+                        .foregroundStyle(theme.faint)
+                }
+            }
+            .contentShape(Rectangle())
+            .opacity(cannotAdd ? 0.55 : 1)
+        }
+        .buttonStyle(QuietCraftPressStyle())
+        .disabled(locked || cannotAdd)
+        .accessibilityLabel("\(chip.label) filter")
+        .accessibilityHint(cannotAdd ? "Remove another filter first" : "")
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+    }
+
+    private func toggleFilterChip(_ chip: DashboardFilterChip) {
+        var ids = selectedFilterChipIDs
+        if ids.contains(chip.id) {
+            ids.removeAll { $0 == chip.id }
+        } else {
+            guard ids.count < DashboardFilterPreferences.maxChips else { return }
+            ids.append(chip.id)
+        }
+        filterChipsRaw = DashboardFilterPreferences.encodeChipIDs(ids)
     }
 
     // MARK: - Connection

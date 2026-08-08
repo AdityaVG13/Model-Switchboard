@@ -16,19 +16,14 @@ extension MenuBarContentView {
                 .padding(.horizontal, 10)
                 .padding(.top, 4)
         }
-        // When This Mac has no local hero, the first remote ready model is
-        // featured in the ACTIVE ON … card — omit that same profile from the
-        // gateway list so it does not appear twice.
-        let featuredRemote = heroProfile == nil ? remoteActiveSummary : nil
+        // Omit every profile already featured in an ACTIVE ON hero card so
+        // multi-start gateways do not list the same models twice.
+        let excludedByGateway = remoteHeroProfileIDsByGateway
         ForEach(hub.enabledRemoteRuntimes) { runtime in
-            let excludeProfile: String? = {
-                guard let featuredRemote, featuredRemote.gatewayID == runtime.id else { return nil }
-                return featuredRemote.profile.profile
-            }()
             RemoteGatewaySectionView(
                 runtime: runtime,
                 filter: profileFilter,
-                excludeProfileID: excludeProfile,
+                excludeProfileIDs: excludedByGateway[runtime.id] ?? [],
                 hostMetrics: hostMetricsMonitor.entry(forGatewayID: runtime.id).metrics,
                 theme: theme,
                 accent: accent,
@@ -43,8 +38,8 @@ extension MenuBarContentView {
 struct RemoteGatewaySectionView: View {
     @Bindable var runtime: GatewayRuntime
     let filter: MenuBarContentView.ProfileFilter
-    /// Profile id already shown in the hero ACTIVE ON … card (if any).
-    var excludeProfileID: String? = nil
+    /// Profile ids already shown in ACTIVE ON hero cards for this gateway.
+    var excludeProfileIDs: Set<String> = []
     /// Live host metrics from GET /api/host/metrics (GPU/VRAM), not process RSS.
     var hostMetrics: HostMetricsPayload? = nil
     let theme: DashboardTheme
@@ -55,29 +50,28 @@ struct RemoteGatewaySectionView: View {
 
     private var visibleProfiles: [ModelProfileStatus] {
         store.sortedStatuses.filter { status in
-            if let excludeProfileID, status.profile == excludeProfileID {
+            if excludeProfileIDs.contains(status.profile) {
                 return false
             }
-            switch filter {
-            case .all:
-                return true
-            case .running:
-                return MenuBarContentView.isDisplayedRunning(status, in: store) || store.isBusy(profile: status.profile)
-            case .mlx:
-                return MenuBarContentView.runtimeKind(status) == .mlx
-            case .llamaCpp:
-                return MenuBarContentView.runtimeKind(status) == .llamaCpp
-            }
+            return DashboardFilterPreferences.matches(
+                status,
+                filterID: filter,
+                isDisplayedRunning: MenuBarContentView.isDisplayedRunning(status, in: store),
+                isBusy: store.isBusy(profile: status.profile)
+            )
         }
     }
 
     var body: some View {
         // Header-only sections (hero stole the only row, or filter miss) are
-        // noise — keep the section only when there are rows, a real empty
+        // noise -- keep the section only when there are rows, a real empty
         // profiles directory, or a connection issue to surface.
+        // Keep the gateway chrome when heroes stole every row so DIRECT/SSH
+        // badges and ready counts do not vanish on an all-running remote.
         let shouldRender = !visibleProfiles.isEmpty
             || store.sortedStatuses.isEmpty
             || connectionIssue != nil
+            || !excludeProfileIDs.isEmpty
         if shouldRender {
             VStack(alignment: .leading, spacing: 0) {
                 sectionHeader

@@ -40,10 +40,74 @@ import ModelSwitchboardTestSupport
     let vllmMLX = ModelFixtures.profileStatus(profile: "c", runtime: "vLLM MLX", runtimeLabel: "vLLM MLX")
     let unknown = ModelFixtures.profileStatus(profile: "d", runtime: "custom", runtimeLabel: nil)
 
-    #expect(MenuBarContentView.runtimeKind(llama) == .llamaCpp)
-    #expect(MenuBarContentView.runtimeKind(mlx) == .mlx)
-    #expect(MenuBarContentView.runtimeKind(vllmMLX) == .mlx)
+    #expect(MenuBarContentView.runtimeKind(llama) == "llama.cpp")
+    #expect(MenuBarContentView.runtimeKind(mlx) == "mlx")
+    #expect(MenuBarContentView.runtimeKind(vllmMLX) == "mlx")
     #expect(MenuBarContentView.runtimeKind(unknown) == nil)
+}
+
+@Test func dashboardFilterPreferencesSanitizesAndCapsChips() {
+    let raw = DashboardFilterPreferences.sanitize([
+        "runtime:vllm",
+        "all",
+        "running",
+        "runtime:mlx",
+        "runtime:ollama",
+        "runtime:sglang",
+        "runtime:extra",
+        "bogus",
+    ])
+    #expect(raw.first == "all")
+    #expect(raw[1] == "running")
+    #expect(raw.count <= DashboardFilterPreferences.maxChips)
+    #expect(!raw.contains("bogus"))
+
+    #expect(
+        DashboardFilterPreferences.matches(
+            ModelFixtures.profileStatus(runtime: "MLX", runtimeLabel: "MLX"),
+            filterID: "runtime:mlx",
+            isDisplayedRunning: false,
+            isBusy: false
+        )
+    )
+    #expect(
+        DashboardFilterPreferences.matches(
+            ModelFixtures.profileStatus(runtime: "llama.cpp", runtimeLabel: "llama.cpp"),
+            filterID: "runtime:mlx",
+            isDisplayedRunning: true,
+            isBusy: false
+        ) == false
+    )
+    // Short needles must not substring-match unrelated runtimes.
+    #expect(
+        DashboardFilterPreferences.runtimeMatches(
+            ModelFixtures.profileStatus(runtime: "Ollama", runtimeLabel: "Ollama"),
+            needle: "os"
+        ) == false
+    )
+    #expect(
+        DashboardFilterPreferences.runtimeMatches(
+            ModelFixtures.profileStatus(runtime: "vLLM MLX", runtimeLabel: "vLLM MLX"),
+            needle: "mlx"
+        )
+    )
+    #expect(
+        DashboardFilterPreferences.matches(
+            ModelFixtures.profileStatus(runtime: "MLX", runtimeLabel: "MLX"),
+            filterID: "bogus",
+            isDisplayedRunning: true,
+            isBusy: false
+        ) == false
+    )
+}
+
+@MainActor
+@Test func remoteHeroExclusionDropsFeaturedProfilesFromStandbyLogic() {
+    // Pure exclusion contract used by RemoteGatewaySectionView.
+    let featured = Set(["alpha", "beta"])
+    let rows = ["alpha", "beta", "gamma", "delta"]
+    let visible = rows.filter { !featured.contains($0) }
+    #expect(visible == ["gamma", "delta"])
 }
 
 @MainActor

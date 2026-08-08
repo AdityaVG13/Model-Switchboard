@@ -3,12 +3,8 @@ import SwiftUI
 import ModelSwitchboardCore
 
 struct MenuBarContentView: View {
-    enum ProfileFilter: String, CaseIterable {
-        case all = "All"
-        case running = "Running"
-        case mlx = "MLX"
-        case llamaCpp = "llama.cpp"
-    }
+    /// Selection id for the dashboard filter strip (`all` / `running` / `runtime:…`).
+    typealias ProfileFilter = String
 
     enum InspectorPanel: String, Identifiable {
         case settings
@@ -82,7 +78,16 @@ struct MenuBarContentView: View {
     let panelGap: CGFloat = 10
     let inspectorAnimation = Animation.easeInOut(duration: 0.2)
 
-    @State var profileFilter: ProfileFilter = .all
+    @State var profileFilter: ProfileFilter = DashboardFilterChip.all.id
+
+    @AppStorage(DashboardAppearanceKeys.filterChips)
+    var filterChipsRaw: String = DashboardFilterPreferences.encodeChipIDs(
+        DashboardFilterPreferences.defaultChipIDs
+    )
+
+    var visibleFilterChips: [DashboardFilterChip] {
+        DashboardFilterPreferences.chips(fromIDs: DashboardFilterPreferences.decodeChipIDs(filterChipsRaw))
+    }
 
     @State var inspectorCoordinator = InspectorPanelCoordinator<InspectorPanel>()
     @State var hostWindow: NSWindow?
