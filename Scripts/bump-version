@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+PRODUCT="BumpVersion"
+BIN="$ROOT/.build/release/$PRODUCT"
+if [[ -x "$BIN" ]]; then
+  exec "$BIN" "$@"
+fi
+DEBUG_BIN="$ROOT/.build/debug/$PRODUCT"
+if [[ -x "$DEBUG_BIN" ]]; then
+  exec "$DEBUG_BIN" "$@"
+fi
+exec swift run --package-path "$ROOT" "$PRODUCT" "$@"

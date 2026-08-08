@@ -170,8 +170,12 @@ struct RemoteAgentConformanceTests {
     }
 
     @Test func swiftClientRunsFullLifecycleAgainstPythonAgent() async throws {
-        try #require(FileManager.default.isReadableFile(atPath: agentScript.path))
-        try #require(FileManager.default.isReadableFile(atPath: discoveryScript.path))
+        guard FileManager.default.isReadableFile(atPath: Self.agentScript.path),
+              FileManager.default.isReadableFile(atPath: Self.discoveryScript.path)
+        else {
+            Issue.record("RemoteAgent python modules missing from repo checkout")
+            return
+        }
 
         let harness = try AgentHarness()
         defer { harness.shutdown() }
@@ -191,7 +195,7 @@ struct RemoteAgentConformanceTests {
         #expect(doctor.controller.reachable)
 
         let metrics = try await client.fetchHostMetrics()
-        #expect(!metrics.host.isEmpty)
+        #expect(!(metrics.host ?? "").isEmpty)
         if let source = metrics.gpuSource {
             #expect(["nvidia-smi", "unavailable"].contains(source))
         }

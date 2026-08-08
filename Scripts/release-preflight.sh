@@ -29,7 +29,7 @@ require_file "Scripts/embed-controller.sh"
 require_file "Scripts/controller-endpoint-defaults.sh"
 require_file "Scripts/verify-installed-app.sh"
 require_file "Scripts/verify-privacy.sh"
-require_file "Scripts/bump-version.py"
+require_file "Scripts/bump-version"
 require_file ".github/workflows/release.yml"
 require_file "README.md"
 require_file "project.yml"
@@ -41,8 +41,8 @@ pass "required release files"
 
 require_executable "Scripts/build-app.sh"
 require_executable "Scripts/build-dmg.sh"
-require_executable "Scripts/bump-version.py"
-require_executable "Scripts/check-cycles.py"
+require_executable "Scripts/bump-version"
+require_executable "Scripts/check-cycles"
 require_executable "Scripts/embed-controller.sh"
 require_executable "Scripts/install.sh"
 require_executable "Scripts/model-switchboardctl"
@@ -88,7 +88,7 @@ if [[ "${MSW_PREFLIGHT_SKIP_TESTS:-0}" != "1" ]]; then
   pass "swift test"
 
   note "running dependency cycle check"
-  ./Scripts/check-cycles.py
+  ./Scripts/check-cycles
   pass "dependency cycle check"
 
 else

@@ -6,7 +6,7 @@ test:
 	swift test
 
 deps-check:
-	./Scripts/check-cycles.py
+	./Scripts/check-cycles
 
 xcode:
 	./Scripts/build-xcode-app.sh

@@ -10,6 +10,8 @@ let package = Package(
         .library(name: "ModelSwitchboardCore", targets: ["ModelSwitchboardCore"]),
         .executable(name: "ModelSwitchboardApp", targets: ["ModelSwitchboardApp"]),
         .executable(name: "ModelSwitchboardController", targets: ["ModelSwitchboardController"]),
+        .executable(name: "BumpVersion", targets: ["BumpVersion"]),
+        .executable(name: "CheckCycles", targets: ["CheckCycles"]),
     ],
     dependencies: [
         .package(path: "Vendor/MenuBarExtraAccess")
@@ -35,6 +37,24 @@ let package = Package(
             dependencies: ["ModelSwitchboardControllerCore"]
         ),
         .target(
+            name: "BumpVersionCore",
+            path: "Sources/BumpVersionCore"
+        ),
+        .executableTarget(
+            name: "BumpVersion",
+            dependencies: ["BumpVersionCore"],
+            path: "Sources/BumpVersion"
+        ),
+        .target(
+            name: "CheckCyclesCore",
+            path: "Sources/CheckCyclesCore"
+        ),
+        .executableTarget(
+            name: "CheckCycles",
+            dependencies: ["CheckCyclesCore"],
+            path: "Sources/CheckCycles"
+        ),
+        .target(
             name: "ModelSwitchboardTestSupport",
             dependencies: ["ModelSwitchboardCore"],
             path: "Tests/ModelSwitchboardTestSupport"
@@ -50,6 +70,14 @@ let package = Package(
         .testTarget(
             name: "ModelSwitchboardControllerTests",
             dependencies: ["ModelSwitchboardControllerCore", "ModelSwitchboardCore"]
+        ),
+        .testTarget(
+            name: "BumpVersionCoreTests",
+            dependencies: ["BumpVersionCore"]
+        ),
+        .testTarget(
+            name: "CheckCyclesCoreTests",
+            dependencies: ["CheckCyclesCore"]
         ),
     ]
 )
