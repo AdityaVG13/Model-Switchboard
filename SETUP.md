@@ -417,7 +417,7 @@ This repo builds DMGs locally; public releases should be signed and notarized.
 Included:
 
 - `Scripts/release-preflight.sh`
-- `Scripts/bump-version.py`
+- `Scripts/bump-version`
 - `Scripts/sign-and-notarize-dmg.sh`
 - `.github/workflows/release.yml`
 
@@ -429,7 +429,7 @@ The release workflow signs, notarizes, verifies, and uploads both editions when 
 Normal maintainer flow:
 
 ```bash
-python3 Scripts/bump-version.py patch   # or minor / major / x.y.z
+./Scripts/bump-version patch   # or minor / major / x.y.z
 git push origin main
 ```
 

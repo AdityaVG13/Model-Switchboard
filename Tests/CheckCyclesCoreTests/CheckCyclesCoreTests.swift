@@ -1,21 +1,32 @@
 import Testing
-import CheckCyclesCore
+@testable import CheckCyclesCore
 
-@Test func tarjanCyclesFindsMultiNodeCycle() {
-    let graph: [String: Set<String>] = [
+@Test func tarjanFindsMultiNodeCycle() {
+    let graph: DependencyGraph = [
         "A": ["B"],
         "B": ["C"],
         "C": ["A"],
-        "D": [],
+        "D": ["E"],
+        "E": [],
     ]
     let cycles = CheckCyclesCore.tarjanCycles(graph)
     #expect(cycles == [["A", "B", "C"]])
 }
 
-@Test func tarjanCyclesFindsSelfLoop() {
-    let graph: [String: Set<String>] = [
-        "A": ["A"],
-        "B": [],
+@Test func tarjanFindsSelfLoop() {
+    let graph: DependencyGraph = [
+        "Solo": ["Solo"],
+        "Other": [],
     ]
-    #expect(CheckCyclesCore.tarjanCycles(graph) == [["A"]])
+    let cycles = CheckCyclesCore.tarjanCycles(graph)
+    #expect(cycles == [["Solo"]])
+}
+
+@Test func tarjanReportsAcyclic() {
+    let graph: DependencyGraph = [
+        "A": ["B"],
+        "B": ["C"],
+        "C": [],
+    ]
+    #expect(CheckCyclesCore.tarjanCycles(graph).isEmpty)
 }
