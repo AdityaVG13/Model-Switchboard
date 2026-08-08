@@ -27,10 +27,17 @@ CONTROLLER_PLIST="$APP_PATH/Contents/Library/LaunchAgents/io.modelswitchboard.co
 plutil -lint "$CONTROLLER_PLIST" >/dev/null
 CONTROLLER_CAPABILITIES="$("$CONTROLLER_BIN" capabilities)"
 grep -q '"native" : true' <<<"$CONTROLLER_CAPABILITIES"
-if find "$APP_PATH" -type f -name '*.py' -print -quit | grep -q .; then
-  echo "Python runtime file found in production app bundle" >&2
-  exit 1
-fi
+# RemoteAgent ships bundled *.py under Contents/Resources/RemoteAgent/; nowhere else.
+find "$APP_PATH" -type f -name '*.py' -print | while IFS= read -r py_file; do
+  case "$py_file" in
+    "$APP_PATH/Contents/Resources/RemoteAgent/"*)
+      ;;
+    *)
+      echo "Python runtime file found outside allowed RemoteAgent path: $py_file" >&2
+      exit 1
+      ;;
+  esac
+done
 
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 "$ROOT_DIR/Scripts/verify-privacy.sh" "$APP_PATH"
