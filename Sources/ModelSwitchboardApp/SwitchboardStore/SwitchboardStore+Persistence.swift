@@ -18,9 +18,15 @@ extension SwitchboardStore {
             : "\(Constants.benchmarkCooldownKey).\(gateway.id)"
     }
 
+    var autoBenchmarkedProfilesDefaultsKey: String {
+        gateway.isLocal
+            ? Constants.autoBenchmarkedProfilesKey
+            : "\(Constants.autoBenchmarkedProfilesKey).\(gateway.id)"
+    }
+
     func loadCachedState() {
         guard let cached = cachedStateLoader() else { return }
-        apply(payload: cached.payload)
+        apply(payload: cached.payload, considerAutoBenchmark: false)
         lastUpdated = cached.cachedAt
     }
 
@@ -56,6 +62,24 @@ extension SwitchboardStore {
         }
         lastBenchmarkStartedAt = Date(timeIntervalSince1970: timestamp)
     }
+
+    func loadAutoBenchmarkedProfiles() {
+        let stored = UserDefaults.standard.stringArray(forKey: autoBenchmarkedProfilesDefaultsKey) ?? []
+        autoBenchmarkedProfiles = Set(stored)
+    }
+
+    func persistAutoBenchmarkedProfiles() {
+        UserDefaults.standard.set(
+            Array(autoBenchmarkedProfiles).sorted(),
+            forKey: autoBenchmarkedProfilesDefaultsKey
+        )
+    }
+
+    func markAutoBenchmarked(_ profile: String) {
+        guard autoBenchmarkedProfiles.insert(profile).inserted else { return }
+        persistAutoBenchmarkedProfiles()
+    }
+
 
     func rememberLastActiveProfiles(from sourceStatuses: [ModelProfileStatus]) {
         let runningProfiles = sourceStatuses

@@ -67,7 +67,7 @@ enum HostMetricsPresentation {
         primaryGPU(metrics)?.tempC
     }
 
-    /// Compact gateway strip: "GPU 42% · 54/128 GB VRAM · 51°C".
+    /// Compact gateway strip: "GPU 42% · 54/128 GB · 51°C".
     static func compactGPUStrip(_ metrics: HostMetricsPayload?) -> String? {
         guard metrics != nil else { return nil }
         var parts: [String] = []
@@ -75,7 +75,7 @@ enum HostMetricsPresentation {
             parts.append(String(format: "GPU %.0f%%", util))
         }
         if let vram = hostVRAMUsedTotalLabel(metrics) {
-            parts.append("\(vram) VRAM")
+            parts.append(vram)
         }
         if let temp = hostGPUTempC(metrics) {
             parts.append(String(format: "%.0f°C", temp))

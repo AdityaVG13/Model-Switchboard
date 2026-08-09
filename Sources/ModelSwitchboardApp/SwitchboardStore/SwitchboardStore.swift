@@ -11,6 +11,7 @@ final class SwitchboardStore {
         static let lastActiveProfilesKey = "modelswitchboard.last-active-profiles"
         static let benchmarkCooldownKey = "modelswitchboard.last-benchmark-started-at"
         static let benchmarkCooldownSeconds: TimeInterval = 300
+        static let autoBenchmarkedProfilesKey = "modelswitchboard.auto-benchmarked-profiles"
         static let statusStaleThresholdSeconds: TimeInterval = 900 // > AutoRefreshPolicy.idleInterval (600)
         static let loopbackEndpointProbeFastIntervalSeconds: TimeInterval = 2
         static let loopbackEndpointProbeSteadyIntervalSeconds: TimeInterval = 5
@@ -71,6 +72,8 @@ final class SwitchboardStore {
     var lastActiveProfiles: [String] = []
     var lastBenchmarkStartedAt: Date?
     var activeBenchmarkProfiles: [String] = []
+    /// Profiles that already received the one-shot auto-benchmark for this store.
+    var autoBenchmarkedProfiles: Set<String> = []
 
     @ObservationIgnored private var sortedStatusesCache: [ModelProfileStatus]?
 
@@ -111,6 +114,7 @@ final class SwitchboardStore {
         self.cachedStateLoader = cachedStateLoader ?? (gateway.isLocal ? { ControllerStatusCache.load() } : { nil })
         loadLastActiveProfiles()
         loadBenchmarkCooldownState()
+        loadAutoBenchmarkedProfiles()
         loadCachedState()
         if autoStartRefresh {
             startAutoRefresh()

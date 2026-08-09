@@ -2,6 +2,31 @@ import AppKit
 import SwiftUI
 import ModelSwitchboardCore
 
+
+enum ProfileHeroStatusCopy {
+    /// Board/hero status line for local or remote profiles.
+    static func label(
+        ready: Bool,
+        running: Bool,
+        pending: String?,
+        gatewayName: String?
+    ) -> String {
+        if let gatewayName {
+            let host = gatewayName.uppercased()
+            if let pending {
+                return "\(pending.uppercased()) ON \(host)"
+            }
+            if ready { return "ACTIVE ON \(host)" }
+            if running { return "WARMING ON \(host)" }
+            return "STARTING ON \(host)"
+        }
+        if let pending { return pending }
+        if ready { return "ACTIVE" }
+        if running { return "WARMING" }
+        return "STARTING"
+    }
+}
+
 /// Shared list-row chrome for local and remote profiles.
 struct ProfileListRowView: View {
     let profile: ModelProfileStatus
@@ -88,12 +113,14 @@ struct ProfileListRowView: View {
             isRunning: isDisplayedRunning
         ) {
             parts.append(memory)
-        } else if !showReachability,
-                  let tok = store.benchmark?.latest?.rows
-                    .filter({ $0.profile == profile.profile })
-                    .compactMap(\.decodeTokensPerSec)
-                    .max() {
+        }
+        let benchRows = store.benchmark?.latest?.rows.filter { $0.profile == profile.profile } ?? []
+        if let tok = benchRows.compactMap(\.decodeTokensPerSec).max() {
             parts.append(String(format: "%.1f t/s", tok))
+        }
+        if let best = benchRows.max(by: { ($0.decodeTokensPerSec ?? -1) < ($1.decodeTokensPerSec ?? -1) }),
+           let ttft = best.ttftMS {
+            parts.append(String(format: "%.0f ms", ttft))
         }
         if showReachability, isDisplayedRunning, reachableEndpointURL == nil {
             parts.append(endpointUnavailableHint ?? "not reachable")
@@ -256,6 +283,7 @@ struct ActiveProfileHeroView: View {
     var context: Context = .local
     var hostMetrics: HostMetricsPayload? = nil
     var decodeTokensPerSecond: Double? = nil
+    var ttftMilliseconds: Double? = nil
     /// Mac-reachable URL for remote heroes (forwarded / rewritten).
     var reachableEndpointURL: String? = nil
     var onOpenBenchmarks: (() -> Void)? = nil
@@ -269,15 +297,19 @@ struct ActiveProfileHeroView: View {
     private var statusLabel: String {
         switch context {
         case .local:
-            return store.pendingLabel(for: profile.profile)
-                ?? (profile.ready ? "ACTIVE" : "STARTING")
+            return ProfileHeroStatusCopy.label(
+                ready: profile.ready,
+                running: profile.running,
+                pending: store.pendingLabel(for: profile.profile),
+                gatewayName: nil
+            )
         case .remote(let name):
-            if let pending = store.pendingLabel(for: profile.profile) {
-                return "\(pending.uppercased()) ON \(name.uppercased())"
-            }
-            return profile.ready
-                ? "ACTIVE ON \(name.uppercased())"
-                : "STARTING ON \(name.uppercased())"
+            return ProfileHeroStatusCopy.label(
+                ready: profile.ready,
+                running: profile.running,
+                pending: store.pendingLabel(for: profile.profile),
+                gatewayName: name
+            )
         }
     }
 
@@ -393,10 +425,10 @@ struct ActiveProfileHeroView: View {
 
     @ViewBuilder
     private var trailingMetric: some View {
-        switch context {
-        case .local:
-            if let tok = decodeTokensPerSecond {
-                VStack(alignment: .trailing, spacing: 0) {
+        VStack(alignment: .trailing, spacing: 2) {
+            switch context {
+            case .local:
+                if let tok = decodeTokensPerSecond {
                     Text(String(format: "%.1f", tok))
                         .font(.system(size: 20, weight: .bold).monospacedDigit())
                         .foregroundStyle(accent)
@@ -404,10 +436,14 @@ struct ActiveProfileHeroView: View {
                         .font(.system(size: 10))
                         .foregroundStyle(theme.sub)
                 }
-            }
-        case .remote:
-            if let pct = HostMetricsPresentation.hostVRAMPercent(hostMetrics) {
-                VStack(alignment: .trailing, spacing: 0) {
+                if let ttft = ttftMilliseconds {
+                    Text(String(format: "%.0f ms", ttft))
+                        .font(.system(size: 10).monospacedDigit())
+                        .foregroundStyle(theme.sub)
+                        .accessibilityLabel("TTFT \(Int(ttft.rounded())) milliseconds")
+                }
+            case .remote:
+                if let pct = HostMetricsPresentation.hostVRAMPercent(hostMetrics) {
                     Text("\(Int(pct.rounded()))%")
                         .font(.system(size: 20, weight: .bold).monospacedDigit())
                         .foregroundStyle(accent)
@@ -416,15 +452,32 @@ struct ActiveProfileHeroView: View {
                         .foregroundStyle(theme.sub)
                     if let detail = HostMetricsPresentation.hostVRAMUsedTotalLabel(hostMetrics) {
                         Text(detail)
-                            .font(.system(size: 9, design: .monospaced))
-                            .foregroundStyle(theme.faint)
+                            .font(.system(size: 10).monospacedDigit())
+                            .foregroundStyle(theme.sub)
                     }
                 }
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("Host VRAM \(HostMetricsPresentation.hostVRAMUsedTotalLabel(hostMetrics) ?? "")")
+                if let bench = compactRemoteBenchLabel {
+                    Text(bench)
+                        .font(.system(size: 10).monospacedDigit())
+                        .foregroundStyle(theme.sub)
+                        .accessibilityLabel("Benchmark \(bench)")
+                }
             }
         }
+        .accessibilityElement(children: .combine)
     }
+
+    private var compactRemoteBenchLabel: String? {
+        var parts: [String] = []
+        if let tok = decodeTokensPerSecond {
+            parts.append(String(format: "%.1f t/s", tok))
+        }
+        if let ttft = ttftMilliseconds {
+            parts.append(String(format: "%.0f ms", ttft))
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
 
     private func actionButton(
         _ title: String,

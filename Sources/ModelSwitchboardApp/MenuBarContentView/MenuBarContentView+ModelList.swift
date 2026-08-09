@@ -49,11 +49,22 @@ extension MenuBarContentView {
         DashboardFilterPreferences.legacyRuntimeKind(status)
     }
 
-    func decodeTokensPerSecond(for profile: String) -> Double? {
-        store.benchmark?.latest?.rows
+    func decodeTokensPerSecond(for profile: String, in store: SwitchboardStore? = nil) -> Double? {
+        let source = store ?? self.store
+        return source.benchmark?.latest?.rows
             .filter { $0.profile == profile }
             .compactMap(\.decodeTokensPerSec)
             .max()
+    }
+
+    func ttftMilliseconds(for profile: String, in store: SwitchboardStore? = nil) -> Double? {
+        let source = store ?? self.store
+        let rows = source.benchmark?.latest?.rows.filter { $0.profile == profile } ?? []
+        // Prefer the row that produced the best decode rate when both exist.
+        if let best = rows.max(by: { ($0.decodeTokensPerSec ?? -1) < ($1.decodeTokensPerSec ?? -1) }) {
+            return best.ttftMS
+        }
+        return rows.compactMap(\.ttftMS).min()
     }
 
     func runtimeName(_ status: ModelProfileStatus) -> String {
@@ -144,6 +155,8 @@ extension MenuBarContentView {
             store: remoteStore,
             context: .remote(gatewayName: summary.name),
             hostMetrics: hostMetrics,
+            decodeTokensPerSecond: decodeTokensPerSecond(for: summary.profile.profile, in: remoteStore),
+            ttftMilliseconds: ttftMilliseconds(for: summary.profile.profile, in: remoteStore),
             reachableEndpointURL: runtime?.reachableEndpointURL(for: summary.profile),
             onOpenBenchmarks: { setInspectorPanel(.benchmarks) },
             theme: theme,
@@ -157,6 +170,7 @@ extension MenuBarContentView {
             store: store,
             context: .local,
             decodeTokensPerSecond: decodeTokensPerSecond(for: profile.profile),
+            ttftMilliseconds: ttftMilliseconds(for: profile.profile),
             onOpenBenchmarks: { setInspectorPanel(.benchmarks) },
             theme: theme,
             accent: accent

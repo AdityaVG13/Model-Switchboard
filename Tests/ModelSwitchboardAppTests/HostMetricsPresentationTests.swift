@@ -35,7 +35,7 @@ private func sparkMetrics(
 @Test func compactGPUStripUsesHostVRAMNotRSS() {
     let metrics = sparkMetrics()
     let strip = HostMetricsPresentation.compactGPUStrip(metrics)
-    #expect(strip == "GPU 42% · 54/128 GB VRAM · 51°C")
+    #expect(strip == "GPU 42% · 54/128 GB · 51°C")
     #expect(strip?.contains("RSS") != true)
 }
 
@@ -63,7 +63,7 @@ private func sparkMetrics(
     let metrics = sparkMetrics()
     #expect(HostMetricsPresentation.hostVRAMPercent(metrics).map { Int($0.rounded()) } == 42)
     #expect(HostMetricsPresentation.hostVRAMUsedTotalLabel(metrics) == "54/128 GB")
-    #expect(HostMetricsPresentation.sectionMetricsChip(metrics)?.contains("VRAM") == true)
+    #expect(HostMetricsPresentation.sectionMetricsChip(metrics)?.contains("54/128 GB") == true)
 }
 
 @Test func missingMetricsYieldNilNotFakeVRAM() {

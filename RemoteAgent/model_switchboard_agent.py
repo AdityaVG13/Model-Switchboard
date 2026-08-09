@@ -1248,8 +1248,18 @@ def host_metrics_payload() -> dict[str, Any]:
         cpu_percent = _sample_cpu_percent()
         span.stage("assemble")
         hostname = socket.gethostname()
-        gpus = gpu.get("gpus") or []
+        gpus = list(gpu.get("gpus") or [])
         gpu_source = gpu.get("source") or "unavailable"
+        # GB10 / unified-memory: nvidia-smi FB used/total are N/A. Report the
+        # host memory pool in those fields so Mac can show "used/total GB".
+        mem_used = mem.get("used_mb") if isinstance(mem, dict) else None
+        mem_total = mem.get("total_mb") if isinstance(mem, dict) else None
+        if mem_total:
+            for entry in gpus:
+                if entry.get("vram_total_mb") is None:
+                    entry["vram_total_mb"] = mem_total
+                    if entry.get("vram_used_mb") is None:
+                        entry["vram_used_mb"] = mem_used
         span.tags["gpu_source"] = gpu_source
         span.tags["n_gpus"] = len(gpus)
         return {
@@ -1796,6 +1806,33 @@ class AgentConfiguration:
     @property
     def systemd_unit_path(self) -> Path:
         return Path.home() / ".config/systemd/user/model-switchboard-agent.service"
+
+
+
+def openai_model_id_matches(expected: str | None, ids: list[str], *aliases: str) -> bool:
+    """True when *expected* matches a /v1/models id loosely.
+
+    llama.cpp often returns a full weights path as `id` while claim profiles
+    store SERVER_MODEL_ID as the basename (or the reverse). Also accept any
+    explicit aliases (e.g. REQUEST_MODEL).
+    """
+    if not expected:
+        return bool(ids)
+    candidates = {expected}
+    for alias in aliases:
+        alias_s = (alias or "").strip()
+        if alias_s:
+            candidates.add(alias_s)
+    id_set = set(ids)
+    if candidates & id_set:
+        return True
+    id_names = {Path(item).name for item in ids}
+    for candidate in list(candidates):
+        if Path(candidate).name in id_names:
+            return True
+        if candidate in id_names:
+            return True
+    return False
 
 
 class AgentService:
@@ -2926,7 +2963,13 @@ class AgentService:
             if isinstance(entry, dict) and isinstance(entry.get("id"), str) and entry["id"]
         ]
         expected = profile.get("HEALTHCHECK_EXPECT_ID") or profile.server_model_id
-        return (bool(ids) if not expected else expected in ids), ids
+        matched = openai_model_id_matches(
+            expected,
+            ids,
+            profile.request_model,
+            profile.server_model_id,
+        )
+        return matched, ids
 
     def _terminate_profile_processes(
         self,

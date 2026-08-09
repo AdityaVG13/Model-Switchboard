@@ -107,7 +107,7 @@ extension SwitchboardStore {
         statuses = updated
     }
 
-    func apply(payload: ControllerStatusPayload) {
+    func apply(payload: ControllerStatusPayload, considerAutoBenchmark: Bool = true) {
         statuses = payload.statuses
         rememberLastActiveProfiles(from: payload.statuses)
         benchmark = features.supportsBenchmarks ? payload.benchmark : nil
@@ -117,6 +117,20 @@ extension SwitchboardStore {
         integrations = features.supportsIntegrations ? payload.integrations : []
         profilesDirectory = payload.profilesDirectory
         controllerRoot = payload.controllerRoot
+        if considerAutoBenchmark {
+            considerAutoBenchmarks()
+        }
+    }
+
+    /// One-shot quick bench the first time each profile reports ready.
+    func considerAutoBenchmarks() {
+        guard features.supportsBenchmarks else { return }
+        guard canStartBenchmarkNow else { return }
+        guard let profile = statuses.first(where: { $0.ready && !autoBenchmarkedProfiles.contains($0.profile) })?.profile else {
+            return
+        }
+        markAutoBenchmarked(profile)
+        Task { await self.quickBenchmark([profile]) }
     }
 
     func apply(doctorReport: DoctorReport) {
