@@ -53,7 +53,11 @@ actor RemoteAgentDeployer {
     /// Pushes the agent modules and runs the installer on the gateway host. With
     /// `useTailscale` the agent is set up bound to the host's tailnet address
     /// and the returned pairing link describes a direct (tunnel-less) gateway.
-    func deploy(to config: GatewayConfig, useTailscale: Bool = false) async throws -> Result {
+    func deploy(
+        to config: GatewayConfig,
+        useTailscale: Bool = false,
+        profilesDirectory: String? = nil
+    ) async throws -> Result {
         guard resourcesAvailable else { throw DeployError.missingResources }
         if config.hasUnsafeSSHDestination {
             throw DeployError.sshFailed(
@@ -82,11 +86,23 @@ actor RemoteAgentDeployer {
 
         // 2. Run the installer from stdin: no files land anywhere except the
         //    agent's own install root.
-        let installerFlags = "--port \(config.remotePort)" + (useTailscale ? " --tailscale" : "")
+        var installerFlags = "--port \(config.remotePort)" + (useTailscale ? " --tailscale" : "")
+        var remotePrefix = ""
+        if let profilesDirectory {
+            let trimmed = profilesDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                // Prefer env so arbitrary paths (spaces, quotes) stay out of argv parsing.
+                remotePrefix =
+                    "MODEL_SWITCHBOARD_PROFILES_DIR=\(Self.shellSingleQuoted(trimmed)) "
+                if Self.isSimpleShellPath(trimmed) {
+                    installerFlags += " --profiles-dir \(trimmed)"
+                }
+            }
+        }
         let output = try await runSSH(
             config: config,
             step: "run installer",
-            remoteCommand: "bash -s -- \(installerFlags)",
+            remoteCommand: "\(remotePrefix)bash -s -- \(installerFlags)",
             stdin: installerData
         )
 
@@ -96,6 +112,18 @@ actor RemoteAgentDeployer {
             .first { $0.hasPrefix("\(GatewayLinkCode.scheme)://") }
         let authToken = Self.extractAuthToken(from: output)
         return Result(pairingLink: pairingLink, authToken: authToken, log: output)
+    }
+
+
+    /// Single-quote for remote `sh` so spaces/metacharacters in the path stay literal.
+    nonisolated static func shellSingleQuoted(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    /// Paths safe to append as unquoted installer argv (no shell metacharacters).
+    nonisolated static func isSimpleShellPath(_ value: String) -> Bool {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "/._-~"))
+        return !value.isEmpty && value.unicodeScalars.allSatisfy { allowed.contains($0) }
     }
 
     /// Prefer a machine-readable `AUTH_TOKEN=` line; fall back to the human

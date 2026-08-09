@@ -159,3 +159,22 @@ private func jsonRequest(path: String, object: [String: Any]) -> ControllerHTTPR
 private func errorCode(_ response: ControllerHTTPResponse) -> String? {
   ((try? JSONSerialization.jsonObject(with: response.body)) as? [String: Any])?["error"] as? String
 }
+
+@Test func routerSetsProfilesDirectory() throws {
+  try withFixtureRoot { fixture in
+    let router = ControllerRouter(service: fixture.service, authToken: nil)
+    let next = fixture.temporary.appendingPathComponent("router-profiles", isDirectory: true)
+    let response = router.handle(
+      jsonRequest(path: "/api/config/profiles-dir", object: ["profiles_dir": next.path]))
+    #expect(response.status == 200)
+    let payload = try JSONSerialization.jsonObject(with: response.body) as? [String: Any]
+    #expect(payload?["ok"] as? Bool == true)
+    #expect(payload?["profiles_dir"] as? String == next.path)
+    #expect(fixture.service.configuration.profilesDirectory.path == next.path)
+
+    let missing = router.handle(jsonRequest(path: "/api/config/profiles-dir", object: [:]))
+    #expect(missing.status == 400)
+  }
+}
+
+

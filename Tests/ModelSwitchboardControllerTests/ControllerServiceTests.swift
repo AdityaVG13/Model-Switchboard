@@ -94,3 +94,25 @@ import Testing
     #expect((payload?["statuses"] as? [Any])?.count == 1)
   }
 }
+
+@Test func setProfilesDirectoryPersistsAndHotReloads() throws {
+  try withFixtureRoot { fixture in
+    let next = fixture.temporary.appendingPathComponent("alt-profiles", isDirectory: true)
+    let response = try fixture.service.setProfilesDirectory(next.path)
+    #expect(response.ok == true)
+    #expect(response.profilesDirectory == next.path)
+    #expect(fixture.service.configuration.profilesDirectory.path == next.path)
+    #expect(FileManager.default.fileExists(atPath: next.path))
+
+    let configURL = fixture.configuration.root.appendingPathComponent("config.json")
+    let object = try JSONSerialization.jsonObject(with: Data(contentsOf: configURL)) as? [String: Any]
+    #expect(object?["profiles_dir"] as? String == next.path)
+
+    // Empty profiles folder still loads (no profiles yet).
+    let payload = try fixture.service.statusPayload()
+    #expect(payload.profilesDirectory == next.path)
+    #expect(payload.statuses.isEmpty)
+  }
+}
+
+

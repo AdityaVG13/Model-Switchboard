@@ -27,6 +27,7 @@ struct GatewaySettingsSection: View {
     @State private var deployWithTailscale = false
     @State private var renamingGatewayID: String?
     @State private var renameDraft = ""
+    @State private var profilesDirectoryDraft = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -244,20 +245,27 @@ struct GatewaySettingsSection: View {
 
             deployStatusText
 
-            if !draftIsNew, let runtime = hub.remoteRuntimes.first(where: { $0.id == config.id }),
-               let profilesDirectory = runtime.store.profilesDirectory,
-               !profilesDirectory.isEmpty
-            {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Profiles folder (on host)")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(theme.label)
-                    Text(profilesDirectory)
-                        .font(.system(size: 10.5, design: .monospaced))
+            if !draftIsNew, let runtime = hub.remoteRuntimes.first(where: { $0.id == config.id }) {
+                VStack(alignment: .leading, spacing: 4) {
+                    field(
+                        "Profiles folder (on host)",
+                        text: $profilesDirectoryDraft,
+                        prompt: "~/model-profiles",
+                        monospaced: true
+                    )
+                    Text("Path on the remote host where model profile .env/.json files live. Saving updates the running agent without reinstall.")
+                        .font(.system(size: 10))
                         .foregroundStyle(theme.sub)
-                        .textSelection(.enabled)
-                        .lineLimit(2)
-                        .truncationMode(.middle)
+                        .fixedSize(horizontal: false, vertical: true)
+                    linkButton("Save Profiles Folder", emphasized: true) {
+                        Task { await runtime.store.setProfilesDirectory(profilesDirectoryDraft) }
+                    }
+                }
+                .onAppear {
+                    profilesDirectoryDraft = runtime.store.profilesDirectory ?? ""
+                }
+                .onChange(of: runtime.store.profilesDirectory) { _, newValue in
+                    profilesDirectoryDraft = newValue ?? ""
                 }
             }
 

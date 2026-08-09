@@ -117,10 +117,38 @@ struct RemoteHostsPanelView: View {
                         .truncationMode(.middle)
                 }
                 Spacer(minLength: 0)
-                Text(connectionBadge(runtime))
-                    .font(.system(size: 9, weight: .semibold))
-                    .kerning(0.4)
-                    .foregroundStyle(theme.faint)
+                Button {
+                    Task {
+                        await hub.forceUpdateGateway(id: runtime.id)
+                        await metricsMonitor.pollOnce()
+                    }
+                } label: {
+                    Text(connectionBadge(runtime))
+                        .font(.system(size: 9, weight: .semibold))
+                        .kerning(0.4)
+                        .foregroundStyle(badgeForeground(runtime))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(theme.btnBg.opacity(0.85), in: Capsule())
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(QuietCraftPressStyle())
+                .disabled(isForceUpdating(runtime))
+                .help(GatewayConnectionBadge.help(for: runtime))
+                .accessibilityLabel("Force update " + runtime.name)
+                .accessibilityHint(GatewayConnectionBadge.help(for: runtime))
+            }
+
+            if case .failed(let message) = runtime.forceUpdatePhase {
+                Text(message)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(DashboardTheme.stopRed)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if case .updating(let step) = runtime.forceUpdatePhase {
+                Text(step)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(theme.sub)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if let error = entry.error, metrics == nil {
@@ -313,12 +341,15 @@ struct RemoteHostsPanelView: View {
     }
 
     private func agentUpgradeHint(for runtime: GatewayRuntime) -> String {
-
+        let sshUser = runtime.config.sshUser.trimmingCharacters(in: .whitespacesAndNewlines)
         switch runtime.config.kind {
         case .ssh:
-            return "SSH gateways can use Settings → Install Agent on Host, or paste the one-liner below on the box. Until then only process RSS is shown — not GPU VRAM."
+            return "Click the SSH badge above to push a fresh agent from this Mac (or use Settings → Install Agent / the one-liner below). Until then only process RSS is shown — not GPU VRAM."
         case .direct:
-            return "SSH into this host and re-run the install one-liner (copy below) so /api/host/metrics can report GPU/VRAM. Until then only process RSS is shown."
+            if sshUser.isEmpty {
+                return "Click DIRECT above to push a fresh agent over SSH to this Tailscale host. Set SSH user in Settings if login is not your Mac username. Or paste the one-liner below on the box."
+            }
+            return "Click DIRECT above to push a fresh agent from this Mac over SSH as \(sshUser). Or paste the one-liner below on the box."
         }
     }
 
@@ -368,6 +399,22 @@ struct RemoteHostsPanelView: View {
 
     private func connectionBadge(_ runtime: GatewayRuntime) -> String {
         GatewayConnectionBadge.text(for: runtime)
+    }
+
+    private func isForceUpdating(_ runtime: GatewayRuntime) -> Bool {
+        if case .updating = runtime.forceUpdatePhase { return true }
+        return false
+    }
+
+    private func badgeForeground(_ runtime: GatewayRuntime) -> Color {
+        switch runtime.forceUpdatePhase {
+        case .updating:
+            return accent
+        case .failed:
+            return DashboardTheme.stopRed
+        case .idle:
+            return theme.faint
+        }
     }
 
     private func statusColor(runtime: GatewayRuntime, entry: RemoteHostMetricsMonitor.Entry) -> Color {

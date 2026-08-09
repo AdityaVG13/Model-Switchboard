@@ -5,6 +5,15 @@ import SwiftUI
 enum GatewayConnectionBadge {
     @MainActor
     static func text(for runtime: GatewayRuntime) -> String {
+        switch runtime.forceUpdatePhase {
+        case .updating:
+            return "UPDATING…"
+        case .failed:
+            return "UPDATE FAILED"
+        case .idle:
+            break
+        }
+
         switch runtime.config.kind {
         case .direct:
             if runtime.store.lastError != nil {
@@ -23,5 +32,21 @@ enum GatewayConnectionBadge {
             case .failed: return "SSH · FAILED"
             }
         }
+    }
+
+    @MainActor
+    static func help(for runtime: GatewayRuntime) -> String {
+        switch runtime.forceUpdatePhase {
+        case .updating(let step):
+            return step
+        case .failed(let message):
+            return message
+        case .idle:
+            break
+        }
+        if GatewayHub.agentDeployConfig(for: runtime.config) != nil {
+            return "Force update: push the bundled agent over SSH, reconnect if needed, and hard-refresh models and ports."
+        }
+        return "Add an SSH user/host in Settings for this gateway, then click again to push a fresh agent."
     }
 }

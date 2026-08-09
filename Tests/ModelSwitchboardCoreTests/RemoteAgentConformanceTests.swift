@@ -330,4 +330,28 @@ struct RemoteAgentConformanceTests {
         let stub = try #require(status.statuses.first { $0.profile == "conformance-stub" })
         #expect(stub.launchable != false)
     }
+
+    @Test func setProfilesDirectoryHotReloads() async throws {
+        guard FileManager.default.isReadableFile(atPath: Self.agentScript.path),
+              FileManager.default.isReadableFile(atPath: Self.discoveryScript.path)
+        else {
+            Issue.record("RemoteAgent python modules missing from repo checkout")
+            return
+        }
+
+        let harness = try AgentHarness()
+        defer { harness.shutdown() }
+        let client = try harness.makeClient()
+        try await Self.waitForAgent(client)
+
+        let next = harness.root.appendingPathComponent("alt-profiles", isDirectory: true)
+        let expectedPath = next.resolvingSymlinksInPath().path
+        let response = try await client.setProfilesDirectory(next.path)
+        #expect(response.ok == true)
+        #expect(response.profilesDirectory.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path } == expectedPath)
+
+        let status = try await client.fetchStatus()
+        #expect(status.profilesDirectory.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path } == expectedPath)
+        #expect(status.statuses.isEmpty)
+    }
 }

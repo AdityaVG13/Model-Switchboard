@@ -212,3 +212,10 @@ private func makeSources() throws -> (agent: URL, discovery: URL, installer: URL
         _ = try await deployer.deploy(to: GatewayConfig(name: "x", kind: .ssh, sshHost: "h"))
     }
 }
+
+@Test func shellSingleQuotedEscapesEmbeddedQuotes() {
+    #expect(RemoteAgentDeployer.shellSingleQuoted("plain") == "'plain'")
+    #expect(RemoteAgentDeployer.shellSingleQuoted("a'b") == "'a'\\''b'")
+    #expect(RemoteAgentDeployer.isSimpleShellPath("/home/user/model-profiles"))
+    #expect(!RemoteAgentDeployer.isSimpleShellPath("/tmp/has space"))
+}

@@ -285,3 +285,190 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
         #expect(GatewayConfigStore.load(from: defaults).first?.name == "Lab Box")
     }
 }
+
+
+@MainActor
+@Test func discardLiveStatusForForceUpdateClearsBoard() throws {
+    try withTestDefaults { defaults, service in
+        let hub = makeHub(defaults: defaults, keychainService: service)
+        let config = GatewayConfig(name: "Spark", kind: .direct, baseURL: "http://10.0.0.9:8877")
+        hub.upsertGateway(config, token: "")
+        defer { hub.removeGateway(id: config.id) }
+
+        let runtime = try #require(hub.remoteRuntimes.first)
+        runtime.store.statuses = [
+            ModelFixtures.profileStatus(profile: "stale", port: "8000", running: true, ready: true)
+        ]
+        runtime.store.lastUpdated = Date()
+        runtime.store.lastError = "stale"
+
+        runtime.store.discardLiveStatusForForceUpdate()
+
+        #expect(runtime.store.statuses.isEmpty)
+        #expect(runtime.store.lastUpdated == nil)
+        #expect(runtime.store.lastError == nil)
+    }
+}
+
+@MainActor
+@Test func forceUpdateRedeploysWhenSSHHostPresent() async throws {
+    await withTestDefaultsAsync { defaults, service in
+        var deployCalls = 0
+        var sawTailscale: Bool?
+        let hub = GatewayHub(
+            localStore: makeLocalStore(),
+            defaults: defaults,
+            remoteStoreFactory: { config, baseURL, token in
+                SwitchboardStore(
+                    controllerBaseURL: baseURL,
+                    controllerAuthToken: token,
+                    features: .base,
+                    gateway: GatewayContext(config: config),
+                    autoStartRefresh: false,
+                    controllerClientFactory: { _, _ in throw TestBoom() }
+                )
+            },
+            tokenStorageFactory: { id in
+                KeychainTokenStorage(service: service, accessGroup: nil, account: "gateway-\(id)")
+            },
+            sshExecutableURL: URL(fileURLWithPath: "/usr/bin/true"),
+            deployAgent: { config, useTailscale, _ in
+                deployCalls += 1
+                sawTailscale = useTailscale
+                #expect(config.sshHost == "spark.local")
+                return RemoteAgentDeployer.Result(
+                    pairingLink: nil,
+                    authToken: "new-token-0123456789ab",
+                    log: "ok"
+                )
+            }
+        )
+        let config = GatewayConfig(
+            name: "Spark",
+            kind: .ssh,
+            sshUser: "ubuntu",
+            sshHost: "spark.local",
+            remotePort: 8877
+        )
+        hub.upsertGateway(config, token: "old-token-0123456789ab")
+        defer { hub.removeGateway(id: config.id) }
+
+        await hub.forceUpdateGateway(id: config.id)
+
+        #expect(deployCalls == 1)
+        #expect(sawTailscale == false)
+        #expect(hub.authToken(forGateway: config.id) == "new-token-0123456789ab")
+    }
+}
+
+@MainActor
+@Test func agentDeployConfigDerivesHostFromDirectBaseURL() {
+    let config = GatewayConfig(
+        name: "Spark",
+        kind: .direct,
+        baseURL: "http://dgx-spark.tail123.ts.net:8877"
+    )
+    let deploy = GatewayHub.agentDeployConfig(for: config)
+    #expect(deploy?.sshHost == "dgx-spark.tail123.ts.net")
+    #expect(deploy?.kind == .direct)
+}
+
+@MainActor
+@Test func forceUpdateUsesDerivedHostForDirectGateway() async throws {
+    try await withTestDefaultsAsync { defaults, service in
+        var deployHosts: [String] = []
+        var sawTailscale: Bool?
+        let hub = GatewayHub(
+            localStore: makeLocalStore(),
+            defaults: defaults,
+            remoteStoreFactory: { config, baseURL, token in
+                SwitchboardStore(
+                    controllerBaseURL: baseURL,
+                    controllerAuthToken: token,
+                    features: .base,
+                    gateway: GatewayContext(config: config),
+                    autoStartRefresh: false,
+                    controllerClientFactory: { _, _ in throw TestBoom() }
+                )
+            },
+            tokenStorageFactory: { id in
+                KeychainTokenStorage(service: service, accessGroup: nil, account: "gateway-\(id)")
+            },
+            sshExecutableURL: URL(fileURLWithPath: "/usr/bin/true"),
+            deployAgent: { config, useTailscale, _ in
+                deployHosts.append(config.sshHost)
+                sawTailscale = useTailscale
+                return RemoteAgentDeployer.Result(pairingLink: nil, authToken: nil, log: "ok")
+            }
+        )
+        let config = GatewayConfig(
+            name: "Spark",
+            kind: .direct,
+            baseURL: "http://dgx-spark.tail123.ts.net:8877",
+            sshUser: "spark"
+        )
+        hub.upsertGateway(config, token: "tok")
+        defer { hub.removeGateway(id: config.id) }
+
+        await hub.forceUpdateGateway(id: config.id)
+
+        #expect(deployHosts == ["dgx-spark.tail123.ts.net"])
+        #expect(sawTailscale == true)
+    }
+}
+
+
+@MainActor
+@Test func forceUpdatePassesProfilesDirectoryToDeploy() async throws {
+    await withTestDefaultsAsync { defaults, service in
+        var sawProfilesDir: String?
+        let hub = GatewayHub(
+            localStore: makeLocalStore(),
+            defaults: defaults,
+            remoteStoreFactory: { config, baseURL, token in
+                let store = SwitchboardStore(
+                    controllerBaseURL: baseURL,
+                    controllerAuthToken: token,
+                    features: .base,
+                    gateway: GatewayContext(config: config),
+                    autoStartRefresh: false,
+                    controllerClientFactory: { _, _ in throw TestBoom() }
+                )
+                store.profilesDirectory = "/custom/model-profiles"
+                return store
+            },
+            tokenStorageFactory: { id in
+                KeychainTokenStorage(service: service, accessGroup: nil, account: "gateway-\(id)")
+            },
+            sshExecutableURL: URL(fileURLWithPath: "/usr/bin/true"),
+            deployAgent: { _, _, profilesDirectory in
+                sawProfilesDir = profilesDirectory
+                return RemoteAgentDeployer.Result(pairingLink: nil, authToken: nil, log: "ok")
+            }
+        )
+        let config = GatewayConfig(
+            name: "Spark",
+            kind: .ssh,
+            sshUser: "ubuntu",
+            sshHost: "spark.local",
+            remotePort: 8877
+        )
+        hub.upsertGateway(config, token: "tok")
+        defer { hub.removeGateway(id: config.id) }
+
+        await hub.forceUpdateGateway(id: config.id)
+
+        #expect(sawProfilesDir == "/custom/model-profiles")
+    }
+}
+
+@MainActor
+private func withTestDefaultsAsync(
+    _ body: @MainActor (UserDefaults, String) async throws -> Void
+) async rethrows {
+    let suiteName = "io.modelswitchboard.tests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let service = "io.modelswitchboard.tests.\(UUID().uuidString)"
+    try await body(defaults, service)
+}

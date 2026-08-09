@@ -6,6 +6,7 @@
 #   ./install-remote-agent.sh --port 9000
 #   ./install-remote-agent.sh --tailscale    # bind the tailnet address + require token
 #   ./install-remote-agent.sh --tailscale --allow-unauthenticated
+#   ./install-remote-agent.sh --profiles-dir ~/models/profiles
 #   ./install-remote-agent.sh --uninstall
 #
 # Default: the agent binds 127.0.0.1 only; pair it with the app's SSH tunnel
@@ -19,6 +20,7 @@ PORT=8877
 UNINSTALL=0
 TAILSCALE=0
 ALLOW_UNAUTH=0
+PROFILES_DIR_CLI=""
 AUTH_TOKEN_FILE="${MODEL_SWITCHBOARD_AUTH_TOKEN_FILE:-$HOME/.config/model-switchboard-agent.token}"
 
 while [ $# -gt 0 ]; do
@@ -31,6 +33,8 @@ while [ $# -gt 0 ]; do
             ALLOW_UNAUTH=1; shift ;;
         --auth-token-file)
             AUTH_TOKEN_FILE="$2"; shift 2 ;;
+        --profiles-dir)
+            PROFILES_DIR_CLI="$2"; shift 2 ;;
         --uninstall)
             UNINSTALL=1; shift ;;
         -h|--help)
@@ -79,7 +83,40 @@ mkdir -p "$INSTALL_ROOT/run" "$BIN_DIR"
 # Visible default for launch .env/.json files. Agent state stays under
 # INSTALL_ROOT; profiles are separate so people (and AI setups) can keep
 # model.env next to their models without digging through ~/.local/share.
-PROFILES_DIR="${MODEL_SWITCHBOARD_PROFILES_DIR:-$HOME/model-profiles}"
+# Resolve: --profiles-dir → env → existing config.json → ~/model-profiles.
+if [ -n "$PROFILES_DIR_CLI" ]; then
+    PROFILES_DIR="$PROFILES_DIR_CLI"
+elif [ -n "${MODEL_SWITCHBOARD_PROFILES_DIR:-}" ]; then
+    PROFILES_DIR="$MODEL_SWITCHBOARD_PROFILES_DIR"
+else
+    EXISTING_PROFILES_DIR=""
+    if [ -f "$INSTALL_ROOT/config.json" ]; then
+        EXISTING_PROFILES_DIR="$(python3 - "$INSTALL_ROOT/config.json" <<'PY'
+import json, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+try:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+except Exception:
+    raise SystemExit(0)
+if isinstance(payload, dict):
+    value = payload.get("profiles_dir")
+    if isinstance(value, str) and value.strip():
+        print(value.strip())
+PY
+)"
+    fi
+    if [ -n "$EXISTING_PROFILES_DIR" ]; then
+        PROFILES_DIR="$EXISTING_PROFILES_DIR"
+    else
+        PROFILES_DIR="$HOME/model-profiles"
+    fi
+fi
+# Expand a leading tilde for convenience; leave other paths as given.
+case "$PROFILES_DIR" in
+    "~") PROFILES_DIR="$HOME" ;;
+    "~/"*) PROFILES_DIR="$HOME/${PROFILES_DIR#~/}" ;;
+esac
 mkdir -p "$PROFILES_DIR"
 
 # Agent source, in order: next to this script (repo checkout), already pushed

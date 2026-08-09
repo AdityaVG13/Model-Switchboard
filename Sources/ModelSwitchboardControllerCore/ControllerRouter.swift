@@ -82,6 +82,10 @@ public final class ControllerRouter: @unchecked Sendable {
         _ = try requestObject(request)
         try service.stopAll()
         return try response(service.actionResponse())
+      case ("POST", "/api/config/profiles-dir"):
+        let payload = try requestObject(request)
+        return try response(
+          service.setProfilesDirectory(try requiredString(payload, key: "profiles_dir")))
       case ("POST", "/api/integrations/run"):
         let payload = try requestObject(request)
         try service.runIntegration(

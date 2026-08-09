@@ -43,6 +43,13 @@ extension SwitchboardStore {
         await run { try await $0.runIntegration(id: integration.id, action: action) }
     }
 
+    func setProfilesDirectory(_ path: String) async {
+        _ = await run(
+            { try await $0.setProfilesDirectory(path) },
+            actionName: "Save profiles folder"
+        )
+    }
+
     func stopAll() async {
         guard pendingGlobalActions.insert("stop-all").inserted else { return }
         defer { pendingGlobalActions.remove("stop-all") }

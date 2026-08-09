@@ -64,6 +64,9 @@ extension MenuBarContentView {
                 accent: accent,
                 appVersion: Self.appVersion,
                 openProfilesDirectory: store.openProfilesDirectory,
+                setProfilesDirectory: { path in
+                    await store.setProfilesDirectory(path)
+                },
                 openControllerRoot: store.openControllerRoot,
                 runControllerDoctor: {
                     Task { await store.refreshDoctorReport() }

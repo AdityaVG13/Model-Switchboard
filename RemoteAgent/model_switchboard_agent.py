@@ -2025,6 +2025,18 @@ class AgentService:
             "error": None,
         }
 
+
+    def set_profiles_directory(self, path: str) -> dict[str, Any]:
+        """Persist and hot-reload the profiles folder without restarting the agent."""
+        if not isinstance(path, str) or not path.strip():
+            raise UsageError("missing required string field: profiles_dir")
+        resolved = Path(path).expanduser().resolve()
+        resolved.mkdir(parents=True, exist_ok=True)
+        save_profiles_directory(self.configuration.root, resolved)
+        self.configuration.profiles_dir = resolved
+        self.profiles = ProfileRepository(resolved)
+        return self.action_response()
+
     def _benchmark_dir(self) -> Path:
         path = self.configuration.run_directory / "benchmarks"
         path.mkdir(parents=True, exist_ok=True)
@@ -3053,6 +3065,12 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                     )
                     return service.action_response()
                 return run_integration
+            if path == "/api/config/profiles-dir":
+                def set_profiles_dir(payload: dict[str, Any]) -> dict[str, Any]:
+                    return service.set_profiles_directory(
+                        self._required_string(payload, "profiles_dir")
+                    )
+                return set_profiles_dir
             if path == "/api/benchmark/start":
                 def benchmark_start(payload: dict[str, Any]) -> dict[str, Any]:
                     selected = payload.get("profiles")

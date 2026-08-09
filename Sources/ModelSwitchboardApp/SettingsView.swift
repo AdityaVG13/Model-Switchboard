@@ -15,6 +15,7 @@ struct SettingsView: View {
     let accent: Color
     let appVersion: String
     let openProfilesDirectory: () -> Void
+    let setProfilesDirectory: (String) async -> Void
     let openControllerRoot: () -> Void
     let runControllerDoctor: () -> Void
     let reconnect: () -> Void
@@ -34,6 +35,8 @@ struct SettingsView: View {
     )
 
     private let defaultControllerBaseURL = ControllerEndpointDefaults.baseURLString
+
+    @State private var profilesDirectoryDraft = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -62,6 +65,10 @@ struct SettingsView: View {
         }
         .onAppear {
             launchAtLoginManager.refresh()
+            profilesDirectoryDraft = profilesDirectory ?? ""
+        }
+        .onChange(of: profilesDirectory) { _, newValue in
+            profilesDirectoryDraft = newValue ?? ""
         }
     }
 
@@ -284,21 +291,31 @@ struct SettingsView: View {
     private var controllerGroup: some View {
         settingsGroup("CONTROLLER") {
             VStack(alignment: .leading, spacing: 8) {
-                if let profilesDirectory, !profilesDirectory.isEmpty {
-                    Text(profilesDirectory)
-                        .font(.system(size: 10.5, design: .monospaced))
-                        .foregroundStyle(theme.sub)
-                        .lineLimit(2)
-                        .truncationMode(.middle)
-                        .textSelection(.enabled)
-                    HStack(spacing: 10) {
-                        settingsLinkButton("Open Profiles Folder", action: openProfilesDirectory)
-                        if let controllerRoot, !controllerRoot.isEmpty {
-                            settingsLinkButton("Open Controller Root", action: openControllerRoot)
-                        }
+                Text("Profiles folder")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(theme.label)
+                TextField("~/model-profiles", text: $profilesDirectoryDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 11.5, design: .monospaced))
+                    .foregroundStyle(theme.fieldFg)
+                HStack(spacing: 10) {
+                    settingsLinkButton("Save Profiles Folder", emphasized: true) {
+                        Task { await setProfilesDirectory(profilesDirectoryDraft) }
                     }
-                } else {
-                    settingsFootnote("No profile folder reported yet. Start the controller and reconnect to load its configured model-profiles path. Point it elsewhere with ModelSwitchboardController --profiles-dir ~/Documents/model-profiles (persisted in the controller config).", color: DashboardTheme.pendingOrange)
+                    settingsLinkButton("Open Profiles Folder", action: openProfilesDirectory)
+                    if let controllerRoot, !controllerRoot.isEmpty {
+                        settingsLinkButton("Open Controller Root", action: openControllerRoot)
+                    }
+                }
+                settingsFootnote(
+                    "Editable here; persisted in the controller config.json. The controller hot-reloads the folder without a restart.",
+                    color: theme.sub
+                )
+                if profilesDirectory == nil || profilesDirectory?.isEmpty == true {
+                    settingsFootnote(
+                        "No profile folder reported yet. Start the controller and reconnect, or save a path above.",
+                        color: DashboardTheme.pendingOrange
+                    )
                 }
 
                 groupDivider

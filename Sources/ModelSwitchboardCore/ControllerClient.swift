@@ -34,6 +34,10 @@ public struct ControllerClient: Sendable {
 
     private struct EmptyRequest: Encodable {}
 
+    private struct ProfilesDirectoryRequest: Encodable {
+        let profiles_dir: String
+    }
+
     public let baseURL: URL
     public let authToken: String?
     public let session: URLSession
@@ -93,6 +97,11 @@ public struct ControllerClient: Sendable {
 
     public func stopAll() async throws -> ControllerActionResponse {
         try await post("/api/stop-all", payload: EmptyRequest())
+    }
+
+    public func setProfilesDirectory(_ path: String) async throws -> ControllerActionResponse {
+        try await post(
+            "/api/config/profiles-dir", payload: ProfilesDirectoryRequest(profiles_dir: path))
     }
 
     public func quickBenchmark(profiles: [String]? = nil, suite: String = "quick") async throws -> ControllerActionResponse {

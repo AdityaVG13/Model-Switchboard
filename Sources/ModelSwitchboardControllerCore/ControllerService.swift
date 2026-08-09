@@ -3,8 +3,8 @@ import Foundation
 import ModelSwitchboardCore
 
 public final class ControllerService: @unchecked Sendable {
-  public let configuration: ControllerConfiguration
-  public let profiles: ProfileRepository
+  public private(set) var configuration: ControllerConfiguration
+  public private(set) var profiles: ProfileRepository
   let controllerExecutableURL: URL
   let droidSettingsURL: URL
   let statusCacheURL: URL
@@ -52,6 +52,29 @@ public final class ControllerService: @unchecked Sendable {
       profilesDirectory: configuration.profilesDirectory.path,
       controllerRoot: configuration.root.path
     )
+  }
+
+  public func setProfilesDirectory(_ path: String) throws -> ControllerActionResponse {
+    let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else {
+      throw ControllerError.usage("missing required string field: profiles_dir")
+    }
+    let profilesDirectory = URL(
+      fileURLWithPath: NSString(string: trimmed).expandingTildeInPath, isDirectory: true)
+    try fileManager.createDirectory(at: profilesDirectory, withIntermediateDirectories: true)
+    try ControllerConfiguration.saveConfiguredProfilesDirectory(
+      root: configuration.root, profilesDirectory: profilesDirectory)
+    configuration = try ControllerConfiguration(
+      root: configuration.root,
+      host: configuration.host,
+      port: configuration.port,
+      authToken: configuration.authToken,
+      unsafeBind: configuration.unsafeBind,
+      profilesDirectory: profilesDirectory
+    )
+    profiles = ProfileRepository(
+      directory: configuration.profilesDirectory, fileManager: fileManager)
+    return try actionResponse()
   }
 
   public func actionResponse() throws -> ControllerActionResponse {

@@ -3,6 +3,13 @@ import Observation
 import OSLog
 import ModelSwitchboardCore
 
+/// Operator-visible progress for a Mac-driven remote gateway hard update.
+enum GatewayForceUpdatePhase: Equatable, Sendable {
+    case idle
+    case updating(String)
+    case failed(String)
+}
+
 /// One gateway's live state: its store, and for SSH gateways the tunnel.
 @MainActor
 @Observable
@@ -14,7 +21,10 @@ final class GatewayRuntime: Identifiable {
     var tunnelState: SSHTunnelManager.State = .idle
     /// Remote model port → local loopback port currently forwarded over SSH.
     var forwardedPorts: [Int: Int] = [:]
+    /// Side-panel force-update progress (agent push + reconnect + hard refresh).
+    var forceUpdatePhase: GatewayForceUpdatePhase = .idle
     @ObservationIgnored var forwardSyncTask: Task<Void, Never>?
+    @ObservationIgnored var forceUpdateTask: Task<Void, Never>?
 
     init(config: GatewayConfig, store: SwitchboardStore, tunnel: SSHTunnelManager?) {
         self.id = config.id
@@ -82,6 +92,7 @@ final class GatewayHub {
     @ObservationIgnored private let remoteStoreFactory: RemoteStoreFactory
     @ObservationIgnored private let tokenStorageFactory: (String) -> KeychainTokenStorage
     @ObservationIgnored private let sshExecutableURL: URL
+    @ObservationIgnored private let deployAgent: @MainActor (GatewayConfig, Bool, String?) async throws -> RemoteAgentDeployer.Result
     /// Coalesce spam-clicks on the dashboard refresh control.
     @ObservationIgnored private var lastManualRefreshAt: Date?
 
@@ -90,13 +101,18 @@ final class GatewayHub {
         defaults: UserDefaults = .standard,
         remoteStoreFactory: RemoteStoreFactory? = nil,
         tokenStorageFactory: @escaping (String) -> KeychainTokenStorage = { KeychainTokenStorage.forGateway(id: $0) },
-        sshExecutableURL: URL = URL(fileURLWithPath: "/usr/bin/ssh")
+        sshExecutableURL: URL = URL(fileURLWithPath: "/usr/bin/ssh"),
+        deployAgent: (@MainActor (GatewayConfig, Bool, String?) async throws -> RemoteAgentDeployer.Result)? = nil
     ) {
         self.localStore = localStore
         self.defaults = defaults
         self.remoteStoreFactory = remoteStoreFactory ?? Self.makeRemoteStore
         self.tokenStorageFactory = tokenStorageFactory
         self.sshExecutableURL = sshExecutableURL
+        self.deployAgent = deployAgent ?? { config, useTailscale, profilesDirectory in
+            try await RemoteAgentDeployer().deploy(
+                to: config, useTailscale: useTailscale, profilesDirectory: profilesDirectory)
+        }
         applyConfigs(GatewayConfigStore.load(from: defaults))
     }
 
@@ -369,6 +385,132 @@ final class GatewayHub {
         for store in allStores {
             Task { await store.refresh() }
         }
+    }
+
+    /// Push the bundled agent (when SSH is available), bounce the tunnel, and
+    /// hard-refresh status so stale ports/models cannot linger on the Mac UI.
+    func forceUpdateGateway(id: String) async {
+        guard let runtime = remoteRuntimes.first(where: { $0.id == id }) else { return }
+        if case .updating = runtime.forceUpdatePhase { return }
+        runtime.forceUpdateTask?.cancel()
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.performForceUpdate(gatewayID: id)
+        }
+        runtime.forceUpdateTask = task
+        _ = await task.value
+    }
+
+    private func performForceUpdate(gatewayID: String) async {
+        guard let runtime = remoteRuntimes.first(where: { $0.id == gatewayID }) else { return }
+        runtime.forceUpdatePhase = .updating("Clearing stale status…")
+        runtime.store.discardLiveStatusForForceUpdate()
+
+        let config = runtime.config
+        guard let deployConfig = Self.agentDeployConfig(for: config) else {
+            runtime.forceUpdatePhase = .failed(
+                "Add an SSH user/host in Settings for this gateway, then click the badge again to push a fresh agent from this Mac."
+            )
+            await runtime.store.refresh()
+            return
+        }
+
+        runtime.forceUpdatePhase = .updating("Pushing agent…")
+        // Direct (Tailscale) installs bind the agent to the tailnet; SSH
+        // tunnel installs keep loopback-only listen + Mac-side forward.
+        let useTailscale = config.kind == .direct
+        let trimmedProfiles = runtime.store.profilesDirectory?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let profilesDirectory =
+            (trimmedProfiles?.isEmpty == false) ? trimmedProfiles : nil
+        do {
+            let result = try await deployAgent(deployConfig, useTailscale, profilesDirectory)
+            if let token = result.authToken?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !token.isEmpty {
+                tokenStorageFactory(config.id).save(token)
+                if let live = remoteRuntimes.first(where: { $0.id == gatewayID }) {
+                    live.store.controllerAuthToken = token
+                }
+            }
+        } catch {
+            let message: String
+            if let deployError = error as? RemoteAgentDeployer.DeployError {
+                switch deployError {
+                case .missingResources:
+                    message = "This build is missing the bundled agent."
+                case .sshFailed(let step, let detail):
+                    message = "Agent update failed while trying to \(step): \(detail)"
+                }
+            } else {
+                message = error.localizedDescription
+            }
+            if let live = remoteRuntimes.first(where: { $0.id == gatewayID }) {
+                live.forceUpdatePhase = .failed(message)
+            }
+            Self.logger.error("force-update deploy failed: \(message, privacy: .public)")
+            // Still hard-refresh whatever agent is already running.
+        }
+
+        guard !Task.isCancelled else { return }
+        guard let current = remoteRuntimes.first(where: { $0.id == gatewayID }) else { return }
+
+        if current.config.kind == .ssh {
+            if case .failed = current.forceUpdatePhase {
+                // Keep the deploy failure visible across the tunnel bounce.
+            } else {
+                current.forceUpdatePhase = .updating("Reconnecting…")
+            }
+            bounceSSHRuntime(id: gatewayID, preservingPhase: current.forceUpdatePhase)
+            // Wait briefly for the replacement tunnel; refresh starts on .established.
+            for _ in 0..<40 {
+                if Task.isCancelled { return }
+                guard let live = remoteRuntimes.first(where: { $0.id == gatewayID }) else { return }
+                if live.tunnelState == .established { break }
+                if case .failed = live.tunnelState { break }
+                try? await Task.sleep(for: .milliseconds(250))
+            }
+        }
+
+        guard let live = remoteRuntimes.first(where: { $0.id == gatewayID }) else { return }
+        if case .failed = live.forceUpdatePhase {
+            // Deploy already failed; still attempt a status pull.
+            await live.store.refresh()
+            return
+        }
+        live.forceUpdatePhase = .updating("Refreshing…")
+        await live.store.refresh()
+        if case .failed = live.forceUpdatePhase {
+            return
+        }
+        live.forceUpdatePhase = .idle
+    }
+
+    /// SSH target for pushing the bundled agent. Prefer explicit Settings SSH
+    /// fields; for DIRECT Tailscale gateways fall back to the URL hostname so
+    /// operators can force-update without re-entering the MagicDNS name.
+    static func agentDeployConfig(for config: GatewayConfig) -> GatewayConfig? {
+        var deploy = config
+        let explicitHost = deploy.sshHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        if explicitHost.isEmpty {
+            guard config.kind == .direct,
+                  let host = URL(string: config.baseURL)?.host?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                  !host.isEmpty
+            else { return nil }
+            deploy.sshHost = host
+        }
+        guard !deploy.hasUnsafeSSHDestination else { return nil }
+        return deploy
+    }
+
+    private func bounceSSHRuntime(id: String, preservingPhase: GatewayForceUpdatePhase) {
+        guard let index = remoteRuntimes.firstIndex(where: { $0.id == id }) else { return }
+        let old = remoteRuntimes[index]
+        let config = old.config
+        teardown(old)
+        let fresh = makeRuntime(config: config)
+        fresh.forceUpdatePhase = preservingPhase
+        remoteRuntimes[index] = fresh
     }
 
     // MARK: - Default remote store construction
