@@ -3,8 +3,8 @@ import Testing
 @testable import ModelSwitchboardCore
 
 /// Cross-implementation end-to-end: the app's real `ControllerClient` driving
-/// the real Python remote agent (`RemoteAgent/model_switchboard_agent.py`)
-/// through a full status → start → ready → stop lifecycle.
+/// the real Python remote agent through a full status → start → ready → stop
+/// lifecycle. Test scaffolding is native Swift (no Python test code).
 ///
 /// This is the wire-compatibility proof for remote gateways: if the agent
 /// drifts from the Swift controller contract, these tests fail.
@@ -15,40 +15,61 @@ struct RemoteAgentConformanceTests {
         .deletingLastPathComponent()  // ModelSwitchboardCoreTests
         .deletingLastPathComponent()  // Tests
     static let agentScript = repoRoot.appendingPathComponent("RemoteAgent/model_switchboard_agent.py")
+    static let discoveryScript = repoRoot.appendingPathComponent("RemoteAgent/discovery.py")
 
     final class AgentHarness {
         let root: URL
         let port: UInt16
+        let authToken: String?
         let process: Process
 
-        init() throws {
+        init(authToken: String? = nil, extraProfiles: [(name: String, body: String)] = []) throws {
             root = FileManager.default.temporaryDirectory
                 .appendingPathComponent("msw-agent-conformance-\(UUID().uuidString)")
             let profiles = root.appendingPathComponent("model-profiles")
             try FileManager.default.createDirectory(at: profiles, withIntermediateDirectories: true)
 
+            // Agent imports discovery as a sibling module next to --root? It loads
+            // discovery from the script directory. Keep agent path absolute.
             port = Self.freePort()
             let stubPort = Self.freePort()
-            let stubScript = root.appendingPathComponent("stub_server.py")
+            let stubScript = root.appendingPathComponent("openai-stub.swift")
             try Self.stubServerSource.write(to: stubScript, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o755],
+                ofItemAtPath: stubScript.path
+            )
             let profile = """
             DISPLAY_NAME="Conformance Stub"
             REQUEST_MODEL=conformance-stub-model
             SERVER_MODEL_ID=conformance-stub-model
             PORT=\(stubPort)
-            START_COMMAND="exec python3 \(stubScript.path) \(stubPort) conformance-stub-model"
+            START_COMMAND="exec /usr/bin/env swift \(stubScript.path) \(stubPort) conformance-stub-model"
             """
             try profile.write(
                 to: profiles.appendingPathComponent("conformance-stub.env"),
                 atomically: true, encoding: .utf8
             )
+            for extra in extraProfiles {
+                try extra.body.write(
+                    to: profiles.appendingPathComponent("\(extra.name).env"),
+                    atomically: true,
+                    encoding: .utf8
+                )
+            }
 
+            self.authToken = authToken
             process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = [
+            var arguments = [
                 "python3", RemoteAgentConformanceTests.agentScript.path,
-                "--root", root.path, "--port", String(port), "serve",
+                "--root", root.path, "--port", String(port),
             ]
+            if let authToken, !authToken.isEmpty {
+                arguments += ["--auth-token", authToken]
+            }
+            arguments.append("serve")
+            process.arguments = arguments
             process.standardOutput = FileHandle.nullDevice
             process.standardError = FileHandle.nullDevice
             try process.run()
@@ -61,6 +82,13 @@ struct RemoteAgentConformanceTests {
         }
 
         var baseURL: String { "http://127.0.0.1:\(port)" }
+
+        func makeClient(authToken override: String? = nil) throws -> ControllerClient {
+            try ControllerClient(
+                baseURLString: baseURL,
+                authToken: override ?? authToken
+            )
+        }
 
         static func freePort() -> UInt16 {
             let socketFD = socket(AF_INET, SOCK_STREAM, 0)
@@ -84,33 +112,56 @@ struct RemoteAgentConformanceTests {
             return UInt16(bigEndian: assigned.sin_port)
         }
 
-        static let stubServerSource = """
-        import http.server
-        import json
-        import sys
+        /// Native Swift OpenAI-compatible /v1/models stub — no Python test code.
+        static let stubServerSource = #"""
+        #!/usr/bin/env swift
+        import Foundation
+        import Darwin
 
-        port, model = int(sys.argv[1]), sys.argv[2]
+        guard CommandLine.arguments.count >= 3,
+              let port = UInt16(CommandLine.arguments[1]) else {
+            fputs("usage: openai-stub.swift <port> <model-id>\n", stderr)
+            exit(2)
+        }
+        let model = CommandLine.arguments[2]
+        let body = Data("{\"data\":[{\"id\":\"\(model)\"}]}".utf8)
 
-        class Handler(http.server.BaseHTTPRequestHandler):
-            def do_GET(self):
-                body = json.dumps({"data": [{"id": model}]}).encode()
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { exit(1) }
+        var yes: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, socklen_t(MemoryLayout.size(ofValue: yes)))
+        var address = sockaddr_in()
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = port.bigEndian
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        let bindOK = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        guard bindOK == 0, listen(fd, 8) == 0 else { exit(1) }
 
-            def log_message(self, *args):
-                pass
-
-        http.server.HTTPServer(("127.0.0.1", port), Handler).serve_forever()
-        """
+        while true {
+            let client = accept(fd, nil, nil)
+            guard client >= 0 else { continue }
+            var request = [UInt8](repeating: 0, count: 4096)
+            _ = read(client, &request, request.count)
+            var header = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(body.count)\r\nConnection: close\r\n\r\n"
+            header.withUTF8 { raw in _ = raw.withMemoryRebound(to: UInt8.self) { write(client, $0.baseAddress, $0.count) } }
+            body.withUnsafeBytes { raw in
+                if let base = raw.bindMemory(to: UInt8.self).baseAddress {
+                    _ = write(client, base, body.count)
+                }
+            }
+            close(client)
+        }
+        """#
     }
 
-    static func waitForAgent(_ client: ControllerClient) async throws {
+    static func waitForAgent(_ client: ControllerClient, expectedProfiles: Int = 1) async throws {
         for _ in 0..<50 {
-            if let payload = try? await client.fetchStatus() {
-                #expect(payload.statuses.count == 1)
+            if let payload = try? await client.fetchStatus(),
+               payload.statuses.count == expectedProfiles {
                 return
             }
             try await Task.sleep(for: .milliseconds(100))
@@ -119,9 +170,16 @@ struct RemoteAgentConformanceTests {
     }
 
     @Test func swiftClientRunsFullLifecycleAgainstPythonAgent() async throws {
+        guard FileManager.default.isReadableFile(atPath: Self.agentScript.path),
+              FileManager.default.isReadableFile(atPath: Self.discoveryScript.path)
+        else {
+            Issue.record("RemoteAgent python modules missing from repo checkout")
+            return
+        }
+
         let harness = try AgentHarness()
         defer { harness.shutdown() }
-        let client = try ControllerClient(baseURLString: harness.baseURL)
+        let client = try harness.makeClient()
         try await Self.waitForAgent(client)
 
         let status = try await client.fetchStatus()
@@ -135,6 +193,12 @@ struct RemoteAgentConformanceTests {
 
         let doctor = try await client.fetchDoctorReport()
         #expect(doctor.controller.reachable)
+
+        let metrics = try await client.fetchHostMetrics()
+        #expect(!(metrics.host ?? "").isEmpty)
+        if let source = metrics.gpuSource {
+            #expect(["nvidia-smi", "unavailable"].contains(source))
+        }
 
         let started = try await client.start(profile: "conformance-stub")
         #expect(started.ok == true)
@@ -150,7 +214,7 @@ struct RemoteAgentConformanceTests {
             }
             try await Task.sleep(for: .milliseconds(250))
         }
-        #expect(ready, "profile never became ready via the Python agent")
+        #expect(ready, "profile never became ready via the remote agent")
 
         let stopped = try await client.stopAll()
         #expect(stopped.ok == true)
@@ -159,14 +223,111 @@ struct RemoteAgentConformanceTests {
         #expect(final.statuses.first?.ready == false)
     }
 
-    @Test func unknownProfileAndBadTokenMapToClientErrors() async throws {
-        let harness = try AgentHarness()
+    @Test func unknownProfileBadTokenAndUnsupportedIntegrationMapToClientErrors() async throws {
+        let token = "conformance-secret-token"
+        let harness = try AgentHarness(authToken: token)
         defer { harness.shutdown() }
-        let client = try ControllerClient(baseURLString: harness.baseURL)
+        let client = try harness.makeClient()
         try await Self.waitForAgent(client)
 
         await #expect(throws: ControllerClientError.self) {
             _ = try await client.start(profile: "does-not-exist")
         }
+
+        let unauthenticated = try harness.makeClient(authToken: "wrong-token")
+        await #expect(throws: ControllerClientError.self) {
+            _ = try await unauthenticated.stopAll()
+        }
+
+        await #expect(throws: ControllerClientError.self) {
+            _ = try await client.runIntegration(id: "droid", action: "sync")
+        }
+    }
+
+    @Test func statusPayloadMarksProfilesAndReportsReadyCount() async throws {
+        guard FileManager.default.isReadableFile(atPath: Self.agentScript.path),
+              FileManager.default.isReadableFile(atPath: Self.discoveryScript.path)
+        else {
+            Issue.record("RemoteAgent python modules missing from repo checkout")
+            return
+        }
+
+        let harness = try AgentHarness()
+        defer { harness.shutdown() }
+        let client = try harness.makeClient()
+        try await Self.waitForAgent(client)
+
+        let status = try await client.fetchStatus()
+        let stub = try #require(status.statuses.first { $0.profile == "conformance-stub" })
+        #expect(stub.source == "profile")
+        #expect(status.profileTotalCount == status.statuses.filter { $0.source == "profile" }.count)
+        #expect(status.profileReadyCount == status.statuses.filter { $0.source == "profile" && $0.ready }.count)
+        let counts = ProfileRuntimeCounts(statuses: status.statuses)
+        #expect(counts.total == status.profileTotalCount)
+        #expect(counts.ready == status.profileReadyCount)
+    }
+
+    @Test func sharedPortProfilesConflictOnSwitch() async throws {
+        let stubPort = AgentHarness.freePort()
+        // Two profiles claim the same port — switch must 409 before launch.
+        let shared = """
+        DISPLAY_NAME="Conflict A"
+        REQUEST_MODEL=conflict-a
+        PORT=\(stubPort)
+        START_COMMAND="exec sleep 30"
+        HEALTHCHECK_MODE=disabled
+        """
+        let other = """
+        DISPLAY_NAME="Conflict B"
+        REQUEST_MODEL=conflict-b
+        PORT=\(stubPort)
+        START_COMMAND="exec sleep 30"
+        HEALTHCHECK_MODE=disabled
+        """
+        // Harness always writes conformance-stub too; use a dedicated root by
+        // writing only conflict profiles via a custom harness setup.
+        let harness = try AgentHarness(extraProfiles: [
+            (name: "conflict-a", body: shared),
+            (name: "conflict-b", body: other),
+        ])
+        defer { harness.shutdown() }
+        let client = try harness.makeClient()
+        try await Self.waitForAgent(client, expectedProfiles: 3)
+
+        await #expect(throws: ControllerClientError.self) {
+            _ = try await client.activate(profile: "conflict-a")
+        }
+    }
+
+    @Test func hidesProfilesWhoseModelPathIsGone() async throws {
+        guard FileManager.default.isReadableFile(atPath: Self.agentScript.path),
+              FileManager.default.isReadableFile(atPath: Self.discoveryScript.path)
+        else {
+            Issue.record("RemoteAgent python modules missing from repo checkout")
+            return
+        }
+
+        let missingPath = "/tmp/msw-does-not-exist-\(UUID().uuidString).gguf"
+        let stale = """
+        DISPLAY_NAME="Stale Missing Weights"
+        REQUEST_MODEL=stale-missing-model
+        PORT=\(AgentHarness.freePort())
+        MODEL_PATH=\(missingPath)
+        START_COMMAND="exec sleep 30"
+        HEALTHCHECK_MODE=disabled
+        """
+        let harness = try AgentHarness(extraProfiles: [
+            (name: "stale-missing", body: stale),
+        ])
+        defer { harness.shutdown() }
+        let client = try harness.makeClient()
+        try await Self.waitForAgent(client, expectedProfiles: 1)
+
+        let status = try await client.fetchStatus()
+        let names = Set(status.statuses.map(\.profile))
+        #expect(names.contains("conformance-stub"))
+        #expect(!names.contains("stale-missing"))
+        let stub = try #require(status.statuses.first { $0.profile == "conformance-stub" })
+        #expect(stub.launchable != false)
     }
 }

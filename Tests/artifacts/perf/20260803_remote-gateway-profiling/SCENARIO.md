@@ -206,7 +206,7 @@ surface grow (profiles + claims + listeners), independent of Mac UI.
 ### Expected output (golden / behavioral)
 
 - `statuses` length ≥ profile count (plus claim/listener extras when full list).
-- Claim discovery shape stable (`RemoteAgent/tests/test_perf_golden.py` remains green).
+- Claim discovery shape covered by Swift `RemoteAgentConformanceTests` (Python golden suite removed).
 - No home-directory deep-walk regression (prior hang ~15s must not return).
 
 ### Success metrics

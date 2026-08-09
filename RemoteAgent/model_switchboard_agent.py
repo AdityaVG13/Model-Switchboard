@@ -598,6 +598,58 @@ class Profile:
         return Path(raw).expanduser()
 
 
+
+_WEIGHT_SUFFIXES = (".gguf", ".safetensors", ".bin", ".pt", ".pth", ".onnx")
+
+
+def _looks_like_local_fs_path(raw: str) -> bool:
+    """True for filesystem-looking paths; false for HF ids and URLs."""
+    value = (raw or "").strip()
+    if not value or "://" in value:
+        return False
+    if value.startswith(("/", "~", "./", "../")):
+        return True
+    lower = value.lower()
+    return any(lower.endswith(suffix) for suffix in _WEIGHT_SUFFIXES)
+
+
+def missing_local_model_artifacts(values: dict[str, str] | dict[str, Any]) -> list[str]:
+    """Return local MODEL_* paths that are missing on disk (empty = ok / nothing to check)."""
+    missing: list[str] = []
+    model_dir_raw = str(values.get("MODEL_DIR") or "").strip()
+    model_path_raw = str(values.get("MODEL_PATH") or "").strip()
+    model_file_raw = str(values.get("MODEL_FILE") or "").strip()
+
+    model_dir: Path | None = None
+    if model_dir_raw and _looks_like_local_fs_path(model_dir_raw):
+        model_dir = Path(model_dir_raw).expanduser()
+        if not model_dir.is_dir():
+            missing.append(str(model_dir))
+
+    if model_path_raw and _looks_like_local_fs_path(model_path_raw):
+        model_path = Path(model_path_raw).expanduser()
+        if not (model_path.is_file() or model_path.is_dir()):
+            missing.append(str(model_path))
+
+    if model_file_raw and _looks_like_local_fs_path(model_file_raw):
+        model_file = Path(model_file_raw).expanduser()
+        if not model_file.is_absolute() and model_dir is not None:
+            model_file = model_dir / model_file_raw
+        elif not model_file.is_absolute() and model_dir_raw and _looks_like_local_fs_path(model_dir_raw):
+            model_file = Path(model_dir_raw).expanduser() / model_file_raw
+        if not model_file.is_file():
+            missing.append(str(model_file))
+
+    # Stable unique order
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for path in missing:
+        if path not in seen:
+            seen.add(path)
+            ordered.append(path)
+    return ordered
+
+
 class ProfileRepository:
     def __init__(self, directory: Path):
         self.directory = directory
@@ -1761,6 +1813,15 @@ class AgentService:
             listening: list[dict[str, Any]] = []
             # Full discovery only when listing everything — targeted stays profile-only.
             if selected is None:
+                # Drop stale file-backed configs whose weights are gone and that
+                # are not currently answering (still show live endpoints).
+                statuses = [
+                    item
+                    for item in statuses
+                    if item.get("launchable", True)
+                    or item.get("running")
+                    or item.get("ready")
+                ]
                 # Reuse the same listeners snapshot (no second inventory).
                 start_cmds = [
                     profile.get("START_COMMAND")
@@ -1787,13 +1848,30 @@ class AgentService:
                     for item in statuses
                     if str(item.get("port") or "").isdigit()
                 }
+                listening_by_port = {
+                    int(item["port"]): item
+                    for item in listening
+                    if str(item.get("port") or "").isdigit()
+                }
+                listening_ports = {
+                    int(item["port"])
+                    for item in listeners
+                    if str(item.get("port") or "").isdigit()
+                }
 
                 # Claimed port folders not already represented by a profile.
                 for claim in claims:
                     port = int(claim["port"])
                     if port in covered_ports:
                         continue
-                    live = next((item for item in listening if int(item["port"]) == port), None)
+                    flags = claim.get("flags") if isinstance(claim.get("flags"), dict) else {}
+                    claim_values = {str(k): str(v) for k, v in flags.items()}
+                    if "MODEL" in claim_values and "MODEL_PATH" not in claim_values:
+                        claim_values["MODEL_PATH"] = claim_values["MODEL"]
+                    claim_missing = missing_local_model_artifacts(claim_values)
+                    if claim_missing and port not in listening_ports:
+                        continue
+                    live = listening_by_port.get(port)
                     merged = dict(claim)
                     if live:
                         merged.update(
@@ -1836,7 +1914,7 @@ class AgentService:
                     statuses.append(
                         status_dict_from_discovery(
                             live,
-                            source="listening",
+                            source="discovery",
                             profile_name=f"discovered-{port}",
                             listeners=listeners,
                         )
@@ -1851,12 +1929,15 @@ class AgentService:
             span.tags["n_claims"] = len(claims)
             span.tags["n_live"] = len(listening)
             span.tags["full_discovery"] = selected is None
+            file_backed = [item for item in statuses if item.get("source") == "profile"]
             return {
                 "statuses": statuses,
                 "benchmark": benchmark,
                 "integrations": [],
                 "profiles_dir": str(self.configuration.profiles_directory),
                 "controller_root": str(self.configuration.root),
+                "profile_total_count": len(file_backed),
+                "profile_ready_count": sum(1 for item in file_backed if item.get("ready")),
                 "discovery": {
                     "listening": listening if selected is None else [],
                     "claims": [
@@ -1895,6 +1976,7 @@ class AgentService:
             listeners=listeners,
         )
         live_by_port = {int(item["port"]): item for item in live}
+        claims_by_port = {int(item["port"]): item for item in claims}
         ports: list[dict[str, Any]] = []
         for listener in listeners:
             port = int(listener["port"])
@@ -1905,10 +1987,7 @@ class AgentService:
                 "bind": listener.get("bind"),
                 "looks_like_model": command_looks_like_model_server(listener.get("command")),
                 "model": live_by_port.get(port),
-                "claimed": next(
-                    (claim for claim in claims if int(claim["port"]) == port),
-                    None,
-                ),
+                "claimed": claims_by_port.get(port),
             }
             ports.append(entry)
         # Claims with nothing listening yet still appear.
@@ -2334,6 +2413,9 @@ class AgentService:
             state = "zombie"
             if not ready:
                 alive = False
+        ready_flag = bool(ready and (alive or listening))
+        missing = missing_local_model_artifacts(profile.values)
+        launchable = (not missing) or alive or ready_flag
         return {
             "profile": profile.name,
             "display_name": profile.display_name,
@@ -2351,14 +2433,16 @@ class AgentService:
             "state": state,
             # Health alone when the port answers (Swift-like). Unowned ready
             # endpoints stay stop-safe because pid/running stay false.
-            "ready": bool(ready and (alive or listening)),
+            "ready": ready_flag,
             "server_ids": server_ids if (alive or ready) else [],
             "rss_mb": process_rss_mb(pid) if alive and pid else None,
             # GPU VRAM when nvidia-smi can attribute memory to this pid (not RSS).
             "vram_mb": process_vram_mb(pid) if alive and pid else None,
             "command": process_command(pid) if ((alive or zombie) and pid) else None,
             "log_path": profile.log_path,
-            "discovery_source": "profile",
+            "source": "profile",
+            "launchable": launchable,
+            "missing_artifacts": missing,
         }
 
     # -- lifecycle ---------------------------------------------------------
@@ -2397,6 +2481,12 @@ class AgentService:
                 detail = f" by pid {listener}" if listener else ""
                 raise ProfileConflictError(
                     f"Cannot start {canonical}: port {port} is already in use{detail}."
+                )
+
+            missing = missing_local_model_artifacts(profile.values)
+            if missing:
+                raise InvalidProfileError(
+                    f"{canonical}: cannot start; missing model path(s): {', '.join(missing)}"
                 )
 
             environment = dict(os.environ)

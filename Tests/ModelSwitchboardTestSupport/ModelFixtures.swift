@@ -18,7 +18,10 @@ public enum ModelFixtures {
         rssMB: Double? = 4096,
         vramMB: Double? = nil,
         command: String? = nil,
-        logPath: String = "/tmp/qwen.log"
+        logPath: String = "/tmp/qwen.log",
+        source: String? = nil,
+        launchable: Bool? = nil,
+        missingArtifacts: [String]? = nil
     ) -> ModelProfileStatus {
         ModelProfileStatus(
             profile: profile,
@@ -39,7 +42,10 @@ public enum ModelFixtures {
             rssMB: running ? rssMB : nil,
             vramMB: running ? vramMB : nil,
             command: command,
-            logPath: logPath
+            logPath: logPath,
+            source: source,
+            launchable: launchable,
+            missingArtifacts: missingArtifacts
         )
     }
 
@@ -48,14 +54,18 @@ public enum ModelFixtures {
         benchmark: BenchmarkStatus? = BenchmarkStatus(running: false, pid: nil, logPath: nil, latest: nil),
         integrations: [ControllerIntegration] = [],
         profilesDirectory: String? = nil,
-        controllerRoot: String? = nil
+        controllerRoot: String? = nil,
+        profileTotalCount: Int? = nil,
+        profileReadyCount: Int? = nil
     ) -> ControllerStatusPayload {
         ControllerStatusPayload(
             statuses: statuses,
             benchmark: benchmark,
             integrations: integrations,
             profilesDirectory: profilesDirectory,
-            controllerRoot: controllerRoot
+            controllerRoot: controllerRoot,
+            profileTotalCount: profileTotalCount,
+            profileReadyCount: profileReadyCount
         )
     }
 

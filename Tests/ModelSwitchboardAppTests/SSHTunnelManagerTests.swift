@@ -166,12 +166,8 @@ private func waitFor(
           esac
         done
         PORT=$(printf '%s' "$SPEC" | cut -d: -f2)
-        exec python3 -c "import socket, time
-        s = socket.socket()
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        s.bind(('127.0.0.1', $PORT))
-        s.listen(4)
-        time.sleep(120)"
+        # Pure shell fixture — no Python in tests. macOS ships /usr/bin/nc.
+        exec /usr/bin/nc -l 127.0.0.1 "$PORT"
         """,
         name: "fake-ssh-listen"
     )

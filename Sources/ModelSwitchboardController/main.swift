@@ -1,4 +1,5 @@
 import Foundation
+import ModelSwitchboardCore
 import ModelSwitchboardControllerCore
 
 @main
@@ -241,13 +242,12 @@ enum ModelSwitchboardControllerMain {
 
   private static func printSwiftBar(service: ControllerService) throws {
     let payload = try service.statusPayload()
-    let ready = payload.statuses.filter(\.ready).count
-    let running = payload.statuses.filter(\.running).count
+    let counts = ProfileRuntimeCounts(statuses: payload.statuses)
     let executable = CommandLine.arguments[0]
-    print("LLMs \(ready)/\(payload.statuses.count)")
+    print("LLMs \(counts.ready)/\(counts.total)")
     print("---")
-    print("Ready endpoints: \(ready)/\(payload.statuses.count)")
-    print("Running processes: \(running)")
+    print("Ready endpoints: \(counts.ready)/\(counts.total)")
+    print("Running processes: \(counts.running)")
     print(
       "Stop all | bash=\(executable) param1=stop-all param2=--root param3=\(service.configuration.root.path) terminal=false refresh=true color=red"
     )

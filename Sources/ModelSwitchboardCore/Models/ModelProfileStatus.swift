@@ -21,8 +21,22 @@ public struct ModelProfileStatus: Codable, Identifiable, Equatable, Sendable {
     public let vramMB: Double?
     public let command: String?
     public let logPath: String
+    /// Status origin: profile, claim, or discovery.
+    public let source: String?
+    /// False when configured model weights/dirs are missing on the agent host.
+    public let launchable: Bool?
+    /// Absolute/expanded paths the agent could not find (may be empty).
+    public let missingArtifacts: [String]?
 
     public var id: String { profile }
+
+    /// Board rows: hide stale configs unless the endpoint is still live.
+    public var isBoardVisible: Bool {
+        if launchable == false {
+            return running || ready
+        }
+        return true
+    }
 
     public init(
         profile: String,
@@ -43,7 +57,10 @@ public struct ModelProfileStatus: Codable, Identifiable, Equatable, Sendable {
         rssMB: Double?,
         vramMB: Double? = nil,
         command: String?,
-        logPath: String
+        logPath: String,
+        source: String? = nil,
+        launchable: Bool? = nil,
+        missingArtifacts: [String]? = nil
     ) {
         self.profile = profile
         self.displayName = displayName
@@ -64,6 +81,9 @@ public struct ModelProfileStatus: Codable, Identifiable, Equatable, Sendable {
         self.vramMB = vramMB
         self.command = command
         self.logPath = logPath
+        self.source = source
+        self.launchable = launchable
+        self.missingArtifacts = missingArtifacts
     }
 
     enum CodingKeys: String, CodingKey {
@@ -86,6 +106,9 @@ public struct ModelProfileStatus: Codable, Identifiable, Equatable, Sendable {
         case vramMB = "vram_mb"
         case command
         case logPath = "log_path"
+        case source
+        case launchable
+        case missingArtifacts = "missing_artifacts"
     }
 
     /// Tolerant decode: remote agents may omit or null `log_path` (discovery rows).
@@ -115,6 +138,9 @@ public struct ModelProfileStatus: Codable, Identifiable, Equatable, Sendable {
         } else {
             logPath = ""
         }
+        source = try container.decodeIfPresent(String.self, forKey: .source)
+        launchable = try container.decodeIfPresent(Bool.self, forKey: .launchable)
+        missingArtifacts = try container.decodeIfPresent([String].self, forKey: .missingArtifacts)
     }
 }
 
@@ -180,7 +206,10 @@ public extension ModelProfileStatus {
             rssMB: rssMB ?? self.rssMB,
             vramMB: vramMB ?? self.vramMB,
             command: command,
-            logPath: logPath
+            logPath: logPath,
+            source: source,
+            launchable: launchable,
+            missingArtifacts: missingArtifacts
         )
     }
 

@@ -297,13 +297,13 @@ If you build one, implement the adapter in `ModelSwitchboardControllerCore` and 
 Before opening a PR:
 
 ```bash
-swift test && ./Scripts/check-cycles.py && ./Scripts/build-app.sh
+swift test && ./Scripts/check-cycles && ./Scripts/build-app.sh
 ```
 
 For maintainers, release prep is scriptable instead of hand-editing version files:
 
 ```bash
-python3 Scripts/bump-version.py patch   # or minor / major / x.y.z
+./Scripts/bump-version patch   # or minor / major / x.y.z
 ./Scripts/release-preflight.sh
 ```
 

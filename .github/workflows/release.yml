@@ -21,7 +21,7 @@ on:
       - "Scripts/verify-distribution.sh"
       - "Scripts/verify-installed-app.sh"
       - "Scripts/verify-privacy.sh"
-      - "Scripts/bump-version.py"
+      - "Scripts/bump-version"
 
 jobs:
   build-release:

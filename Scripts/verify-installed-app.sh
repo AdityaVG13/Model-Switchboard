@@ -277,115 +277,108 @@ run_osascript() {
 }
 
 status_json() {
-  python3 - "$CONTROLLER_URL" <<'PY'
-import http.client, json, sys, time, urllib.error, urllib.request
-base = sys.argv[1]
-last = None
-for _ in range(20):
-    try:
-        obj = json.load(urllib.request.urlopen(base + "/api/status", timeout=5))
-        break
-    except (urllib.error.URLError, http.client.HTTPException, OSError) as exc:
-        last = exc
-        time.sleep(0.5)
-else:
-    raise last
-print(json.dumps(obj))
-PY
+  local attempt=1
+  local body=""
+  while (( attempt <= 20 )); do
+    if body="$(curl -fsS --max-time 5 "$CONTROLLER_URL/api/status" 2>/dev/null)"; then
+      printf '%s\n' "$body"
+      return 0
+    fi
+    sleep 0.5
+    attempt=$((attempt + 1))
+  done
+  return 1
 }
 
 status_value() {
-  python3 - "$CONTROLLER_URL" "$1" "$2" <<'PY'
-import http.client, json, sys, time, urllib.error, urllib.request
-base, mode, arg = sys.argv[1], sys.argv[2], sys.argv[3]
-last = None
-for _ in range(20):
-    try:
-        obj = json.load(urllib.request.urlopen(base + "/api/status", timeout=5))
-        break
-    except (urllib.error.URLError, http.client.HTTPException, OSError) as exc:
-        last = exc
-        time.sleep(0.5)
-else:
-    raise last
-if mode == "profile_running":
-    row = next(x for x in obj["statuses"] if x["profile"] == arg)
-    print("true" if row["running"] else "false")
-elif mode == "profile_pid":
-    row = next(x for x in obj["statuses"] if x["profile"] == arg)
-    print(row["pid"] or "")
-elif mode == "benchmark_generated_at":
-    print(((obj.get("benchmark") or {}).get("latest") or {}).get("generated_at") or "")
-elif mode == "benchmark_running":
-    print("true" if (obj.get("benchmark") or {}).get("running") else "false")
-elif mode == "benchmark_markdown_path":
-    print(((obj.get("benchmark") or {}).get("latest") or {}).get("markdown_path") or "")
-elif mode == "profile_display_name":
-    row = next(x for x in obj["statuses"] if x["profile"] == arg)
-    print(row["display_name"])
-elif mode == "profiles_dir":
-    print(obj.get("profiles_dir") or "")
-elif mode == "controller_root":
-    print(obj.get("controller_root") or "")
-PY
+  local mode="$1"
+  local arg="$2"
+  local json
+  json="$(status_json)" || return 1
+  case "$mode" in
+    profile_running)
+      printf '%s\n' "$json" | jq -r --arg p "$arg" '
+        .statuses[] | select(.profile == $p)
+        | if .running then "true" else "false" end
+      '
+      ;;
+    profile_pid)
+      printf '%s\n' "$json" | jq -r --arg p "$arg" '
+        .statuses[] | select(.profile == $p) | (.pid // "") | tostring
+      '
+      ;;
+    benchmark_generated_at)
+      printf '%s\n' "$json" | jq -r '.benchmark.latest.generated_at // empty'
+      ;;
+    benchmark_running)
+      printf '%s\n' "$json" | jq -r 'if (.benchmark.running // false) then "true" else "false" end'
+      ;;
+    benchmark_markdown_path)
+      printf '%s\n' "$json" | jq -r '.benchmark.latest.markdown_path // empty'
+      ;;
+    profile_display_name)
+      printf '%s\n' "$json" | jq -r --arg p "$arg" '
+        .statuses[] | select(.profile == $p) | .display_name
+      '
+      ;;
+    profiles_dir)
+      printf '%s\n' "$json" | jq -r '.profiles_dir // empty'
+      ;;
+    controller_root)
+      printf '%s\n' "$json" | jq -r '.controller_root // empty'
+      ;;
+    *)
+      return 2
+      ;;
+  esac
 }
 
 first_profile() {
-  python3 - "$CONTROLLER_URL" <<'PY'
-import http.client, json, sys, time, urllib.error, urllib.request
-base = sys.argv[1]
-last = None
-for _ in range(20):
-    try:
-        obj = json.load(urllib.request.urlopen(base + "/api/status", timeout=5))
-        break
-    except (urllib.error.URLError, http.client.HTTPException, OSError) as exc:
-        last = exc
-        time.sleep(0.5)
-else:
-    raise last
-def is_loopback(host):
-    return host in {"", "127.0.0.1", "::1", "localhost"}
-def port_rank(row):
-    try:
-        return int(row.get("port") or 0)
-    except (TypeError, ValueError):
-        return 0
-def display_key(row):
-    running_rank = 0 if row.get("running") else 1
-    ready_rank = 0 if row.get("ready") else 1
-    host = (row.get("host") or "").lower()
-    return (
-        running_rank,
-        ready_rank if row.get("running") else 0,
-        0 if is_loopback(host) else 1,
-        host,
-        port_rank(row),
-        (row.get("display_name") or "").lower(),
-        (row.get("profile") or "").lower(),
-    )
-rows = sorted(obj["statuses"], key=display_key)
-print(rows[0]["profile"])
-PY
+  local json
+  json="$(status_json)" || return 1
+  printf '%s\n' "$json" | jq -r '
+    def loopback:
+      ((. // "") | ascii_downcase) as $h
+      | ($h == "" or $h == "127.0.0.1" or $h == "::1" or $h == "localhost");
+    .statuses
+    | sort_by(
+        (if .running then 0 else 1 end),
+        (if .running then (if .ready then 0 else 1 end) else 0 end),
+        (if (.host | loopback) then 0 else 1 end),
+        ((.host // "") | ascii_downcase),
+        ((.port // "0") | tonumber? // 0),
+        ((.display_name // "") | ascii_downcase),
+        ((.profile // "") | ascii_downcase)
+      )
+    | .[0].profile
+  '
 }
 
 controller_post() {
-  python3 - "$CONTROLLER_URL" "$1" "$2" <<'PY'
-import http.client, sys, time, urllib.error, urllib.request
-base, path, payload = sys.argv[1], sys.argv[2], sys.argv[3]
-data = payload.encode() if payload else None
-req = urllib.request.Request(base + path, data=data, headers={"Content-Type": "application/json"}, method="POST")
-last = None
-for _ in range(20):
-    try:
-        urllib.request.urlopen(req, timeout=20).read()
-        break
-    except (urllib.error.URLError, http.client.HTTPException, OSError) as exc:
-        last = exc
-        time.sleep(0.5)
-else:
-    raise last
-PY
+  local path="$1"
+  local payload="${2:-}"
+  local attempt=1
+  while (( attempt <= 20 )); do
+    if [[ -n "$payload" ]]; then
+      if curl -fsS --max-time 20 \
+        -H "Content-Type: application/json" \
+        -d "$payload" \
+        -X POST \
+        "$CONTROLLER_URL$path" >/dev/null 2>&1; then
+        return 0
+      fi
+    else
+      if curl -fsS --max-time 20 \
+        -H "Content-Type: application/json" \
+        -X POST \
+        "$CONTROLLER_URL$path" >/dev/null 2>&1; then
+        return 0
+      fi
+    fi
+    sleep 0.5
+    attempt=$((attempt + 1))
+  done
+  return 1
 }
 
 app_pid() {
@@ -458,28 +451,31 @@ safe_label() {
 }
 
 normalized_path() {
-  python3 - "$1" <<'PY'
-import os
-import sys
-
-path = sys.argv[1]
-if not path:
-    print("")
-else:
-    print((os.path.realpath(path).rstrip("/") or "/"))
-PY
+  local path="$1"
+  if [[ -z "$path" ]]; then
+    printf '\n'
+    return 0
+  fi
+  # Prefer realpath; fall back to pwd -P via cd.
+  if command -v realpath >/dev/null 2>&1; then
+    realpath "$path" 2>/dev/null | sed 's:/*$::'
+  else
+    (cd "$path" 2>/dev/null && pwd -P) || printf '%s\n' "${path%/}"
+  fi
 }
 
 file_mtime_ns() {
-  python3 - "$1" <<'PY'
-import os
-import sys
-
-try:
-    print(os.stat(sys.argv[1]).st_mtime_ns)
-except FileNotFoundError:
-    print(0)
-PY
+  local path="$1"
+  if [[ ! -e "$path" ]]; then
+    printf '0\n'
+    return 0
+  fi
+  # macOS stat: %N is birth? Use %m * 1e9 via awk for portability, or GNU %Y.
+  if stat -f '%m' "$path" >/dev/null 2>&1; then
+    awk -v sec="$(stat -f '%m' "$path")" 'BEGIN { printf "%.0f\n", sec * 1000000000 }'
+  else
+    awk -v sec="$(stat -c '%Y' "$path")" 'BEGIN { printf "%.0f\n", sec * 1000000000 }'
+  fi
 }
 
 window_bounds() {
@@ -620,10 +616,7 @@ wait_for_main_window_width() {
     bounds="$(main_window_bounds)"
     if [[ -n "$bounds" ]]; then
       width="$(echo "$bounds" | awk -F'|' '{print $4}')"
-      if python3 - <<PY
-import sys
-sys.exit(0 if abs(float("$width") - float("$expected")) < 0.5 else 1)
-PY
+      if awk -v w="$width" -v e="$expected" 'BEGIN { exit ( (w - e < 0 ? e - w : w - e) < 0.5 ? 0 : 1 ) }'
       then
         return 0
       fi
@@ -703,14 +696,8 @@ try_ocr_click() {
   px="$(echo "$line" | awk -F'|' '{print $1}')"
   py="$(echo "$line" | awk -F'|' '{print $2}')"
   local cx cy
-  cx="$(python3 - <<PY
-print($px / float("$SCREEN_SCALE"))
-PY
-)"
-  cy="$(python3 - <<PY
-print($py / float("$SCREEN_SCALE"))
-PY
-)"
+  cx="$(awk -v px="$px" -v scale="$SCREEN_SCALE" 'BEGIN { print px / scale }')"
+  cy="$(awk -v py="$py" -v scale="$SCREEN_SCALE" 'BEGIN { print py / scale }')"
   "$WORK_DIR/msw_click" "$cx" "$cy"
 }
 
@@ -733,14 +720,8 @@ try_ocr_click_window() {
   y="$(echo "$bounds" | awk -F'|' '{print $3}')"
   px="$(echo "$line" | awk -F'|' '{print $1}')"
   py="$(echo "$line" | awk -F'|' '{print $2}')"
-  cx="$(python3 - <<PY
-print(float("$x") + ($px / float("$SCREEN_SCALE")))
-PY
-)"
-  cy="$(python3 - <<PY
-print(float("$y") + ($py / float("$SCREEN_SCALE")))
-PY
-)"
+  cx="$(awk -v x="$x" -v px="$px" -v scale="$SCREEN_SCALE" 'BEGIN { print x + (px / scale) }')"
+  cy="$(awk -v y="$y" -v py="$py" -v scale="$SCREEN_SCALE" 'BEGIN { print y + (py / scale) }')"
   "$WORK_DIR/msw_click" "$cx" "$cy"
 }
 
@@ -957,27 +938,23 @@ MAIN_BEFORE="$(main_window_bounds)"
 MAIN_BEFORE_X="$(echo "$MAIN_BEFORE" | awk -F'|' '{print $2}')"
 MAIN_BEFORE_Y="$(echo "$MAIN_BEFORE" | awk -F'|' '{print $3}')"
 MAIN_BEFORE_W="$(echo "$MAIN_BEFORE" | awk -F'|' '{print $4}')"
-MAIN_BEFORE_RIGHT="$(python3 - <<PY
-print(float("$MAIN_BEFORE_X") + float("$MAIN_BEFORE_W"))
-PY
-)"
+MAIN_BEFORE_RIGHT="$(awk -v x="$MAIN_BEFORE_X" -v w="$MAIN_BEFORE_W" 'BEGIN { print x + w }')"
 open_settings_panel_from_current_menu initial-settings
 sleep 0.3
 MAIN_AFTER_SETTINGS="$(main_window_bounds)"
 MAIN_AFTER_SETTINGS_X="$(echo "$MAIN_AFTER_SETTINGS" | awk -F'|' '{print $2}')"
 MAIN_AFTER_SETTINGS_Y="$(echo "$MAIN_AFTER_SETTINGS" | awk -F'|' '{print $3}')"
 MAIN_AFTER_SETTINGS_W="$(echo "$MAIN_AFTER_SETTINGS" | awk -F'|' '{print $4}')"
-MAIN_AFTER_SETTINGS_RIGHT="$(python3 - <<PY
-print(float("$MAIN_AFTER_SETTINGS_X") + float("$MAIN_AFTER_SETTINGS_W"))
-PY
-)"
-python3 - <<PY || fail "settings moved main panel"
-import sys
-same_x = abs(float("$MAIN_AFTER_SETTINGS_X") - float("$MAIN_BEFORE_X")) < 0.5
-same_y = abs(float("$MAIN_AFTER_SETTINGS_Y") - float("$MAIN_BEFORE_Y")) < 0.5
-same_right = abs(float("$MAIN_AFTER_SETTINGS_RIGHT") - float("$MAIN_BEFORE_RIGHT")) < 0.5
-sys.exit(0 if (same_x and same_y and same_right) else 1)
-PY
+MAIN_AFTER_SETTINGS_RIGHT="$(awk -v x="$MAIN_AFTER_SETTINGS_X" -v w="$MAIN_AFTER_SETTINGS_W" 'BEGIN { print x + w }')"
+awk -v ax="$MAIN_AFTER_SETTINGS_X" -v bx="$MAIN_BEFORE_X" \
+    -v ay="$MAIN_AFTER_SETTINGS_Y" -v by="$MAIN_BEFORE_Y" \
+    -v ar="$MAIN_AFTER_SETTINGS_RIGHT" -v br="$MAIN_BEFORE_RIGHT" \
+    'BEGIN {
+      same_x = (ax - bx < 0 ? bx - ax : ax - bx) < 0.5
+      same_y = (ay - by < 0 ? by - ay : ay - by) < 0.5
+      same_r = (ar - br < 0 ? br - ar : ar - br) < 0.5
+      exit (same_x && same_y && same_r ? 0 : 1)
+    }' || fail "settings moved main panel"
 SETTINGS_SHOT="$WORK_DIR/settings-sidebar.png"
 take_shot "$SETTINGS_SHOT"
 if ! ocr_expect "$SETTINGS_SHOT" "Controller Base URL"; then
@@ -999,29 +976,28 @@ fi
 sleep 0.3
 MAIN_AFTER_HELP="$(main_window_bounds)"
 MAIN_AFTER_HELP_Y="$(echo "$MAIN_AFTER_HELP" | awk -F'|' '{print $3}')"
-python3 - <<PY || fail "help moved main panel"
-import sys
-sys.exit(0 if abs(float("$MAIN_AFTER_HELP_Y") - float("$MAIN_BEFORE_Y")) < 0.5 else 1)
-PY
+awk -v ay="$MAIN_AFTER_HELP_Y" -v by="$MAIN_BEFORE_Y" \
+  'BEGIN { d = ay - by; if (d < 0) d = -d; exit (d < 0.5 ? 0 : 1) }' \
+  || fail "help moved main panel"
 pass "help side panel"
 
 MAIN_BOUNDS_NOW="$(main_window_bounds)"
-OUTSIDE_CLICK_POINT="$(python3 - <<PY
-import sys
-parts = "${MAIN_BOUNDS_NOW}".split("|")
-if len(parts) < 5:
-    print("400|400")
-    raise SystemExit(0)
-x = float(parts[1]); y = float(parts[2]); w = float(parts[3]); h = float(parts[4])
-target_x = int(x + w + 24)
-target_y = int(y + (h / 2))
-if target_x < 120:
-    target_x = int(max(120, x - 24))
-if target_y < 120:
-    target_y = int(max(120, y + h - 24))
-print(f"{target_x}|{target_y}")
-PY
-)"
+OUTSIDE_CLICK_POINT="$(awk -F'|' -v bounds="$MAIN_BOUNDS_NOW" 'BEGIN {
+  n = split(bounds, parts, "|")
+  if (n < 5) { print "400|400"; exit }
+  x = parts[2] + 0; y = parts[3] + 0; w = parts[4] + 0; h = parts[5] + 0
+  target_x = int(x + w + 24)
+  target_y = int(y + (h / 2))
+  if (target_x < 120) {
+    left = int(x - 24)
+    target_x = (left > 120 ? left : 120)
+  }
+  if (target_y < 120) {
+    bottom = int(y + h - 24)
+    target_y = (bottom > 120 ? bottom : 120)
+  }
+  printf "%d|%d\n", target_x, target_y
+}')"
 OUTSIDE_CLICK_X="$(echo "$OUTSIDE_CLICK_POINT" | awk -F'|' '{print $1}')"
 OUTSIDE_CLICK_Y="$(echo "$OUTSIDE_CLICK_POINT" | awk -F'|' '{print $2}')"
 "$WORK_DIR/msw_click" "$OUTSIDE_CLICK_X" "$OUTSIDE_CLICK_Y"

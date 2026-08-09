@@ -46,7 +46,6 @@ With TTL=2.0s:
 ## Tests
 
 ```text
-python3 -m unittest discover -s RemoteAgent/tests -p 'test_agent.py' -k Listening -k Inventory -v
-Ran 19 tests in 0.069s
-OK
+# Historical — Python RemoteAgent/tests suite removed.
+# Coverage moved to: swift test --filter RemoteAgentConformanceTests
 ```
