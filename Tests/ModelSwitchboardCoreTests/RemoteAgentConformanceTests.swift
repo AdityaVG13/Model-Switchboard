@@ -298,4 +298,36 @@ struct RemoteAgentConformanceTests {
             _ = try await client.activate(profile: "conflict-a")
         }
     }
+
+    @Test func hidesProfilesWhoseModelPathIsGone() async throws {
+        guard FileManager.default.isReadableFile(atPath: Self.agentScript.path),
+              FileManager.default.isReadableFile(atPath: Self.discoveryScript.path)
+        else {
+            Issue.record("RemoteAgent python modules missing from repo checkout")
+            return
+        }
+
+        let missingPath = "/tmp/msw-does-not-exist-\(UUID().uuidString).gguf"
+        let stale = """
+        DISPLAY_NAME="Stale Missing Weights"
+        REQUEST_MODEL=stale-missing-model
+        PORT=\(AgentHarness.freePort())
+        MODEL_PATH=\(missingPath)
+        START_COMMAND="exec sleep 30"
+        HEALTHCHECK_MODE=disabled
+        """
+        let harness = try AgentHarness(extraProfiles: [
+            (name: "stale-missing", body: stale),
+        ])
+        defer { harness.shutdown() }
+        let client = try harness.makeClient()
+        try await Self.waitForAgent(client, expectedProfiles: 1)
+
+        let status = try await client.fetchStatus()
+        let names = Set(status.statuses.map(\.profile))
+        #expect(names.contains("conformance-stub"))
+        #expect(!names.contains("stale-missing"))
+        let stub = try #require(status.statuses.first { $0.profile == "conformance-stub" })
+        #expect(stub.launchable != false)
+    }
 }

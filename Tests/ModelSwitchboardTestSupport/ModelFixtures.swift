@@ -19,7 +19,9 @@ public enum ModelFixtures {
         vramMB: Double? = nil,
         command: String? = nil,
         logPath: String = "/tmp/qwen.log",
-        source: String? = nil
+        source: String? = nil,
+        launchable: Bool? = nil,
+        missingArtifacts: [String]? = nil
     ) -> ModelProfileStatus {
         ModelProfileStatus(
             profile: profile,
@@ -41,7 +43,9 @@ public enum ModelFixtures {
             vramMB: running ? vramMB : nil,
             command: command,
             logPath: logPath,
-            source: source
+            source: source,
+            launchable: launchable,
+            missingArtifacts: missingArtifacts
         )
     }
 

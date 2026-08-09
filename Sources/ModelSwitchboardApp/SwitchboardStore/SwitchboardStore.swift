@@ -145,7 +145,7 @@ final class SwitchboardStore {
         // during a SwiftUI body evaluation does not invalidate the in-flight render.
         let statuses = self.statuses
         if let sortedStatusesCache { return sortedStatusesCache }
-        let sorted = statuses.sortedForDisplay()
+        let sorted = statuses.filter(\.isBoardVisible).sortedForDisplay()
         sortedStatusesCache = sorted
         return sorted
     }

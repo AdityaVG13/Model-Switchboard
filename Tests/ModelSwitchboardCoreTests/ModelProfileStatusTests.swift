@@ -114,3 +114,48 @@ import ModelSwitchboardTestSupport
     #expect(ModelFixtures.profileStatus(host: "127.0.0.1").usesLoopbackEndpoint)
     #expect(!ModelFixtures.profileStatus(host: "10.0.0.8", baseURL: "http://10.0.0.8:8081/v1").usesLoopbackEndpoint)
 }
+
+
+@Test func boardHidesUnlaunchableStoppedProfiles() {
+    let hidden = ModelFixtures.profileStatus(
+        profile: "gone",
+        pid: nil,
+        running: false,
+        ready: false,
+        rssMB: nil,
+        launchable: false,
+        missingArtifacts: ["/tmp/msw-does-not-exist.gguf"]
+    )
+    #expect(!hidden.isBoardVisible)
+
+    let live = ModelFixtures.profileStatus(
+        profile: "gone-but-running",
+        pid: 7,
+        running: true,
+        ready: false,
+        rssMB: nil,
+        launchable: false,
+        missingArtifacts: ["/tmp/msw-does-not-exist.gguf"]
+    )
+    #expect(live.isBoardVisible)
+
+    let ready = ModelFixtures.profileStatus(
+        profile: "gone-but-ready",
+        pid: nil,
+        running: false,
+        ready: true,
+        rssMB: nil,
+        launchable: false,
+        missingArtifacts: ["/tmp/msw-does-not-exist.gguf"]
+    )
+    #expect(ready.isBoardVisible)
+
+    let unspecified = ModelFixtures.profileStatus(
+        profile: "legacy",
+        pid: nil,
+        running: false,
+        ready: false,
+        rssMB: nil
+    )
+    #expect(unspecified.isBoardVisible)
+}
