@@ -116,6 +116,36 @@ import ModelSwitchboardTestSupport
 }
 
 
+
+@Test func boardShowsUnlaunchableLaunchFolderClaims() {
+    let claim = ModelFixtures.profileStatus(
+        profile: "port-8027",
+        pid: nil,
+        running: false,
+        ready: false,
+        rssMB: nil,
+        source: "claim",
+        launchable: false,
+        missingArtifacts: ["/data/models/missing.gguf"]
+    )
+    #expect(claim.isBoardVisible)
+    #expect(claim.isLaunchFolderClaim)
+
+    let tagged = ModelFixtures.profileStatus(
+        profile: "port-8081",
+        runtimeTags: ["claimed", "launch-folder"],
+        pid: nil,
+        running: false,
+        ready: false,
+        rssMB: nil,
+        source: "profile",
+        launchable: false,
+        missingArtifacts: ["/data/models/missing"]
+    )
+    #expect(tagged.isBoardVisible)
+    #expect(tagged.isLaunchFolderClaim)
+}
+
 @Test func boardHidesUnlaunchableStoppedProfiles() {
     let hidden = ModelFixtures.profileStatus(
         profile: "gone",

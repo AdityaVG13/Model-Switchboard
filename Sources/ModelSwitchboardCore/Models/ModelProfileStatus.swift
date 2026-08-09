@@ -30,12 +30,31 @@ public struct ModelProfileStatus: Codable, Identifiable, Equatable, Sendable {
 
     public var id: String { profile }
 
-    /// Board rows: hide stale configs unless the endpoint is still live.
+    /// Board rows: hide stale flat configs unless the endpoint is still live.
+    /// Launch-folder / port claims stay visible so operators can see runners
+    /// whose weights are temporarily missing.
     public var isBoardVisible: Bool {
         if launchable == false {
+            if isLaunchFolderClaim {
+                return true
+            }
             return running || ready
         }
         return true
+    }
+
+    /// True for claimed port folders (`port-N`, claim source, or launch-folder tags).
+    public var isLaunchFolderClaim: Bool {
+        if source == "claim" {
+            return true
+        }
+        if let runtimeTags {
+            let tags = Set(runtimeTags.map { $0.lowercased() })
+            if tags.contains("claimed") || tags.contains("launch-folder") {
+                return true
+            }
+        }
+        return profile.hasPrefix("port-")
     }
 
     public init(

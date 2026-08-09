@@ -28,11 +28,32 @@ import ModelSwitchboardTestSupport
         ModelFixtures.profileStatus(profile: "discovered-9000", running: true, ready: true),
     ])
 
+    #expect(counts.total == 2)
+    #expect(counts.running == 2)
+    #expect(counts.ready == 2)
+}
+
+@Test func profileRuntimeCountsIncludePortClaimsWithoutSource() {
+    let counts = ProfileRuntimeCounts(statuses: [
+        ModelFixtures.profileStatus(profile: "port-8027", running: true, ready: false),
+    ])
+
+    #expect(counts.total == 1)
+    #expect(counts.running == 1)
+    #expect(counts.ready == 0)
+}
+
+@Test func profileRuntimeCountsTreatClaimSourceAsFileBacked() {
+    let counts = ProfileRuntimeCounts(statuses: [
+        ModelFixtures.profileStatus(profile: "port-8000", running: true, ready: true, source: "claim"),
+        ModelFixtures.profileStatus(profile: "port-9000", running: true, ready: true, source: "discovery"),
+        ModelFixtures.profileStatus(profile: "x", running: false, ready: false, source: "listening"),
+    ])
+
     #expect(counts.total == 1)
     #expect(counts.running == 1)
     #expect(counts.ready == 1)
 }
-
 
 @Test func profileRuntimeCountsPreferSourceOverName() {
     let counts = ProfileRuntimeCounts(statuses: [
@@ -46,16 +67,46 @@ import ModelSwitchboardTestSupport
     #expect(counts.ready == 1)
 }
 
-@Test func dashboardSummaryPrefersAgentProfileReadyCount() {
+@Test func dashboardSummaryIgnoresAgentProfileCountOverrides() {
     let payload = ModelFixtures.statusPayload(
         statuses: [
             ModelFixtures.profileStatus(profile: "llama", running: true, ready: true, source: "profile"),
             ModelFixtures.profileStatus(profile: "discovered-9", running: true, ready: true, source: "discovery"),
         ],
-        profileTotalCount: 1,
-        profileReadyCount: 1
+        profileTotalCount: 99,
+        profileReadyCount: 99
     )
     let summary = DashboardSummary(payload: payload)
     #expect(summary.totalProfiles == 1)
     #expect(summary.readyProfiles == 1)
+}
+
+@Test func profileRuntimeCountsMatchBoardVisibility() {
+    let counts = ProfileRuntimeCounts(statuses: [
+        ModelFixtures.profileStatus(
+            profile: "stale-flat",
+            running: false,
+            ready: false,
+            source: "profile",
+            launchable: false,
+            missingArtifacts: ["/tmp/gone.gguf"]
+        ),
+        ModelFixtures.profileStatus(
+            profile: "port-8027",
+            running: false,
+            ready: false,
+            source: "claim",
+            launchable: false,
+            missingArtifacts: ["/tmp/gone.gguf"]
+        ),
+        ModelFixtures.profileStatus(
+            profile: "alive",
+            running: true,
+            ready: true,
+            source: "profile"
+        ),
+    ])
+    #expect(counts.total == 2)
+    #expect(counts.running == 1)
+    #expect(counts.ready == 1)
 }

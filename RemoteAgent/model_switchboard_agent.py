@@ -678,6 +678,32 @@ class ProfileRepository:
             except (AgentError, OSError, ValueError, json.JSONDecodeError) as error:
                 # One bad file must not take down /api/status for the whole host.
                 sys.stderr.write(f"[profiles] skipping {file.name}: {error}\n")
+        # One-level nested port-claim folders (e.g. <dir>/8027/flags.env → port-8027).
+        # Flat files win on name collision via setdefault. Discovery is imported later
+        # in this module; load() runs after init so scan/profile_from_claim exist.
+        try:
+            directory = self.directory.expanduser().resolve()
+        except OSError:
+            directory = self.directory
+        claims = scan_port_claim_directories(
+            roots=[self.directory],
+            agent_root=None,
+            listeners=[],
+        )
+        for claim in claims:
+            claim_path = Path(str(claim.get("path") or ""))
+            try:
+                claim_path.resolve().relative_to(directory)
+            except (ValueError, OSError):
+                continue
+            try:
+                profile = profile_from_claim(claim)
+            except (AgentError, OSError, TypeError, ValueError) as error:
+                sys.stderr.write(
+                    f"[profiles] skipping claim {claim.get('path')}: {error}\n"
+                )
+                continue
+            profiles.setdefault(profile.name, profile)
         return profiles
 
     def profile(self, name: str) -> Profile:
@@ -1369,6 +1395,7 @@ from discovery import (  # noqa: E402  — after Profile/process helpers + path 
     PORT_CLAIM_DIR_RE,
     PORT_CLAIM_MARKERS,
     SKIP_LISTEN_PORTS,
+    _configured_scan_roots,
     _decode_proc_net_ip,
     _linux_proc_listening_endpoints,
     _list_listening_tcp_uncached,
@@ -1437,27 +1464,95 @@ def _directory_has_profile_files(directory: Path) -> bool:
     return False
 
 
+def _directory_has_port_claims(directory: Path) -> bool:
+    """True when directory has a one-level port-claim child (flags.env / launch.sh / ...)."""
+    if not directory.is_dir():
+        return False
+    try:
+        for path in directory.iterdir():
+            try:
+                if not path.is_dir() or not PORT_CLAIM_DIR_RE.fullmatch(path.name):
+                    continue
+            except OSError:
+                continue
+            if any((path / marker).is_file() for marker in PORT_CLAIM_MARKERS):
+                return True
+    except OSError:
+        return False
+    return False
+
+
+def _directory_has_loadable_profiles(directory: Path) -> bool:
+    return _directory_has_profile_files(directory) or _directory_has_port_claims(directory)
+
+
+def _profiles_dir_from_scan_roots(root: Path) -> Path | None:
+    """First configured scan_roots entry that already holds port-claim markers."""
+    for scan_root in _configured_scan_roots(root):
+        try:
+            resolved = scan_root.expanduser().resolve()
+        except OSError:
+            continue
+        if _directory_has_port_claims(resolved):
+            return resolved
+    return None
+
+
+
+def _status_is_launch_folder_claim(item: dict[str, Any]) -> bool:
+    """True for port-claim / launch-folder rows (keep visible when weights missing)."""
+    tags = item.get("runtime_tags") or []
+    if isinstance(tags, str):
+        tags = [part.strip() for part in tags.split(",") if part.strip()]
+    tag_set = {str(tag).strip().lower() for tag in tags}
+    if tag_set & {"claimed", "launch-folder"}:
+        return True
+    if item.get("source") == "claim":
+        return True
+    profile = str(item.get("profile") or "")
+    return profile.startswith("port-")
+
+
 def resolve_profiles_directory(
     root: Path,
     explicit: Path | str | None = None,
 ) -> Path:
     """Pick the profiles folder without inventing profile contents.
 
-    Order: CLI/explicit → env → config.json → existing <root>/model-profiles
-    (legacy installs with real profiles) → ~/model-profiles.
+    Order: CLI/explicit → env → config.json profiles_dir (when it has loadable
+    flat profiles or port-claim folders) → existing <root>/model-profiles
+    (legacy installs with real profiles) → ~/model-profiles (when populated) →
+    first configured scan_roots entry with port-claim markers → configured
+    profiles_dir if set but empty → ~/model-profiles.
     """
     if explicit is not None:
         return Path(explicit).expanduser().resolve()
     env = (os.environ.get(PROFILES_DIR_ENV) or "").strip()
     if env:
         return Path(env).expanduser().resolve()
-    configured = load_agent_config(root).get("profiles_dir")
-    if isinstance(configured, str) and configured.strip():
-        return Path(configured).expanduser().resolve()
+
+    configured: Path | None = None
+    configured_raw = load_agent_config(root).get("profiles_dir")
+    if isinstance(configured_raw, str) and configured_raw.strip():
+        configured = Path(configured_raw).expanduser().resolve()
+        if _directory_has_loadable_profiles(configured):
+            return configured
+
     legacy = root.expanduser() / "model-profiles"
-    if _directory_has_profile_files(legacy):
+    if _directory_has_loadable_profiles(legacy):
         return legacy.resolve()
-    return preferred_profiles_directory().resolve()
+
+    preferred = preferred_profiles_directory().resolve()
+    if _directory_has_loadable_profiles(preferred):
+        return preferred
+
+    scan_hit = _profiles_dir_from_scan_roots(root)
+    if scan_hit is not None:
+        return scan_hit
+
+    if configured is not None:
+        return configured
+    return preferred
 
 
 def _peek_profile_keys(path: Path) -> set[str]:
@@ -1813,14 +1908,16 @@ class AgentService:
             listening: list[dict[str, Any]] = []
             # Full discovery only when listing everything — targeted stays profile-only.
             if selected is None:
-                # Drop stale file-backed configs whose weights are gone and that
-                # are not currently answering (still show live endpoints).
+                # Drop stale flat configs whose weights are gone and that are not
+                # currently answering. Keep launch-folder / claimed port profiles
+                # visible (missing weights still show as not launchable).
                 statuses = [
                     item
                     for item in statuses
                     if item.get("launchable", True)
                     or item.get("running")
                     or item.get("ready")
+                    or _status_is_launch_folder_claim(item)
                 ]
                 # Reuse the same listeners snapshot (no second inventory).
                 start_cmds = [
@@ -1853,23 +1950,11 @@ class AgentService:
                     for item in listening
                     if str(item.get("port") or "").isdigit()
                 }
-                listening_ports = {
-                    int(item["port"])
-                    for item in listeners
-                    if str(item.get("port") or "").isdigit()
-                }
 
                 # Claimed port folders not already represented by a profile.
                 for claim in claims:
                     port = int(claim["port"])
                     if port in covered_ports:
-                        continue
-                    flags = claim.get("flags") if isinstance(claim.get("flags"), dict) else {}
-                    claim_values = {str(k): str(v) for k, v in flags.items()}
-                    if "MODEL" in claim_values and "MODEL_PATH" not in claim_values:
-                        claim_values["MODEL_PATH"] = claim_values["MODEL"]
-                    claim_missing = missing_local_model_artifacts(claim_values)
-                    if claim_missing and port not in listening_ports:
                         continue
                     live = listening_by_port.get(port)
                     merged = dict(claim)
@@ -1929,7 +2014,12 @@ class AgentService:
             span.tags["n_claims"] = len(claims)
             span.tags["n_live"] = len(listening)
             span.tags["full_discovery"] = selected is None
-            file_backed = [item for item in statuses if item.get("source") == "profile"]
+            file_backed = [
+                item
+                for item in statuses
+                if item.get("source") in ("profile", "claim")
+                or _status_is_launch_folder_claim(item)
+            ]
             return {
                 "statuses": statuses,
                 "benchmark": benchmark,

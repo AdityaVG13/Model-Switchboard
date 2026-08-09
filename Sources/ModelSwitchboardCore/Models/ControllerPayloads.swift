@@ -111,13 +111,10 @@ public struct DashboardSummary: Equatable, Sendable {
     public let benchmarkSuite: String?
 
     public init(payload: ControllerStatusPayload) {
-        let counts = ProfileRuntimeCounts(statuses: payload.statuses)
+        // Always derive Ready N/M from board-visible statuses. Agent
+        // profile_*_count fields are informational and must not diverge the UI.
         self.init(
-            counts: ProfileRuntimeCounts(
-                total: payload.profileTotalCount ?? counts.total,
-                running: counts.running,
-                ready: payload.profileReadyCount ?? counts.ready
-            ),
+            counts: ProfileRuntimeCounts(statuses: payload.statuses),
             benchmark: payload.benchmark
         )
     }

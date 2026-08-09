@@ -661,7 +661,7 @@ def scan_port_claim_directories(
       • explicit `roots` argument
       • MODEL_SWITCHBOARD_SCAN_ROOTS / config.json scan_roots
       • paths embedded in live process commands / profile START_COMMANDs
-      • $HOME shallow fallback only when primary roots yield no claims
+      • $HOME shallow claims always unioned (until limit)
         (developer homes are huge -- avoid re-walking when primary already hit)
 
     Dirent work is bounded within one call: remaining-depth visit map skips
@@ -821,8 +821,9 @@ def scan_port_claim_directories(
         walk(root, 0, max_depth)
         if len(claims) >= limit:
             break
-    # $HOME is a costly shallow fallback -- only when primary found nothing.
-    if not claims:
+    # Always union shallow $HOME claims. Primary scan_roots can be non-empty
+    # while still missing user-owned port folders under $HOME.
+    if len(claims) < limit:
         for root in home_roots:
             walk(root, 0, home_depth)
             if len(claims) >= limit:
@@ -849,7 +850,14 @@ def discover_live_model_endpoints(
 
     self_pid = os.getpid()
     agent_ports = {DEFAULT_PORT}
-    for listener in (listeners if listeners is not None else list_listening_tcp()):
+    inventory = list(listeners if listeners is not None else list_listening_tcp())
+
+    def _listener_priority(item: dict[str, Any]) -> tuple[int, int]:
+        port = int(item["port"])
+        claimed = 0 if (port in profile_ports or port in claim_ports) else 1
+        return (claimed, port)
+
+    for listener in sorted(inventory, key=_listener_priority):
         port = int(listener["port"])
         if port in SKIP_LISTEN_PORTS:
             continue
@@ -881,6 +889,7 @@ def discover_live_model_endpoints(
             "model_ids": [],
             "base_url": f"http://127.0.0.1:{port}/v1",
         }
+        # Claimed / profile ports spend budget first (sorted above).
         if probes_left > 0 and port_is_listening(str(port)):
             probes_left -= 1
             probe = probe_model_endpoint(port)

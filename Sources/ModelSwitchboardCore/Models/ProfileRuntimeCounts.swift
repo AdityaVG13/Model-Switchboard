@@ -12,7 +12,8 @@ public struct ProfileRuntimeCounts: Equatable, Sendable {
     }
 
     public init(statuses: [ModelProfileStatus]) {
-        let fileBacked = statuses.filter { !$0.isSyntheticDiscoveryProfile }
+        // Board census: same set as SwitchboardStore sortedStatuses (visible file-backed rows).
+        let fileBacked = statuses.filter { !$0.isSyntheticDiscoveryProfile && $0.isBoardVisible }
         total = fileBacked.count
         var runningCount = 0
         var readyCount = 0
@@ -26,18 +27,18 @@ public struct ProfileRuntimeCounts: Equatable, Sendable {
 }
 
 extension ModelProfileStatus {
-    /// True for claim/discovery rows (not file-backed profiles).
+    /// True for discovery/listening rows (not file-backed profiles or port claims).
     public var isSyntheticDiscoveryProfile: Bool {
         if let source {
             switch source {
-            case "profile":
+            case "profile", "claim":
                 return false
-            case "claim", "discovery", "listening":
+            case "discovery", "listening":
                 return true
             default:
                 break
             }
         }
-        return profile.hasPrefix("port-") || profile.hasPrefix("discovered-")
+        return profile.hasPrefix("discovered-")
     }
 }
