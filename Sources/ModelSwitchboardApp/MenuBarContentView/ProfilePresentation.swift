@@ -295,22 +295,13 @@ struct ActiveProfileHeroView: View {
     }
 
     private var statusLabel: String {
-        switch context {
-        case .local:
-            return ProfileHeroStatusCopy.label(
-                ready: profile.ready,
-                running: profile.running,
-                pending: store.pendingLabel(for: profile.profile),
-                gatewayName: nil
-            )
-        case .remote(let name):
-            return ProfileHeroStatusCopy.label(
-                ready: profile.ready,
-                running: profile.running,
-                pending: store.pendingLabel(for: profile.profile),
-                gatewayName: name
-            )
-        }
+        let gatewayName: String? = if case .remote(let name) = context { name } else { nil }
+        return ProfileHeroStatusCopy.label(
+            ready: profile.ready,
+            running: profile.running,
+            pending: store.pendingLabel(for: profile.profile),
+            gatewayName: gatewayName
+        )
     }
 
     private var subtitle: String {

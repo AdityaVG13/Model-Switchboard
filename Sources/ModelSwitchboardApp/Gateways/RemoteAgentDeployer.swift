@@ -71,18 +71,17 @@ actor RemoteAgentDeployer {
 
         // 1. Push discovery + agent into the install root (installer prefers
         //    pre-pushed modules over downloading anything).
-        _ = try await runSSH(
-            config: config,
-            step: "push discovery",
-            remoteCommand: "mkdir -p ~/\(Self.remoteRoot) && cat > ~/\(Self.remoteRoot)/discovery.py",
-            stdin: discoveryData
-        )
-        _ = try await runSSH(
-            config: config,
-            step: "push agent",
-            remoteCommand: "mkdir -p ~/\(Self.remoteRoot) && cat > ~/\(Self.remoteRoot)/model_switchboard_agent.py",
-            stdin: agentData
-        )
+        for (step, file, data) in [
+            ("push discovery", "discovery.py", discoveryData),
+            ("push agent", "model_switchboard_agent.py", agentData),
+        ] {
+            _ = try await runSSH(
+                config: config,
+                step: step,
+                remoteCommand: "mkdir -p ~/\(Self.remoteRoot) && cat > ~/\(Self.remoteRoot)/\(file)",
+                stdin: data
+            )
+        }
 
         // 2. Run the installer from stdin: no files land anywhere except the
         //    agent's own install root.

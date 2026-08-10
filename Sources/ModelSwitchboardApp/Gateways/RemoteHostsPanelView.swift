@@ -123,7 +123,7 @@ struct RemoteHostsPanelView: View {
                         await metricsMonitor.pollOnce()
                     }
                 } label: {
-                    Text(connectionBadge(runtime))
+                    Text(GatewayConnectionBadge.text(for: runtime))
                         .font(.system(size: 9, weight: .semibold))
                         .kerning(0.4)
                         .foregroundStyle(badgeForeground(runtime))
@@ -133,7 +133,7 @@ struct RemoteHostsPanelView: View {
                         .contentShape(Capsule())
                 }
                 .buttonStyle(QuietCraftPressStyle())
-                .disabled(isForceUpdating(runtime))
+                .disabled(runtime.forceUpdatePhase.isUpdating)
                 .help(GatewayConnectionBadge.help(for: runtime))
                 .accessibilityLabel("Force update " + runtime.name)
                 .accessibilityHint(GatewayConnectionBadge.help(for: runtime))
@@ -169,23 +169,25 @@ struct RemoteHostsPanelView: View {
                 HStack(spacing: 6) {
                     metricTile(
                         label: "CPU",
-                        value: percentLabel(metrics?.cpuPercent),
+                        value: HostMetricsPresentation.percentLabel(metrics?.cpuPercent),
                         detail: nil
                     )
                     metricTile(
                         label: "RAM",
-                        value: percentLabel(metrics?.memory?.percent),
+                        value: HostMetricsPresentation.percentLabel(metrics?.memory?.percent),
                         detail: memoryDetail(metrics?.memory)
                     )
                     metricTile(
                         label: "GPU",
-                        value: percentLabel(primaryGPU?.utilPercent),
+                        value: HostMetricsPresentation.percentLabel(primaryGPU?.utilPercent),
                         detail: primaryGPU?.tempC.map { String(format: "%.0f°C", $0) }
                     )
                     metricTile(
                         label: "VRAM",
-                        value: vramPercentLabel(primaryGPU),
-                        detail: vramDetail(primaryGPU)
+                        value: HostMetricsPresentation.percentLabel(
+                            HostMetricsPresentation.hostVRAMPercent(metrics)
+                        ),
+                        detail: HostMetricsPresentation.hostVRAMUsedTotalLabel(metrics)
                     )
                 }
 
@@ -230,7 +232,11 @@ struct RemoteHostsPanelView: View {
                                 .foregroundStyle(theme.label)
                                 .lineLimit(1)
                             Spacer(minLength: 0)
-                            Text(modelMemoryLabel(status, metrics: metrics))
+                            Text(HostMetricsPresentation.profileMemoryLabel(
+                                status: status,
+                                metrics: metrics,
+                                isRunning: true
+                            ) ?? "— · :" + status.port)
                                 .font(.system(size: 10.5, design: .monospaced))
                                 .foregroundStyle(theme.sub)
                         }
@@ -280,25 +286,8 @@ struct RemoteHostsPanelView: View {
         return "\(label) \(value)"
     }
 
-    private func percentLabel(_ value: Double?) -> String {
-        guard let value else { return "—" }
-        return "\(Int(value.rounded()))%"
-    }
-
     private func memoryDetail(_ memory: HostMemoryMetrics?) -> String? {
         guard let used = memory?.usedMB, let total = memory?.totalMB, total > 0 else { return nil }
-        return String(format: "%.0f/%.0f GB", used / 1024, total / 1024)
-    }
-
-    private func vramPercentLabel(_ gpu: HostGPUMetrics?) -> String {
-        guard let used = gpu?.vramUsedMB, let total = gpu?.vramTotalMB, total > 0 else {
-            return "—"
-        }
-        return "\(Int(((used / total) * 100).rounded()))%"
-    }
-
-    private func vramDetail(_ gpu: HostGPUMetrics?) -> String? {
-        guard let used = gpu?.vramUsedMB, let total = gpu?.vramTotalMB, total > 0 else { return nil }
         return String(format: "%.0f/%.0f GB", used / 1024, total / 1024)
     }
 
@@ -312,20 +301,6 @@ struct RemoteHostsPanelView: View {
             parts.append(String(format: "%.0f/%.0f GB", used / 1024, total / 1024))
         }
         return parts.joined(separator: " · ")
-    }
-
-    private func modelMemoryLabel(
-        _ status: ModelProfileStatus,
-        metrics: HostMetricsPayload?
-    ) -> String {
-        if let label = HostMetricsPresentation.profileMemoryLabel(
-            status: status,
-            metrics: metrics,
-            isRunning: true
-        ) {
-            return label
-        }
-        return "— · :" + status.port
     }
 
     private func commitRename(id: String) {
@@ -353,12 +328,9 @@ struct RemoteHostsPanelView: View {
         }
     }
 
-    /// Shared with Settings — keep a single install entry point for operators.
-    private var installOneLiner: String { GatewaySettingsSection.installOneLiner }
-
     private var copyInstallCommandRow: some View {
         HStack(spacing: 8) {
-            Text(installOneLiner)
+            Text(GatewaySettingsSection.installOneLiner)
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(theme.faint)
                 .lineLimit(2)
@@ -367,7 +339,7 @@ struct RemoteHostsPanelView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             Button {
                 NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(installOneLiner, forType: .string)
+                NSPasteboard.general.setString(GatewaySettingsSection.installOneLiner, forType: .string)
                 didCopyInstallCommand = true
                 Task { @MainActor in
                     try? await Task.sleep(for: .seconds(2))
@@ -395,15 +367,6 @@ struct RemoteHostsPanelView: View {
             return host
         }
         return runtime.config.endpointSummary
-    }
-
-    private func connectionBadge(_ runtime: GatewayRuntime) -> String {
-        GatewayConnectionBadge.text(for: runtime)
-    }
-
-    private func isForceUpdating(_ runtime: GatewayRuntime) -> Bool {
-        if case .updating = runtime.forceUpdatePhase { return true }
-        return false
     }
 
     private func badgeForeground(_ runtime: GatewayRuntime) -> Color {

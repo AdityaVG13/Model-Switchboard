@@ -85,7 +85,12 @@ final class RemoteHostMetricsMonitor {
                         id: runtime.id,
                         previous: previous,
                         client: nil,
-                        immediateError: tunnelMessage(runtime.tunnelState),
+                        immediateError: switch runtime.tunnelState {
+                        case .idle: "SSH tunnel is off"
+                        case .connecting: "SSH tunnel connecting…"
+                        case .established: ""
+                        case .failed(let message): message
+                        },
                         preserveUpdatedAt: true
                     )
                 )
@@ -199,15 +204,6 @@ final class RemoteHostMetricsMonitor {
             entry.updatedAt = Date()
             // Keep last good metrics when a transient poll fails.
             return (target.id, entry)
-        }
-    }
-
-    private func tunnelMessage(_ state: SSHTunnelManager.State) -> String {
-        switch state {
-        case .idle: return "SSH tunnel is off"
-        case .connecting: return "SSH tunnel connecting…"
-        case .established: return ""
-        case .failed(let message): return message
         }
     }
 }

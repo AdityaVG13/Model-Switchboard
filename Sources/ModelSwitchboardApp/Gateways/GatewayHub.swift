@@ -8,6 +8,10 @@ enum GatewayForceUpdatePhase: Equatable, Sendable {
     case idle
     case updating(String)
     case failed(String)
+
+    var isUpdating: Bool {
+        if case .updating = self { true } else { false }
+    }
 }
 
 /// One gateway's live state: its store, and for SSH gateways the tunnel.
@@ -391,7 +395,7 @@ final class GatewayHub {
     /// hard-refresh status so stale ports/models cannot linger on the Mac UI.
     func forceUpdateGateway(id: String) async {
         guard let runtime = remoteRuntimes.first(where: { $0.id == id }) else { return }
-        if case .updating = runtime.forceUpdatePhase { return }
+        if runtime.forceUpdatePhase.isUpdating { return }
         runtime.forceUpdateTask?.cancel()
         let task = Task { [weak self] in
             guard let self else { return }
