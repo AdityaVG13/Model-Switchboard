@@ -1,34 +1,17 @@
 import Testing
 @testable import ModelSwitchboardApp
 
-@Test func profileHeroStatusCopyLocalWarmingWhenRunningNotReady() {
-    #expect(
-        ProfileHeroStatusCopy.label(ready: false, running: true, pending: nil, gatewayName: nil)
-            == "WARMING"
-    )
-}
-
-@Test func profileHeroStatusCopyRemoteActive() {
-    #expect(
-        ProfileHeroStatusCopy.label(ready: true, running: true, pending: nil, gatewayName: "Spark")
-            == "ACTIVE ON SPARK"
-    )
-}
-
-@Test func profileHeroStatusCopyRemoteStartingWhenNotRunning() {
-    #expect(
-        ProfileHeroStatusCopy.label(ready: false, running: false, pending: nil, gatewayName: "Spark")
-            == "STARTING ON SPARK"
-    )
-}
-
-@Test func profileHeroStatusCopyPrefersPending() {
-    #expect(
-        ProfileHeroStatusCopy.label(
-            ready: true,
-            running: true,
-            pending: "STARTING",
-            gatewayName: "Spark"
-        ) == "STARTING ON SPARK"
-    )
+@Test func profileHeroStatusCopy() {
+    let cases: [(ready: Bool, running: Bool, pending: String?, gateway: String?, expected: String)] = [
+        (false, true, nil, nil, "WARMING"),
+        (true, true, nil, "Spark", "ACTIVE ON SPARK"),
+        (false, false, nil, "Spark", "STARTING ON SPARK"),
+        (true, true, "STARTING", "Spark", "STARTING ON SPARK"),
+    ]
+    for value in cases {
+        #expect(ProfileHeroStatusCopy.label(
+            ready: value.ready, running: value.running,
+            pending: value.pending, gatewayName: value.gateway
+        ) == value.expected)
+    }
 }

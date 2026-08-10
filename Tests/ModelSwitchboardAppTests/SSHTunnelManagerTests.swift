@@ -40,30 +40,25 @@ private func waitFor(
 }
 
 @Test func backoffDelayGrowsExponentiallyAndCaps() {
-    #expect(SSHTunnelManager.backoffDelay(afterFailures: 1, jitter: 1.0) == 1)
-    #expect(SSHTunnelManager.backoffDelay(afterFailures: 2, jitter: 1.0) == 2)
-    #expect(SSHTunnelManager.backoffDelay(afterFailures: 4, jitter: 1.0) == 8)
-    #expect(SSHTunnelManager.backoffDelay(afterFailures: 7, jitter: 1.0) == 60)
-    #expect(SSHTunnelManager.backoffDelay(afterFailures: 50, jitter: 1.0) == 60)
-    #expect(SSHTunnelManager.backoffDelay(afterFailures: 50, jitter: 1.2) == 60)
+    for (failures, jitter, expected) in [
+        (1, 1.0, 1.0), (2, 1.0, 2.0), (4, 1.0, 8.0),
+        (7, 1.0, 60.0), (50, 1.0, 60.0), (50, 1.2, 60.0),
+    ] {
+        #expect(SSHTunnelManager.backoffDelay(afterFailures: failures, jitter: jitter) == expected)
+    }
 }
 
 @Test func stderrClassificationCoversCommonFailures() {
-    #expect(SSHTunnelManager.classifyFailure(
-        stderrLines: ["gpuadmin@spark: Permission denied (publickey,password)."]
-    ).contains("ssh-add"))
-    #expect(SSHTunnelManager.classifyFailure(
-        stderrLines: ["Host key verification failed."]
-    ).contains("Terminal"))
-    #expect(SSHTunnelManager.classifyFailure(
-        stderrLines: ["bind [127.0.0.1]:9000: Address already in use"]
-    ).contains("port is in use"))
-    #expect(SSHTunnelManager.classifyFailure(
-        stderrLines: ["ssh: connect to host spark port 22: Connection refused"]
-    ).contains("refused"))
-    #expect(SSHTunnelManager.classifyFailure(
-        stderrLines: ["ssh: Could not resolve hostname spark.nowhere"]
-    ).contains("resolve"))
+    let cases = [
+        ("gpuadmin@spark: Permission denied (publickey,password).", "ssh-add"),
+        ("Host key verification failed.", "Terminal"),
+        ("bind [127.0.0.1]:9000: Address already in use", "port is in use"),
+        ("ssh: connect to host spark port 22: Connection refused", "refused"),
+        ("ssh: Could not resolve hostname spark.nowhere", "resolve"),
+    ]
+    for (stderr, expected) in cases {
+        #expect(SSHTunnelManager.classifyFailure(stderrLines: [stderr]).contains(expected))
+    }
     #expect(SSHTunnelManager.classifyFailure(stderrLines: []).contains("exited"))
 }
 

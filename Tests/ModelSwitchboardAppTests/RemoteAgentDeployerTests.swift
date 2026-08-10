@@ -132,9 +132,6 @@ private func makeSources() throws -> (agent: URL, discovery: URL, installer: URL
     )
     let config = GatewayConfig(name: "Spark", kind: .ssh, sshUser: "gpuadmin", sshHost: "spark.local")
 
-    await #expect(throws: RemoteAgentDeployer.DeployError.self) {
-        _ = try await deployer.deploy(to: config)
-    }
     do {
         _ = try await deployer.deploy(to: config)
         Issue.record("expected deploy to fail")

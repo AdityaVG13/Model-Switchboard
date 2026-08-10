@@ -362,18 +362,6 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
 }
 
 @MainActor
-@Test func agentDeployConfigDerivesHostFromDirectBaseURL() {
-    let config = GatewayConfig(
-        name: "Spark",
-        kind: .direct,
-        baseURL: "http://dgx-spark.tail123.ts.net:8877"
-    )
-    let deploy = GatewayHub.agentDeployConfig(for: config)
-    #expect(deploy?.sshHost == "dgx-spark.tail123.ts.net")
-    #expect(deploy?.kind == .direct)
-}
-
-@MainActor
 @Test func forceUpdateUsesDerivedHostForDirectGateway() async throws {
     try await withTestDefaultsAsync { defaults, service in
         var deployHosts: [String] = []
@@ -407,6 +395,9 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
             baseURL: "http://dgx-spark.tail123.ts.net:8877",
             sshUser: "spark"
         )
+        let deploy = GatewayHub.agentDeployConfig(for: config)
+        #expect(deploy?.sshHost == "dgx-spark.tail123.ts.net")
+        #expect(deploy?.kind == .direct)
         hub.upsertGateway(config, token: "tok")
         defer { hub.removeGateway(id: config.id) }
 
