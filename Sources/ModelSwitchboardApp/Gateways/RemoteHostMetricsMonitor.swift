@@ -63,9 +63,6 @@ final class RemoteHostMetricsMonitor {
 
     func pollOnce() async {
         guard let hub else { return }
-        // Measurement-only; default off. MSW_PERF_PROFILE=1 or MSW_AGENT_PERF=1.
-        let perfOn = Self.perfProfileEnabled
-        let t0 = perfOn ? CFAbsoluteTimeGetCurrent() : 0
         let runtimes = hub.enabledRemoteRuntimes
         let activeIDs = Set(runtimes.map(\.id))
         // Drop metrics for removed gateways.
@@ -137,40 +134,6 @@ final class RemoteHostMetricsMonitor {
 
         for (id, entry) in results {
             entries[id] = entry
-        }
-
-        if perfOn {
-            let durationMs = (CFAbsoluteTimeGetCurrent() - t0) * 1000
-            Self.emitPerfSpan(
-                name: "RemoteHostMetricsMonitor.pollOnce",
-                durationMs: durationMs,
-                extra: "\"n_remotes\":\(runtimes.count)"
-            )
-        }
-    }
-
-    /// Env-gated profiling (measurement only). See Tests/artifacts/perf/.../INSTRUMENTATION.md
-    private static var perfProfileEnabled: Bool {
-        let env = ProcessInfo.processInfo.environment
-        for key in ["MSW_PERF_PROFILE", "MSW_AGENT_PERF"] {
-            if let raw = env[key]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
-               ["1", "true", "yes", "on"].contains(raw) {
-                return true
-            }
-        }
-        return false
-    }
-
-    private static func emitPerfSpan(name: String, durationMs: Double, extra: String = "") {
-        let extras = extra.isEmpty ? "" : ",\(extra)"
-        let line = String(
-            format: "perf.profile.span_summary {\"span\":\"%@\",\"duration_ms\":%.3f%@}\n",
-            name,
-            durationMs,
-            extras
-        )
-        if let data = line.data(using: .utf8) {
-            FileHandle.standardError.write(data)
         }
     }
 
