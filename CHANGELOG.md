@@ -5,22 +5,21 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 ### Fixed
 
-- Direct/Tailscale remote gateways no longer fail under App Transport Security (plain HTTP on private networks allowed in Info.plist); transport errors map to short dashboard copy.
-- Dashboard header ready-count and refresh now span all gateways, including remotes; footer STALE no longer fires when a remote feed is live.
-- Multi-gateway dashboard polish: no false "NOTHING RUNNING" when remotes are active; hide empty local MODELS when only remotes exist; online status dots for connected gateways.
+- Allowed private-network HTTP for Direct/Tailscale gateways under App Transport Security and shortened transport errors.
+- Made ready-count/refresh span all gateways; corrected remote-only empty/local/STALE states and added gateway online dots.
 - Remote agent stop now reaps zombie/defunct model processes, treats them as not running, force-kills after a longer vLLM-friendly wait, and exposes `stop --force` / `kill-all`.
 - Tailscale agent binds require a bearer token by default (`--allow-unauthenticated` opt-out); installer generates and prints the token.
 - Watchdog no longer auto-starts a model after agent reboot from a leftover `active-profile` file (session-supervised crash recovery only).
 
 
 ### Added
-- **Remote gateways**: launch, monitor, and stop model servers on other machines (DGX boxes, Linux workstations, servers) from the same menu bar panel, in both Base and Plus. Each gateway renders as its own named section; the menu bar count and Stop Everything span all gateways.
-- Single-file, stdlib-only Python remote agent (`RemoteAgent/`) speaking the exact controller HTTP contract, with launch templates for vLLM, llama.cpp, SGLang, and TGI plus `START_COMMAND` for any other runtime; validated by a cross-implementation conformance suite driven by the app's own `ControllerClient`.
-- One-click agent deployment over SSH from Settings (nothing downloaded on the remote host), `modelswitchboard-gateway://` pairing codes (`model-switchboard-agent link`), and a `curl | bash` installer fallback.
+- **Remote gateways** in Base/Plus: named sections for launching, monitoring, and stopping other hosts; ready-count and Stop Everything aggregate them.
+- Stdlib-only Python agent (`RemoteAgent/`) implementing the controller contract, with vLLM/llama.cpp/SGLang/TGI templates, `START_COMMAND`, and cross-implementation `ControllerClient` conformance coverage.
+- Settings-driven SSH deployment without remote downloads; `modelswitchboard-gateway://` pairing via `link`; `curl | bash` fallback.
 - App-managed SSH tunnels using the user's own keys (`BatchMode`), with jittered reconnect backoff, classified failure messages, and automatic same-port forwarding of running models' endpoints.
-- Tailscale mode: `--tailscale` binds the agent to the host's tailnet address only, and pairing codes carry `mode=direct` so the Mac connects via MagicDNS without a tunnel.
+- Tailscale `--tailscale` tailnet-only binds and `mode=direct` MagicDNS pairing without tunnels.
 - Per-gateway bearer tokens in the keychain; non-loopback agent binds outside a tailnet require `--unsafe-bind` plus a ≥16-byte token, mirroring the local controller.
-- Profiles-folder discovery: default `~/model-profiles/` on remotes; `model-switchboard-agent link` scans `$HOME` for existing launch `.env`/`.json` files (e.g. `model.env`), confirms or accepts a pasted path, and persists it (`--profiles-dir` / `MODEL_SWITCHBOARD_PROFILES_DIR`). Mac controller gains matching `--profiles-dir` + `config.json` support.
+- Profile discovery: remote default `~/model-profiles/`; `link` scans `$HOME` for `.env`/`.json`, confirms/pastes and persists a path (`--profiles-dir` / `MODEL_SWITCHBOARD_PROFILES_DIR`); matching Mac `--profiles-dir` + `config.json` support.
 
 ### Fixed
 - Keychain token saves now update existing items; previously edits to a saved controller token were silently discarded (`SecItemAdd` duplicate). Token edits are debounced, not saved per keystroke.

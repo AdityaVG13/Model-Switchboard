@@ -106,17 +106,18 @@ Use `RUNTIME_TAGS` for model-level traits such as `coding`, `q8`, `long-context`
 
 ## Remote gateways
 
-Remote hosts -- a DGX box, lab workstation, or home server -- show up in the same menu bar panel. You drop a profile file on the remote host, then click `Activate` on your Mac. No SSH session hunting for a tmux pane or pasting a `vllm serve` line by hand.
+Remote Linux/Unix hosts appear as named panel sections; ready-count and `Stop
+Everything` span all gateways.
 
-- **Nothing to install on the remote by hand.** Enter `user` + `host` in *Settings → Remote Gateways*, then click **Install Agent on Host**. The app pushes its bundled single-file agent (stdlib-only Python, [RemoteAgent/](RemoteAgent/)) over your own SSH connection and sets up its service. You can also use the printed pairing code or a `curl | bash` one-liner from an existing SSH session.
-- **SSH tunnels, your keys.** The agent binds loopback only. The app opens the tunnel with your existing SSH config and agent (`BatchMode`; it never touches passwords). Running models' ports are forwarded automatically, so `Copy Endpoint URL` gives you a URL that works on your Mac.
-- **Tailscale-native.** Tick *Tailscale mode* on install (or run the agent with `--tailscale`). The gateway connects directly over your tailnet -- WireGuard-encrypted, no tunnel process, MagicDNS names in endpoint URLs.
-- **Or direct LAN**, guarded the same way as the local controller. Non-loopback binds demand a ≥16-byte bearer token, stored in your keychain.
-- **Any runtime.** Launch templates cover vLLM, llama.cpp, SGLang, and TGI. Use `START_COMMAND` for anything else (same profile files as local models). Live rows show which model is serving on which port, with the URL as reachable *from your Mac*.
-- **Profiles folder.** Default is `~/model-profiles/` on the remote (Mac controller can use `--profiles-dir` too). `link` scans for existing `.env` launch files and lets you confirm or paste a folder you already use.
-- **Everything aggregates.** Each gateway gets its own named section in the panel. The menu bar ready-count spans every gateway. `Stop Everything` sweeps them all.
+| Item | Summary |
+|---|---|
+| Install/pair/update | In *Settings → Remote Gateways*, enter `user` + `host` and click **Install Agent on Host**. The app pushes the bundled stdlib-only Python agent over SSH; pairing-code and `curl \| bash` alternatives are documented below. Re-run installation to update. |
+| SSH (recommended) | Loopback-only agent; app-managed `BatchMode` tunnel uses your SSH config/keys/agent, never passwords, and forwards model ports for Mac-reachable copied URLs. |
+| Tailscale/direct | `--tailscale` binds only the WireGuard tailnet address and uses MagicDNS without a tunnel. Plain-LAN non-loopback binds require `--unsafe-bind` plus a ≥16-byte bearer token stored in Keychain. |
+| Profiles/runtimes | Remote default: `~/model-profiles/`; Mac controller also supports `--profiles-dir`. `link` scans existing `.env` / `.json`. Templates: vLLM, llama.cpp, SGLang, TGI; use `START_COMMAND` otherwise. |
 
-Setup lives in [RemoteAgent/README.md](RemoteAgent/README.md) and the [SETUP.md remote gateways chapter](SETUP.md#remote-gateways).
+See [RemoteAgent/README.md](RemoteAgent/README.md) for commands, auth/security,
+discovery/API routes, and troubleshooting; also see [SETUP.md](SETUP.md#remote-gateways).
 
 ---
 

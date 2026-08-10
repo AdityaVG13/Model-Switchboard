@@ -1,29 +1,20 @@
 # Model Switchboard Remote Agent
 
-Launch and monitor model servers on any Linux/Unix host (a DGX box, a lab
-workstation, a home server) from the Model Switchboard menu bar app on your
-Mac.
-
-The agent is **stdlib-only Python** (3.10+): `model_switchboard_agent.py`
-plus the sibling `discovery.py` module. It speaks the same HTTP contract as
-the macOS controller, reads the same `model-profiles/*.env|*.json` profile
-format, and is what the app's **remote gateways** feature talks to.
+This stdlib-only Python 3.10+ agent (`model_switchboard_agent.py` plus
+`discovery.py`) lets the Mac app control Linux/Unix model hosts. It uses the
+macOS controller's HTTP contract and `.env` / `.json` profiles.
 
 ## Install
 
-**Nothing to download on the remote host.** In Model Switchboard on your Mac:
-**Settings → Remote Gateways → Add Remote Gateway**, enter `user` + `host`,
-and click **Install Agent on Host**. The app pushes the bundled agent modules
-over your own SSH connection and sets up its service.
-
-Prefer to run something yourself in your existing SSH session? One line, no
-checkout:
+In **Settings → Remote Gateways → Add Remote Gateway**, enter `user` + `host`
+and click **Install Agent on Host**. The app pushes bundled modules over SSH
+and installs the service; the remote downloads nothing. Manual, no-checkout:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AdityaVG13/Model-Switchboard/main/RemoteAgent/install-remote-agent.sh | bash
 ```
 
-Or from a repo checkout:
+Repo checkout:
 
 ```bash
 git clone https://github.com/AdityaVG13/Model-Switchboard.git
@@ -31,11 +22,10 @@ cd Model-Switchboard/RemoteAgent
 ./install-remote-agent.sh
 ```
 
-The installer puts the agent under `~/.local/share/model-switchboard-agent/`,
-creates a visible **`~/model-profiles/`** folder for launch `.env` / `.json`
-files (with sample templates), and (when systemd is present) enables a user
-service that keeps it running. Run `loginctl enable-linger $USER` so the
-service survives logout.
+Re-run the same method to update. Installation uses
+`~/.local/share/model-switchboard-agent/`, creates `~/model-profiles/` with
+sample templates, and enables a systemd user service when available. Run
+`loginctl enable-linger $USER` to keep it running after logout.
 
 Add one profile per model server to `~/model-profiles/` (or any folder you
 point the agent at), e.g.:
@@ -49,11 +39,10 @@ PORT=8001
 EXTRA_ARGS="--max-model-len 8192"
 ```
 
-Already have launch files somewhere else (AI setups often drop `model.env`
-next to the model)? Run `model-switchboard-agent link`. It scans your home
-directory for Switchboard-shaped `.env` / `.json` files, asks you to confirm
-a folder (or paste another path), saves it, then prints the pairing code.
-Non-interactive: `--profiles-dir /path --yes`.
+`model-switchboard-agent link` scans `$HOME` for Switchboard-shaped `.env` /
+`.json`, confirms or accepts another folder, persists it, and prints pairing.
+Non-interactive: `--profiles-dir /path --yes`. The installer also accepts
+`--profiles-dir`; use `MODEL_SWITCHBOARD_PROFILES_DIR` in the environment.
 
 Built-in launch templates: `vllm`, `llama.cpp` (`llama-server`), `sglang`,
 `tgi`. Anything else works via `START_COMMAND=...` / `STOP_COMMAND=...`.
@@ -61,16 +50,14 @@ Daemon-style runtimes (`ollama`, LiteLLM, …) are monitored health-only.
 
 ## Connect from the Mac
 
-The installer ends by printing a **pairing code** (get it again anytime with
-`model-switchboard-agent link`):
+The installer prints a pairing code; regenerate it with `link`:
 
 ```
 modelswitchboard-gateway://user@host?name=spark&agent_port=8877
 ```
 
-In Model Switchboard: **Settings → Remote Gateways → Add Remote Gateway**,
-paste the code. The form prefills; every field stays editable. The
-gateway's models then appear in the main panel under its own named section.
+Paste it into **Settings → Remote Gateways → Add Remote Gateway**. It prefills
+editable fields; the gateway gets a named panel section.
 
 - **SSH tunnel (recommended).** The agent binds `127.0.0.1` only; the app
   opens `ssh -N -L` to it using your existing SSH keys/agent (`BatchMode`;
@@ -131,17 +118,10 @@ model-switchboard-agent kill-all          # nuclear: force-stop every profile
 
 ### Models vs the agent
 
-The **agent** is an always-on controller (systemd user unit). A **model** is a
-child process the agent launched (vLLM, llama.cpp, …). Closing a terminal or
-logging out does **not** stop models; only `stop` / `stop-all` / `kill-all`
-does. After a successful stop, `nvidia-smi` should show no model process (large
-vLLM unloads can take up to ~90s; use `--force` / `kill-all` if it hangs).
-
-One-liner to free the GPU from models managed by switchboard:
-
-```bash
-model-switchboard-agent kill-all
-```
+The systemd agent is always on; launched models are child processes. Closing
+a terminal or logging out does **not** stop them. After `stop`, `stop-all`, or
+`kill-all`, `nvidia-smi` should show no model process. Large vLLM unloads can
+take ~90s; use `--force` / `kill-all` if one hangs.
 
 ## Contract
 
@@ -151,10 +131,8 @@ controller (see `SETUP.md` → "Controller API contract"): `/api/status`,
 `/api/stop-all`. Benchmarks and integrations are macOS-controller features;
 the agent answers those endpoints with structured "unsupported" responses.
 
-Contract coverage lives in native Swift tests (the real agent is the system
-under test; there is no Python unittest suite):
-
 ```bash
+# Native Swift conformance; the real agent is the system under test.
 swift test --filter RemoteAgentConformanceTests
 ```
 
