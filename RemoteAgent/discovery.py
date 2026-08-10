@@ -487,6 +487,13 @@ def command_looks_like_model_server(command: str | None) -> bool:
     return any(marker in lowered for marker in MODEL_SERVER_COMMAND_MARKERS)
 
 
+def _shell_tokens(command: str) -> list[str]:
+    try:
+        return shlex.split(command)
+    except ValueError:
+        return command.split()
+
+
 def infer_runtime_from_command(command: str | None) -> str:
     """Best-effort runtime label from a live process — never invent a stack."""
     if not command:
@@ -514,10 +521,7 @@ def infer_model_from_command(command: str | None) -> str | None:
     """Pull a model path/id out of argv when present. None if not visible."""
     if not command:
         return None
-    try:
-        tokens = shlex.split(command)
-    except ValueError:
-        tokens = command.split()
+    tokens = _shell_tokens(command)
     for index, token in enumerate(tokens):
         if token in ("-m", "--model", "--model-path", "--model-id", "--served-model-name"):
             if index + 1 < len(tokens):
@@ -543,9 +547,8 @@ def infer_model_from_command(command: str | None) -> str | None:
     return None
 
 
-def probe_model_endpoint(port: int, host: str = "127.0.0.1") -> dict[str, Any]:
-    """Probe common local model HTTP surfaces. Does not invent identity."""
-    result: dict[str, Any] = {
+def _empty_probe(port: int, host: str = "127.0.0.1") -> dict[str, Any]:
+    return {
         "port": port,
         "host": host,
         "ready": False,
@@ -554,6 +557,11 @@ def probe_model_endpoint(port: int, host: str = "127.0.0.1") -> dict[str, Any]:
         "model_ids": [],
         "base_url": f"http://{host}:{port}/v1",
     }
+
+
+def probe_model_endpoint(port: int, host: str = "127.0.0.1") -> dict[str, Any]:
+    """Probe common local model HTTP surfaces. Does not invent identity."""
+    result = _empty_probe(port, host)
     health_urls = (
         f"http://{host}:{port}/health",
         f"http://{host}:{port}/v1/health",
@@ -598,7 +606,7 @@ def _roots_hinted_by_path_token(token: str) -> list[Path]:
         return []
     candidates: list[Path] = []
     # Walk up a few levels: …/launch/8080/launch.sh → …/launch
-    current = path if path.suffix else path
+    current = path
     for _ in range(4):
         if PORT_CLAIM_DIR_RE.fullmatch(current.name):
             parent = current.parent
@@ -617,11 +625,7 @@ def roots_hinted_by_commands(commands: list[str | None]) -> list[Path]:
     for command in commands:
         if not command:
             continue
-        try:
-            tokens = shlex.split(command)
-        except ValueError:
-            tokens = command.split()
-        for token in tokens:
+        for token in _shell_tokens(command):
             if "/" not in token and not token.startswith("~"):
                 continue
             for root in _roots_hinted_by_path_token(token):
@@ -880,15 +884,7 @@ def discover_live_model_endpoints(
         if not looks_model and not claimed:
             continue
 
-        probe: dict[str, Any] = {
-            "port": port,
-            "host": "127.0.0.1",
-            "ready": False,
-            "health_ok": False,
-            "openai_models": False,
-            "model_ids": [],
-            "base_url": f"http://127.0.0.1:{port}/v1",
-        }
+        probe = _empty_probe(port)
         # Claimed / profile ports spend budget first (sorted above).
         if probes_left > 0 and port_is_listening(str(port)):
             probes_left -= 1
@@ -940,8 +936,6 @@ def status_dict_from_discovery(
     """Shape a discovery/claim record like a controller status entry."""
     port = str(item.get("port", ""))
     runtime = item.get("runtime") or item.get("runtime_hint") or "unknown"
-    if runtime == "unknown" and item.get("runtime_hint"):
-        runtime = item["runtime_hint"]
     label, tags, launch_mode = RUNTIME_SPECS.get(
         runtime, (runtime, ["discovered", "external"], "external")
     )
@@ -1053,6 +1047,4 @@ def profile_from_claim(claim: dict[str, Any]) -> Profile:
         # Still construct for status/stop-by-port; start() will raise clearly.
         values["LAUNCH_MODE"] = "external"
     return Profile(name=name, values=values)
-
-
 

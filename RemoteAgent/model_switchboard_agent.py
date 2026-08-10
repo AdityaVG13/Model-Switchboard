@@ -97,93 +97,6 @@ PROFILE_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
-# --------------------------------------------------------------------------
-# Perf profiling (measurement only; default OFF)
-# Enable with MSW_PERF_PROFILE=1 or MSW_AGENT_PERF=1.
-# Optional JSONL append path: MSW_PERF_JSONL=/path/to/spans.jsonl
-# Emits stderr lines: perf.profile.span_summary {json}
-# --------------------------------------------------------------------------
-_PERF_PROFILE_TRUE = frozenset({"1", "true", "yes", "on"})
-
-
-def _perf_profile_enabled() -> bool:
-    """True when env-gated agent timing is requested (default off)."""
-    for key in ("MSW_PERF_PROFILE", "MSW_AGENT_PERF"):
-        raw = os.environ.get(key, "").strip().lower()
-        if raw in _PERF_PROFILE_TRUE:
-            return True
-    return False
-
-
-def _emit_perf_span_summary(payload: dict[str, Any]) -> None:
-    """Write one structured span line to stderr; optionally append JSONL."""
-    try:
-        body = json.dumps(payload, separators=(",", ":"), sort_keys=True, default=str)
-    except (TypeError, ValueError):
-        body = json.dumps(
-            {"span": str(payload.get("span")), "duration_ms": payload.get("duration_ms")},
-            separators=(",", ":"),
-        )
-    print(f"perf.profile.span_summary {body}", file=sys.stderr, flush=True)
-    path = os.environ.get("MSW_PERF_JSONL", "").strip()
-    if not path:
-        return
-    try:
-        record = dict(payload)
-        record.setdefault("ts", time.time())
-        with open(path, "a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record, separators=(",", ":"), default=str) + "\n")
-    except OSError:
-        pass
-
-
-class _PerfSpan:
-    """Env-gated wall-clock span. No-op when profiling is off (zero side effects)."""
-
-    __slots__ = ("name", "tags", "enabled", "_t0", "stages", "_stage_name", "_stage_t0")
-
-    def __init__(self, name: str, **tags: Any) -> None:
-        self.name = name
-        self.tags: dict[str, Any] = dict(tags)
-        self.enabled = _perf_profile_enabled()
-        self._t0 = 0.0
-        self.stages: dict[str, float] = {}
-        self._stage_name: str | None = None
-        self._stage_t0: float | None = None
-
-    def stage(self, name: str) -> None:
-        """Close the previous stage (if any) and open *name*."""
-        if not self.enabled:
-            return
-        now = time.perf_counter()
-        if self._stage_name is not None and self._stage_t0 is not None:
-            self.stages[self._stage_name] = round((now - self._stage_t0) * 1000.0, 3)
-        self._stage_name = name
-        self._stage_t0 = now
-
-    def __enter__(self) -> "_PerfSpan":
-        if self.enabled:
-            self._t0 = time.perf_counter()
-        return self
-
-    def __exit__(self, *_exc: object) -> bool:
-        if not self.enabled:
-            return False
-        now = time.perf_counter()
-        if self._stage_name is not None and self._stage_t0 is not None:
-            self.stages[self._stage_name] = round((now - self._stage_t0) * 1000.0, 3)
-        duration_ms = round((now - self._t0) * 1000.0, 3)
-        payload: dict[str, Any] = {
-            "span": self.name,
-            "duration_ms": duration_ms,
-            **self.tags,
-        }
-        if self.stages:
-            payload["stages_ms"] = self.stages
-        _emit_perf_span_summary(payload)
-        return False
-
-
 def is_loopback(host: str) -> bool:
     return host.strip().strip("[]").lower() in LOOPBACK_HOSTS
 
@@ -1235,46 +1148,36 @@ def host_metrics_payload() -> dict[str, Any]:
     - temp: Celsius
     - memory/VRAM: megabytes (MiB from nvidia-smi; MB from /proc)
     Graceful when nvidia-smi or /proc are absent (old agent / non-GPU host).
-
-    When MSW_PERF_PROFILE=1 or MSW_AGENT_PERF=1, emits perf.profile.span_summary
-    on stderr (measurement only; no behavior change when flags are off).
     """
-    with _PerfSpan("host_metrics_payload") as span:
-        span.stage("gpu")
-        gpu = gpu_metrics_snapshot()
-        span.stage("memory")
-        mem = _sample_memory()
-        span.stage("cpu")
-        cpu_percent = _sample_cpu_percent()
-        span.stage("assemble")
-        hostname = socket.gethostname()
-        gpus = list(gpu.get("gpus") or [])
-        gpu_source = gpu.get("source") or "unavailable"
-        # GB10 / unified-memory: nvidia-smi FB used/total are N/A. Report the
-        # host memory pool in those fields so Mac can show "used/total GB".
-        mem_used = mem.get("used_mb") if isinstance(mem, dict) else None
-        mem_total = mem.get("total_mb") if isinstance(mem, dict) else None
-        if mem_total:
-            for entry in gpus:
-                if entry.get("vram_total_mb") is None:
-                    entry["vram_total_mb"] = mem_total
-                    if entry.get("vram_used_mb") is None:
-                        entry["vram_used_mb"] = mem_used
-        span.tags["gpu_source"] = gpu_source
-        span.tags["n_gpus"] = len(gpus)
-        return {
-            "host": hostname,
-            "collected_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "cpu_percent": cpu_percent,
-            "memory": mem,
-            "gpus": gpus,
-            "gpu_source": gpu_source,
-            "processes": [
-                {"pid": pid, "vram_mb": round(float(mb) * 10) / 10}
-                for pid, mb in sorted((gpu.get("vram_by_pid") or {}).items())
-            ],
-            "agent_version": AGENT_VERSION,
-        }
+    gpu = gpu_metrics_snapshot()
+    mem = _sample_memory()
+    cpu_percent = _sample_cpu_percent()
+    hostname = socket.gethostname()
+    gpus = list(gpu.get("gpus") or [])
+    gpu_source = gpu.get("source") or "unavailable"
+    # GB10 / unified-memory: nvidia-smi FB used/total are N/A. Report the
+    # host memory pool in those fields so Mac can show "used/total GB".
+    mem_used = mem.get("used_mb") if isinstance(mem, dict) else None
+    mem_total = mem.get("total_mb") if isinstance(mem, dict) else None
+    if mem_total:
+        for entry in gpus:
+            if entry.get("vram_total_mb") is None:
+                entry["vram_total_mb"] = mem_total
+                if entry.get("vram_used_mb") is None:
+                    entry["vram_used_mb"] = mem_used
+    return {
+        "host": hostname,
+        "collected_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "cpu_percent": cpu_percent,
+        "memory": mem,
+        "gpus": gpus,
+        "gpu_source": gpu_source,
+        "processes": [
+            {"pid": pid, "vram_mb": round(float(mb) * 10) / 10}
+            for pid, mb in sorted((gpu.get("vram_by_pid") or {}).items())
+        ],
+        "agent_version": AGENT_VERSION,
+    }
 
 
 def port_is_listening(port: str) -> bool:
@@ -1908,178 +1811,160 @@ class AgentService:
     # -- status ------------------------------------------------------------
 
     def status_payload(self, selected: list[str] | None = None) -> dict[str, Any]:
-        """Assemble controller status JSON (profiles + optional full discovery).
+        """Assemble controller status JSON (profiles + optional full discovery)."""
+        loaded = self.profiles.load()
+        conflicts = self.profiles.conflicts(loaded)
+        names = selected if selected is not None else sorted(loaded.keys())
+        # One inventory for profile port attribution (no N× socket/lsof) and,
+        # when listing everything, claim scan + live discovery.
+        listeners = list_listening_tcp()
+        statuses = []
+        profile_ports: set[int] = set()
+        for name in names:
+            profile = loaded.get(name)
+            if profile is None:
+                raise ProfileNotFoundError(name)
+            statuses.append(
+                self.status(
+                    profile,
+                    allow_port_fallback=name not in conflicts,
+                    listeners=listeners,
+                )
+            )
+            try:
+                profile_ports.add(int(profile.endpoint_port))
+            except (TypeError, ValueError):
+                pass
 
-        When MSW_PERF_PROFILE=1 or MSW_AGENT_PERF=1, emits perf.profile.span_summary
-        on stderr with stage timings (measurement only).
-        """
-        with _PerfSpan("status_payload") as span:
-            span.stage("profiles_load")
-            loaded = self.profiles.load()
-            conflicts = self.profiles.conflicts(loaded)
-            names = selected if selected is not None else sorted(loaded.keys())
-            # One inventory for profile port attribution (no N× socket/lsof) and,
-            # when listing everything, claim scan + live discovery.
-            span.stage("list_listening_tcp")
-            listeners = list_listening_tcp()
-            span.stage("profile_statuses")
-            statuses = []
-            profile_ports: set[int] = set()
-            for name in names:
-                profile = loaded.get(name)
-                if profile is None:
-                    raise ProfileNotFoundError(name)
+        claims: list[dict[str, Any]] = []
+        listening: list[dict[str, Any]] = []
+        # Full discovery only when listing everything — targeted stays profile-only.
+        if selected is None:
+            # Drop stale flat configs whose weights are gone and that are not
+            # currently answering. Keep launch-folder / claimed port profiles
+            # visible (missing weights still show as not launchable).
+            statuses = [
+                item
+                for item in statuses
+                if item.get("launchable", True)
+                or item.get("running")
+                or item.get("ready")
+                or _status_is_launch_folder_claim(item)
+            ]
+            # Reuse the same listeners snapshot (no second inventory).
+            start_cmds = [
+                profile.get("START_COMMAND")
+                for profile in loaded.values()
+            ]
+            # START_COMMAND path hints only; scan re-hints from listeners=.
+            claim_roots = roots_hinted_by_commands(start_cmds)
+            claims = scan_port_claim_directories(
+                roots=claim_roots or None,
+                agent_root=self.configuration.root,
+                listeners=listeners,
+            )
+            claim_ports = {int(item["port"]) for item in claims}
+            listening = discover_live_model_endpoints(
+                profile_ports=profile_ports,
+                claim_ports=claim_ports,
+                listeners=listeners,
+            )
+            covered_ports = {
+                int(item["port"])
+                for item in statuses
+                if str(item.get("port") or "").isdigit()
+            }
+            listening_by_port = {
+                int(item["port"]): item
+                for item in listening
+                if str(item.get("port") or "").isdigit()
+            }
+
+            # Claimed port folders not already represented by a profile.
+            for claim in claims:
+                port = int(claim["port"])
+                if port in covered_ports:
+                    continue
+                live = listening_by_port.get(port)
+                merged = dict(claim)
+                if live:
+                    merged.update(
+                        {
+                            "pid": live.get("pid"),
+                            "command": live.get("command"),
+                            "ready": live.get("ready"),
+                            "server_ids": live.get("server_ids"),
+                            "base_url": live.get("base_url"),
+                            "runtime": live.get("runtime")
+                            if live.get("runtime") != "unknown"
+                            else claim.get("runtime_hint") or "unknown",
+                            "request_model": live.get("request_model")
+                            if live.get("request_model")
+                            and not str(live.get("request_model")).startswith("port-")
+                            else (claim.get("model_hint") or live.get("request_model")),
+                            "display_name": claim.get("display_name")
+                            or live.get("display_name"),
+                        }
+                    )
+                else:
+                    merged["ready"] = False
+                    merged["request_model"] = claim.get("model_hint") or f"port-{port}"
+                    merged["runtime"] = claim.get("runtime_hint") or "unknown"
                 statuses.append(
-                    self.status(
-                        profile,
-                        allow_port_fallback=name not in conflicts,
+                    status_dict_from_discovery(
+                        merged,
+                        source="claim",
+                        profile_name=f"port-{port}",
                         listeners=listeners,
                     )
                 )
-                try:
-                    profile_ports.add(int(profile.endpoint_port))
-                except (TypeError, ValueError):
-                    pass
+                covered_ports.add(port)
 
-            claims: list[dict[str, Any]] = []
-            listening: list[dict[str, Any]] = []
-            # Full discovery only when listing everything — targeted stays profile-only.
-            if selected is None:
-                # Drop stale flat configs whose weights are gone and that are not
-                # currently answering. Keep launch-folder / claimed port profiles
-                # visible (missing weights still show as not launchable).
-                statuses = [
-                    item
-                    for item in statuses
-                    if item.get("launchable", True)
-                    or item.get("running")
-                    or item.get("ready")
-                    or _status_is_launch_folder_claim(item)
-                ]
-                # Reuse the same listeners snapshot (no second inventory).
-                start_cmds = [
-                    profile.get("START_COMMAND")
-                    for profile in loaded.values()
-                ]
-                # START_COMMAND path hints only; scan re-hints from listeners=.
-                claim_roots = roots_hinted_by_commands(start_cmds)
-                span.stage("scan_port_claim_directories")
-                claims = scan_port_claim_directories(
-                    roots=claim_roots or None,
-                    agent_root=self.configuration.root,
-                    listeners=listeners,
-                )
-                claim_ports = {int(item["port"]) for item in claims}
-                span.stage("discover_live_model_endpoints")
-                listening = discover_live_model_endpoints(
-                    profile_ports=profile_ports,
-                    claim_ports=claim_ports,
-                    listeners=listeners,
-                )
-                span.stage("merge_discovery")
-                covered_ports = {
-                    int(item["port"])
-                    for item in statuses
-                    if str(item.get("port") or "").isdigit()
-                }
-                listening_by_port = {
-                    int(item["port"]): item
-                    for item in listening
-                    if str(item.get("port") or "").isdigit()
-                }
-
-                # Claimed port folders not already represented by a profile.
-                for claim in claims:
-                    port = int(claim["port"])
-                    if port in covered_ports:
-                        continue
-                    live = listening_by_port.get(port)
-                    merged = dict(claim)
-                    if live:
-                        merged.update(
-                            {
-                                "pid": live.get("pid"),
-                                "command": live.get("command"),
-                                "ready": live.get("ready"),
-                                "server_ids": live.get("server_ids"),
-                                "base_url": live.get("base_url"),
-                                "runtime": live.get("runtime")
-                                if live.get("runtime") != "unknown"
-                                else claim.get("runtime_hint") or "unknown",
-                                "request_model": live.get("request_model")
-                                if live.get("request_model")
-                                and not str(live.get("request_model")).startswith("port-")
-                                else (claim.get("model_hint") or live.get("request_model")),
-                                "display_name": claim.get("display_name")
-                                or live.get("display_name"),
-                            }
-                        )
-                    else:
-                        merged["ready"] = False
-                        merged["request_model"] = claim.get("model_hint") or f"port-{port}"
-                        merged["runtime"] = claim.get("runtime_hint") or "unknown"
-                    statuses.append(
-                        status_dict_from_discovery(
-                            merged,
-                            source="claim",
-                            profile_name=f"port-{port}",
-                            listeners=listeners,
-                        )
+            # Pure listeners not claimed and not profiled.
+            for live in listening:
+                port = int(live["port"])
+                if port in covered_ports:
+                    continue
+                statuses.append(
+                    status_dict_from_discovery(
+                        live,
+                        source="discovery",
+                        profile_name=f"discovered-{port}",
+                        listeners=listeners,
                     )
-                    covered_ports.add(port)
+                )
+                covered_ports.add(port)
 
-                # Pure listeners not claimed and not profiled.
-                for live in listening:
-                    port = int(live["port"])
-                    if port in covered_ports:
-                        continue
-                    statuses.append(
-                        status_dict_from_discovery(
-                            live,
-                            source="discovery",
-                            profile_name=f"discovered-{port}",
-                            listeners=listeners,
-                        )
-                    )
-                    covered_ports.add(port)
-
-            span.stage("benchmark_status")
-            benchmark = self.benchmark_status()
-            span.tags["n_profiles"] = len(names)
-            span.tags["n_statuses"] = len(statuses)
-            span.tags["n_listeners"] = len(listeners)
-            span.tags["n_claims"] = len(claims)
-            span.tags["n_live"] = len(listening)
-            span.tags["full_discovery"] = selected is None
-            file_backed = [
-                item
-                for item in statuses
-                if item.get("source") in ("profile", "claim")
-                or _status_is_launch_folder_claim(item)
-            ]
-            return {
-                "statuses": statuses,
-                "benchmark": benchmark,
-                "integrations": [],
-                "profiles_dir": str(self.configuration.profiles_directory),
-                "controller_root": str(self.configuration.root),
-                "profile_total_count": len(file_backed),
-                "profile_ready_count": sum(1 for item in file_backed if item.get("ready")),
-                "discovery": {
-                    "listening": listening if selected is None else [],
-                    "claims": [
-                        {
-                            "port": item["port"],
-                            "path": item["path"],
-                            "display_name": item.get("display_name"),
-                            "model_hint": item.get("model_hint"),
-                            "runtime_hint": item.get("runtime_hint"),
-                        }
-                        for item in (claims if selected is None else [])
-                    ],
-                    "scan_roots_env": SCAN_ROOTS_ENV,
-                },
-            }
+        benchmark = self.benchmark_status()
+        file_backed = [
+            item
+            for item in statuses
+            if item.get("source") in ("profile", "claim")
+            or _status_is_launch_folder_claim(item)
+        ]
+        return {
+            "statuses": statuses,
+            "benchmark": benchmark,
+            "integrations": [],
+            "profiles_dir": str(self.configuration.profiles_directory),
+            "controller_root": str(self.configuration.root),
+            "profile_total_count": len(file_backed),
+            "profile_ready_count": sum(1 for item in file_backed if item.get("ready")),
+            "discovery": {
+                "listening": listening if selected is None else [],
+                "claims": [
+                    {
+                        "port": item["port"],
+                        "path": item["path"],
+                        "display_name": item.get("display_name"),
+                        "model_hint": item.get("model_hint"),
+                        "runtime_hint": item.get("runtime_hint"),
+                    }
+                    for item in (claims if selected is None else [])
+                ],
+                "scan_roots_env": SCAN_ROOTS_ENV,
+            },
+        }
 
     def ports_payload(self) -> dict[str, Any]:
         """Ports-style inventory: every listener + model probe outcome."""
@@ -2500,9 +2385,6 @@ class AgentService:
                 "category": prompt.get("category"),
                 "error": str(error),
             }
-
-    def host_metrics(self) -> dict[str, Any]:
-        return host_metrics_payload()
 
     def status(
         self,
@@ -3171,7 +3053,7 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
             if path == "/api/benchmark/status":
                 return lambda _: service.benchmark_status()
             if path == "/api/host/metrics":
-                return lambda _: service.host_metrics()
+                return lambda _: host_metrics_payload()
             if path == "/api/integrations":
                 return lambda _: {
                     "integrations": [],
