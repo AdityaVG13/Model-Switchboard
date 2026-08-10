@@ -1,9 +1,4 @@
-"""Host discovery for the Model Switchboard remote agent.
-
-Ports-style listening inventory plus portable port-claim folders.
-Imported by ``model_switchboard_agent`` (kept as a sibling module so the
-agent file stays focused on profiles, lifecycle, and HTTP).
-"""
+"""Listener and port-claim discovery for the Model Switchboard remote agent."""
 
 from __future__ import annotations
 
@@ -43,7 +38,6 @@ from model_switchboard_agent import (
     process_vram_mb,
 )
 
-# Discovery-owned constants (also re-exported via the agent for tests / API).
 PORT_CLAIM_DIR_RE = re.compile(r"^\d{2,5}$")
 PORT_CLAIM_MARKERS = ("flags.env", "launch.sh", "start.sh", "run.sh", "serve.sh", "ctrl.sh")
 MODEL_SERVER_COMMAND_MARKERS = (
@@ -164,29 +158,7 @@ def _copy_listening_tcp_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]
 
 
 def list_listening_tcp() -> list[dict[str, Any]]:
-    """Inventory local TCP listeners with pid/command when available.
-
-    Mirrors the Ports.app idea: port + owning process + command line.
-
-    Order per uncached call:
-      1. Linux `/proc/net/tcp` + `/proc/net/tcp6` (no spawn; inode→pid via
-         `/proc/*/fd`) when `/proc/net/tcp` is readable.
-      2. `ss -lntupH` (Linux) when /proc path is unavailable.
-      3. `lsof` when still empty (macOS / sparse ss).
-
-    Command lines are resolved once per unique PID via process_command within
-    that inventory -- no longer-lived process_command cache. Ports in
-    SKIP_LISTEN_PORTS and the agent self listener (DEFAULT_PORT + own pid) skip
-    cmdline resolution; command may be None for those rows. Same pid on a
-    non-skip port still resolves when that row is seen.
-
-    Module-level cache (LISTENING_TCP_CACHE_TTL_SECONDS, default 2.0s) so
-    concurrent or back-to-back status/ports polls in the same process skip
-    re-running inventory. Results may lag ≤TTL -- intentional for poll
-    coalescing (UI active refresh is ~10s; 2s covers rapid re-polls and
-    multi-caller bursts). Each call returns a fresh list of dicts (safe under
-    ThreadingHTTPServer if a handler mutates its result).
-    """
+    """Inventory TCP listeners; cached misses coalesce and results are caller-private."""
     global _listening_tcp_cache
     now = time.monotonic()
     with _listening_tcp_cache_lock:
@@ -244,7 +216,6 @@ def _parse_proc_net_tcp_table(
         return rows
     for line in lines[1:]:
         parts = line.split()
-        # sl local_address rem_address st ... inode (index 9)
         if len(parts) < 10:
             continue
         if parts[3] != _PROC_TCP_LISTEN_STATE:
@@ -268,12 +239,7 @@ def _parse_proc_net_tcp_table(
 def _socket_inodes_to_pids(
     proc_root: Path, needed: set[int] | None = None
 ) -> dict[int, int]:
-    """Map socket inode → owning pid by reading ``proc_root/*/fd`` symlinks.
-
-    When *needed* is provided, stop once every requested inode is resolved
-    (typical: only the LISTEN sockets from /proc/net/tcp — far fewer than all
-    open sockets on the box).
-    """
+    """Map requested socket inodes to owning PIDs through proc fd links."""
     mapping: dict[int, int] = {}
     remaining: set[int] | None = set(needed) if needed is not None else None
     try:
@@ -304,7 +270,6 @@ def _socket_inodes_to_pids(
                 continue
             if remaining is not None and inode not in remaining:
                 continue
-            # First owner wins (matches typical ss "one pid" presentation).
             if inode not in mapping:
                 mapping[inode] = pid
                 if remaining is not None:
@@ -317,12 +282,7 @@ def _socket_inodes_to_pids(
 def _linux_proc_listening_endpoints(
     proc_root: Path | None = None,
 ) -> list[tuple[int, int | None, str]] | None:
-    """Linux /proc inventory of TCP listeners as (port, pid, bind).
-
-    Returns None when ``/proc/net/tcp`` is not readable so callers fall back to
-    ss/lsof (macOS, restricted containers). An empty list means the table was
-    readable and there are simply no LISTEN sockets.
-    """
+    """Return /proc listeners, or None when callers should fall back to ss/lsof."""
     root = proc_root if proc_root is not None else Path("/proc")
     tcp_path = root / "net" / "tcp"
     try:
@@ -357,7 +317,6 @@ def _linux_proc_listening_endpoints(
 
 def _list_listening_tcp_uncached() -> list[dict[str, Any]]:
     by_port: dict[int, dict[str, Any]] = {}
-    # Same PID often owns several binds (IPv4+IPv6, multi-port). Resolve once.
     cmd_by_pid: dict[int, str | None] = {}
     self_pid = os.getpid()
 
@@ -398,7 +357,6 @@ def _list_listening_tcp_uncached() -> list[dict[str, Any]]:
             note(port, pid, cmdline(pid, port=port), bind)
         return [by_port[key] for key in sorted(by_port)]
 
-    # Linux ss: State Recv-Q Send-Q Local Address:Port Peer Address:Port Process
     try:
         result = subprocess.run(
             ["ss", "-lntupH"],
@@ -408,14 +366,12 @@ def _list_listening_tcp_uncached() -> list[dict[str, Any]]:
             check=False,
         )
         for line in result.stdout.splitlines():
-            # Local address is usually field 4.
             parts = line.split()
             if len(parts) < 4:
                 continue
             local = parts[3]
             if local.startswith("%"):
                 continue
-            # Formats: 127.0.0.1:8080, *:8080, [::1]:8080, [::]:8080
             port = _parse_local_port(local)
             if port is None:
                 continue
@@ -461,7 +417,6 @@ def _parse_local_port(local: str) -> int | None:
     local = local.strip()
     if not local:
         return None
-    # [ipv6]:port
     if local.startswith("["):
         close = local.find("]")
         if close > 0 and close + 1 < len(local) and local[close + 1] == ":":
@@ -474,7 +429,6 @@ def _parse_local_port(local: str) -> int | None:
             return int(local.rsplit(":", 1)[1])
         except ValueError:
             return None
-    # bare :port
     if local.startswith(":") and local[1:].isdigit():
         return int(local[1:])
     return None
@@ -532,13 +486,11 @@ def infer_model_from_command(command: str | None) -> str | None:
             return token.split("=", 1)[1]
         if token.startswith("--model-id="):
             return token.split("=", 1)[1]
-    # vllm serve <model>
     for index, token in enumerate(tokens):
         if token == "serve" and index + 1 < len(tokens):
             candidate = tokens[index + 1]
             if not candidate.startswith("-"):
                 return candidate
-    # Last path-like arg ending in .gguf / looking like HF repo
     for token in reversed(tokens):
         if token.startswith("-"):
             continue
@@ -605,7 +557,6 @@ def _roots_hinted_by_path_token(token: str) -> list[Path]:
     except (TypeError, ValueError):
         return []
     candidates: list[Path] = []
-    # Walk up a few levels: …/launch/8080/launch.sh → …/launch
     current = path
     for _ in range(4):
         if PORT_CLAIM_DIR_RE.fullmatch(current.name):
@@ -640,11 +591,7 @@ def roots_hinted_by_commands(commands: list[str | None]) -> list[Path]:
 
 
 def _normalize_scan_root(root: Path) -> Path:
-    """Expand ~ and resolve once for stable identity (symlink prefixes, '..').
-
-    Root count is tiny vs dirent work; resolve is kept so macOS /var vs
-    /private/var and overlapping roots share one path key.
-    """
+    """Resolve a scan root for stable identity across symlinks and overlaps."""
     return root.expanduser().resolve()
 
 
@@ -842,11 +789,7 @@ def discover_live_model_endpoints(
     claim_ports: set[int] | None = None,
     listeners: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Ports-style live discovery of model-looking listeners.
-
-    Probes only when the owning command looks like a model server, or the port
-    is already claimed by a profile / port-folder. Caps probe budget.
-    """
+    """Discover model-looking listeners within a bounded probe budget."""
     profile_ports = profile_ports or set()
     claim_ports = claim_ports or set()
     discovered: list[dict[str, Any]] = []
@@ -865,12 +808,10 @@ def discover_live_model_endpoints(
         port = int(listener["port"])
         if port in SKIP_LISTEN_PORTS:
             continue
-        # Skip the agent itself: prefer pid (works without cmdline resolution).
         listener_pid = listener.get("pid")
         if listener_pid is not None and int(listener_pid) == self_pid:
             agent_ports.add(port)
             continue
-        # Fallback when pid missing: cmdline name (if list_listening resolved it).
         if port in agent_ports and command_looks_like_model_server(
             listener.get("command") or ""
         ) is False:
@@ -885,13 +826,10 @@ def discover_live_model_endpoints(
             continue
 
         probe = _empty_probe(port)
-        # Claimed / profile ports spend budget first (sorted above).
         if probes_left > 0 and port_is_listening(str(port)):
             probes_left -= 1
             probe = probe_model_endpoint(port)
 
-        # Drop pure system listeners that didn't respond as a model API unless
-        # the cmdline clearly says model server / the port is claimed.
         if not probe["ready"] and not looks_model and not claimed:
             continue
 
@@ -955,9 +893,6 @@ def status_dict_from_discovery(
     alive = bool(pid) and process_is_alive(pid)
 
     request_model = item.get("request_model") or item.get("model_hint") or f"port-{port}"
-    if isinstance(request_model, str) and request_model and not item.get("request_model"):
-        # Prefer basename for display-ish model paths from flags.
-        pass
     display = item.get("display_name") or Path(str(request_model)).name or f"Port {port}"
     name = profile_name or f"discovered-{port}"
     # Mirror profile status(): ready can be visible without claiming ownership.
@@ -988,7 +923,6 @@ def status_dict_from_discovery(
         "rss_mb": process_rss_mb(pid) if alive and pid else None,
         "vram_mb": process_vram_mb(pid) if alive and pid else None,
         "command": item.get("command") if alive else None,
-        # Mac app ModelProfileStatus.logPath is a non-optional String — never null.
         "log_path": item.get("log_path")
         or (
             f"/tmp/launch-{port}.log"
@@ -1044,7 +978,5 @@ def profile_from_claim(claim: dict[str, Any]) -> Profile:
     if stop:
         values["STOP_COMMAND"] = stop
     if not start:
-        # Still construct for status/stop-by-port; start() will raise clearly.
         values["LAUNCH_MODE"] = "external"
     return Profile(name=name, values=values)
-

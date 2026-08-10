@@ -1,21 +1,5 @@
 #!/usr/bin/env python3
-"""Model Switchboard remote agent.
-
-Stdlib-only implementation of the Model Switchboard controller HTTP contract
-(see SETUP.md "Controller API contract") for remote hosts: Linux boxes,
-DGX-class machines, or anything with Python 3.10+. Host discovery lives in the
-sibling ``discovery`` module.
-
-The macOS menu bar app adds this host as a remote gateway (directly or through
-an SSH tunnel) and can then launch, monitor, and stop model servers here.
-
-Design constraints:
-- No dependencies outside the standard library, ever.
-- Same profile formats as the reference controller (model-profiles/*.env|*.json).
-- Same HTTP routes, status codes, auth rules, and JSON field names.
-- Loopback bind by default; non-loopback binds require --unsafe-bind and a
-  bearer token of at least 16 bytes, mirroring the Swift controller.
-"""
+"""Stdlib remote gateway for launching and managing model servers."""
 
 from __future__ import annotations
 
@@ -166,11 +150,6 @@ def tailscale_status() -> tuple[str | None, str | None]:
     return None, None
 
 
-# --------------------------------------------------------------------------
-# Errors (mirrors ControllerError -> ControllerRouter HTTP mapping)
-# --------------------------------------------------------------------------
-
-
 class AgentError(Exception):
     """Base error with the same categories as the Swift ControllerError."""
 
@@ -247,10 +226,6 @@ class InvalidJSONError(AgentError):
     public_message = "invalid JSON"
 
 
-# --------------------------------------------------------------------------
-# Runtime catalog (subset parity with RuntimeCatalog.swift)
-# --------------------------------------------------------------------------
-
 RUNTIME_ALIASES: dict[str, str] = {
     "llamacpp": "llama.cpp", "llama-cpp": "llama.cpp", "mlx-lm": "mlx", "mlx_lm": "mlx",
     "rvllm": "rvllm-mlx", "rvllm_mlx": "rvllm-mlx", "vllm_mlx": "vllm-mlx",
@@ -302,11 +277,6 @@ RUNTIME_SPECS: dict[str, tuple[str, list[str], str]] = {
 def canonical_runtime(value: str | None) -> str:
     normalized = (value or "llama.cpp").strip().lower().replace("_", "-")
     return RUNTIME_ALIASES.get(normalized, normalized)
-
-
-# --------------------------------------------------------------------------
-# Profiles (parity with ProfileRepository.swift)
-# --------------------------------------------------------------------------
 
 
 def _parse_env_value(raw: str, file: Path, line: int) -> str:
@@ -712,17 +682,8 @@ def build_start_command(profile: Profile) -> str:
     return command
 
 
-# --------------------------------------------------------------------------
-# Process helpers
-# --------------------------------------------------------------------------
-
-
 def process_stat_state(pid: int) -> str | None:
-    """Return the single-letter process state from /proc, or None if missing.
-
-    Linux: R/S/D/T/Z/...  Z means zombie (defunct). macOS has no /proc; callers
-    fall back to `ps` via process_ps_state.
-    """
+    """Return the /proc process state, including Z for zombies, when available."""
     try:
         raw = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
     except OSError:
@@ -749,11 +710,7 @@ def process_ps_state(pid: int) -> str | None:
 
 
 def _proc_stat_table_available() -> bool:
-    """True when Linux-style /proc/<pid>/stat is the process table.
-
-    When True, a missing /proc/<pid>/stat means the pid is gone — no need for
-    `ps` or kill(0). When False (macOS, restricted mounts), fall back.
-    """
+    """Return whether /proc stat is an authoritative process table."""
     try:
         return Path("/proc/self/stat").is_file()
     except OSError:
@@ -761,11 +718,7 @@ def _proc_stat_table_available() -> bool:
 
 
 def process_is_zombie(pid: int | None) -> bool:
-    """True if *pid* is a defunct/zombie process.
-
-    Linux: one /proc/<pid>/stat read. Missing entry with /proc present ⇒ not a
-    zombie (gone). Otherwise `ps -o state=` fallback.
-    """
+    """Detect defunct processes through /proc or the ps fallback."""
     if not pid or pid <= 0:
         return False
     state = process_stat_state(pid)
@@ -791,14 +744,7 @@ def reap_child(pid: int) -> bool:
 
 
 def process_is_alive(pid: int | None) -> bool:
-    """True only for a live (non-zombie) process.
-
-    Defunct/zombie PIDs are treated as dead: they hold no GPU/CPU work and
-    must not keep status.running true or block stop.
-
-    Linux: one /proc/<pid>/stat read decides existence + zombie without kill/ps.
-    Other platforms (or no /proc): ps state, then kill(0) existence probe.
-    """
+    """Return liveness while treating zombies as dead and reaping owned children."""
     if not pid or pid <= 0:
         return False
     # Reap our own children first so unreaped zombies do not linger.
@@ -1328,11 +1274,6 @@ from discovery import (  # noqa: E402  — after Profile/process helpers + path 
     scan_port_claim_directories,
     status_dict_from_discovery,
 )
-
-# --------------------------------------------------------------------------
-# Profiles directory resolution + home scan
-# --------------------------------------------------------------------------
-
 
 def _default_root() -> Path:
     return Path.home() / ".local/share/model-switchboard-agent"
@@ -2952,8 +2893,6 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
     auth_token: str | None = None
     verbose = False
 
-    # -- plumbing ----------------------------------------------------------
-
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
         if self.verbose:
             sys.stderr.write(f"[http] {format % args}\n")
@@ -3008,8 +2947,6 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
         if not isinstance(value, str) or not value:
             raise UsageError(f"missing required string field: {key}")
         return value
-
-    # -- routing -----------------------------------------------------------
 
     def do_GET(self) -> None:  # noqa: N802
         self._handle("GET")
@@ -3154,19 +3091,8 @@ def make_server(
     return server
 
 
-# --------------------------------------------------------------------------
-# Pairing link codes
-# --------------------------------------------------------------------------
-
-
 def build_link_code(agent_port: int, direct_host: str | None = None) -> dict[str, str]:
-    """Best-effort pairing code the Mac app can paste to prefill a gateway.
-
-    Everything stays local: the code only encodes host/user/ports for the
-    gateway form, which remains fully editable on the Mac. With `direct_host`
-    (e.g. a Tailscale MagicDNS name or IP) the code describes a direct-URL
-    gateway instead of an SSH tunnel.
-    """
+    """Build an editable SSH or direct gateway pairing code."""
     short_host = socket.gethostname().split(".")[0] or "remote"
     if direct_host is not None:
         link = (
@@ -3198,11 +3124,6 @@ def build_link_code(agent_port: int, direct_host: str | None = None) -> dict[str
         "mode": "ssh",
         "link": link,
     }
-
-
-# --------------------------------------------------------------------------
-# CLI
-# --------------------------------------------------------------------------
 
 
 def build_parser() -> argparse.ArgumentParser:
