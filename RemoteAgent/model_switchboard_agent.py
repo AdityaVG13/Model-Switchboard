@@ -2359,7 +2359,8 @@ class AgentService:
             if listener is not None and self._process_matches(listener, profile):
                 pid = listener
                 zombie = process_is_zombie(pid)
-        label, _, launch_mode = profile.runtime_spec
+        label, tags, launch_mode = profile.runtime_spec
+        runtime = profile.runtime
         alive = process_is_alive(pid)
         listening = False
         if listeners is not None:
@@ -2380,12 +2381,29 @@ class AgentService:
         ready_flag = bool(ready and (alive or listening))
         missing = missing_local_model_artifacts(profile.values)
         launchable = (not missing) or alive or ready_flag
+        command = process_command(pid) if ((alive or zombie) and pid) else None
+        # Claim/command profiles often launch vLLM/llama.cpp via START_COMMAND
+        # but keep RUNTIME=command. Prefer the live process (or start command)
+        # so Mac filters like "vLLM" still match running servers.
+        inferred_source = command or (profile.get("START_COMMAND") or "")
+        inferred = infer_runtime_from_command(inferred_source)
+        if inferred != "unknown":
+            runtime = inferred
+            inferred_label, inferred_tags, inferred_mode = RUNTIME_SPECS.get(
+                inferred, (inferred, ["discovered", "external"], "external")
+            )
+            label = inferred_label
+            # Keep claim/managed tags while adding the real family.
+            merged_tags = list(dict.fromkeys(list(inferred_tags) + list(tags or [])))
+            tags = merged_tags
+            if launch_mode == "command" and inferred_mode != "command":
+                launch_mode = inferred_mode
         return {
             "profile": profile.name,
             "display_name": profile.display_name,
-            "runtime": profile.runtime,
+            "runtime": runtime,
             "runtime_label": label,
-            "runtime_tags": profile.runtime_tags,
+            "runtime_tags": tags if isinstance(tags, list) else profile.runtime_tags,
             "launch_mode": launch_mode,
             "host": profile.endpoint_host,
             "port": profile.endpoint_port,
@@ -2402,7 +2420,7 @@ class AgentService:
             "rss_mb": process_rss_mb(pid) if alive and pid else None,
             # GPU VRAM when nvidia-smi can attribute memory to this pid (not RSS).
             "vram_mb": process_vram_mb(pid) if alive and pid else None,
-            "command": process_command(pid) if ((alive or zombie) and pid) else None,
+            "command": command,
             "log_path": profile.log_path,
             "source": "profile",
             "launchable": launchable,

@@ -160,7 +160,7 @@ enum DashboardFilterPreferences {
     }
 
     static func runtimeHaystack(_ status: ModelProfileStatus) -> String {
-        ([status.runtime, status.runtimeLabel ?? ""] + (status.runtimeTags ?? []))
+        ([status.runtime, status.runtimeLabel ?? "", status.command ?? ""] + (status.runtimeTags ?? []))
             .joined(separator: " ")
             .lowercased()
     }
