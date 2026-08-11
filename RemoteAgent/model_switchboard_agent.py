@@ -520,7 +520,9 @@ def missing_local_model_artifacts(values: dict[str, str] | dict[str, Any]) -> li
             model_file = model_dir / model_file_raw
         elif not model_file.is_absolute() and model_dir_raw and _looks_like_local_fs_path(model_dir_raw):
             model_file = Path(model_dir_raw).expanduser() / model_file_raw
-        if not model_file.is_file():
+        # HF / vLLM style checkpoints are directories; single-file weights are files.
+        # Claim profiles historically stuffed MODEL= into MODEL_FILE for both.
+        if not (model_file.is_file() or model_file.is_dir()):
             missing.append(str(model_file))
 
     # Stable unique order

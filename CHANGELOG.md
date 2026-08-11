@@ -6,6 +6,7 @@ All notable changes to this project are documented in this file.
 ### Fixed
 
 - Remote gateway refresh no longer sticks on `DIRECT · ERROR` / "Request timed out" when the agent is healthy: the Mac client allows longer status/doctor HTTP deadlines, and the remote agent skips probing internal vLLM EngineCore/worker ports that were serializing `/api/status` for ~15s.
+- Claim profiles no longer mark live HF/vLLM model directories as missing (`MODEL=` dirs were stuffed into `MODEL_FILE`); Intern-S2-Mobius-style servers now report ready without a false missing-weights warning.
 - Allowed private-network HTTP for Direct/Tailscale gateways under App Transport Security and shortened transport errors.
 - Made ready-count/refresh span all gateways; corrected remote-only empty/local/STALE states and added gateway online dots.
 - Remote agent stop now reaps zombie/defunct model processes, treats them as not running, force-kills after a longer vLLM-friendly wait, and exposes `stop --force` / `kill-all`.

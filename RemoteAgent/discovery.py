@@ -991,6 +991,31 @@ def profile_from_claim(claim: dict[str, Any]) -> Profile:
         elif launch.is_file() and os.access(launch, os.X_OK):
             start = start or shlex.quote(str(launch))
     display = claim.get("display_name") or Path(request_s).name or name
+    flags_safe = flags if isinstance(flags, dict) else {}
+    model_raw = str(flags_safe.get("MODEL") or flags_safe.get("MODEL_PATH") or request_s)
+    model_file_flag = str(flags_safe.get("MODEL_FILE") or "").strip()
+    weight_suffixes = (".gguf", ".safetensors", ".bin", ".pt", ".pth", ".onnx")
+    # Prefer explicit MODEL_FILE; otherwise only treat MODEL= as a file when it
+    # has a weight suffix. HF/vLLM directories stay on MODEL_PATH / MODEL_DIR so
+    # missing_artifacts does not false-positive on live directory checkpoints.
+    if model_file_flag:
+        model_file = model_file_flag
+    elif any(model_raw.lower().endswith(suffix) for suffix in weight_suffixes):
+        model_file = model_raw
+    elif request_s.endswith(".gguf"):
+        model_file = request_s
+    else:
+        model_file = ""
+    model_dir = str(flags_safe.get("MODEL_DIR") or flags_safe.get("MODEL_REPO") or "")
+    if not model_dir and model_raw and not model_file:
+        candidate = Path(model_raw).expanduser()
+        looks_local = model_raw.startswith(("/", "~", "./", "../")) or any(
+            model_raw.lower().endswith(suffix) for suffix in weight_suffixes
+        )
+        if candidate.is_dir() or (
+            looks_local and not any(model_raw.lower().endswith(s) for s in weight_suffixes)
+        ):
+            model_dir = model_raw
     values: dict[str, str] = {
         "DISPLAY_NAME": str(display),
         "RUNTIME": "command",
@@ -1001,13 +1026,10 @@ def profile_from_claim(claim: dict[str, Any]) -> Profile:
         "START_COMMAND": start,
         "WORKING_DIRECTORY": claim_path,
         "LOG_ALIAS": f"launch-{port}",
-        "MODEL_PATH": str(flags.get("MODEL") or flags.get("MODEL_PATH") or request_s),
-        "MODEL_FILE": str(
-            flags.get("MODEL_FILE")
-            or flags.get("MODEL")
-            or (request_s if request_s.endswith(".gguf") else "")
-        ),
-        "MODEL_REPO": str(flags.get("MODEL_REPO") or flags.get("MODEL_DIR") or ""),
+        "MODEL_PATH": model_raw,
+        "MODEL_FILE": model_file,
+        "MODEL_DIR": model_dir,
+        "MODEL_REPO": str(flags_safe.get("MODEL_REPO") or ""),
         "RUNTIME_TAGS": "claimed,launch-folder",
     }
     if stop:
