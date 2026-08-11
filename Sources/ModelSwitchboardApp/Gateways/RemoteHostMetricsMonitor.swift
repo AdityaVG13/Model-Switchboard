@@ -77,17 +77,19 @@ final class RemoteHostMetricsMonitor {
         for runtime in runtimes {
             let previous = entries[runtime.id] ?? Entry()
             if runtime.config.kind == .ssh, runtime.tunnelState != .established {
+                let tunnelError: String
+                switch runtime.tunnelState {
+                case .idle: tunnelError = "SSH tunnel is off"
+                case .connecting: tunnelError = "SSH tunnel connecting…"
+                case .established: tunnelError = ""
+                case .failed(let message): tunnelError = message
+                }
                 targets.append(
                     PollTarget(
                         id: runtime.id,
                         previous: previous,
                         client: nil,
-                        immediateError: switch runtime.tunnelState {
-                        case .idle: "SSH tunnel is off"
-                        case .connecting: "SSH tunnel connecting…"
-                        case .established: ""
-                        case .failed(let message): message
-                        },
+                        immediateError: tunnelError,
                         preserveUpdatedAt: true
                     )
                 )

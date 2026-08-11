@@ -453,6 +453,13 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
     }
 }
 
+@Test func remoteGatewayHTTPTimeoutsLeaveRoomForDiscovery() {
+    // Cold /api/status on a busy vLLM host previously took ~15s while the Mac
+    // client aborted at 5s request / 15s resource — permanent DIRECT · ERROR.
+    #expect(GatewayHub.RemoteHTTPTimeouts.request >= 30)
+    #expect(GatewayHub.RemoteHTTPTimeouts.resource >= GatewayHub.RemoteHTTPTimeouts.request)
+}
+
 @MainActor
 private func withTestDefaultsAsync(
     _ body: @MainActor (UserDefaults, String) async throws -> Void

@@ -45,10 +45,16 @@ import ModelSwitchboardCore
 
 @Test func profileRepositoryRejectsShellStatements() throws {
   try withFixtureRoot(profileBodies: [
-    "bad": "DISPLAY_NAME=Bad\nREQUEST_MODEL=test\nPORT=9001\necho unsafe\n"
+    "bad": "DISPLAY_NAME=Bad\nREQUEST_MODEL=test\nPORT=9001\necho unsafe\n",
+    "good": "DISPLAY_NAME=Good\nREQUEST_MODEL=test\nPORT=9002\n",
   ]) { fixture in
     let repository = ProfileRepository(directory: fixture.configuration.profilesDirectory)
-    #expect(throws: ControllerError.self) { try repository.load() }
+    // load() skips unreadable files so one bad profile cannot take down status.
+    let profiles = try repository.load()
+    #expect(profiles.keys.sorted() == ["good"])
+    #expect(throws: ControllerError.self) {
+      try repository.load(file: fixture.configuration.profilesDirectory.appendingPathComponent("bad.env"))
+    }
   }
 }
 

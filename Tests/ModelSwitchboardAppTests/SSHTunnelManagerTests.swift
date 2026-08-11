@@ -146,6 +146,8 @@ private func waitFor(
 @Test func tunnelBecomesEstablishedWhenForwardPortListens() async throws {
     // Stand-in for ssh: listen on the -L local port (post-auth tunnel), and
     // succeed ControlMaster `-O check` so establish cannot TOCTOU on a squatter.
+    // `-k` keeps nc listening — waitUntilEstablished probes with a real TCP
+    // connect, and single-shot `nc -l` would exit after the first probe.
     let fakeSSH = try writeExecutable(
         """
         #!/bin/bash
@@ -162,7 +164,7 @@ private func waitFor(
         done
         PORT=$(printf '%s' "$SPEC" | cut -d: -f2)
         # Pure shell fixture — no Python in tests. macOS ships /usr/bin/nc.
-        exec /usr/bin/nc -l 127.0.0.1 "$PORT"
+        exec /usr/bin/nc -l -k 127.0.0.1 "$PORT"
         """,
         name: "fake-ssh-listen"
     )

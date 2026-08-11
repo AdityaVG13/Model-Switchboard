@@ -65,6 +65,22 @@ MODEL_SERVER_COMMAND_MARKERS = (
     "llama-cpp",
     "gguf",
 )
+# Subprocess / engine workers that match MODEL_SERVER_COMMAND_MARKERS (e.g. the
+# substring "vllm") but are not user-facing OpenAI HTTP endpoints. Probing them
+# burns the discovery budget on connections that hang until timeout and makes
+# /api/status take tens of seconds — longer than the Mac client's request
+# timeout, so the panel stuck on DIRECT · ERROR even while the agent was up.
+MODEL_SERVER_INTERNAL_COMMAND_MARKERS = (
+    "vllm::enginecore",
+    "vllm::enginecor",  # ss truncates the process title
+    "vllm::workermain",
+    "vllm::worker",
+    "enginecore_executor",
+    "enginecore.executor",
+    "ray::",
+    "multiprocessing.spawn",
+    "multiprocessing.resource_tracker",
+)
 SKIP_LISTEN_PORTS = frozenset({
     22, 25, 53, 67, 68, 69, 80, 110, 123, 135, 139, 143, 161, 389, 443,
     445, 465, 587, 631, 636, 993, 995, 2375, 2376, 3306, 3389, 5432, 5900,
@@ -434,7 +450,21 @@ def _parse_local_port(local: str) -> int | None:
     return None
 
 
+def command_is_internal_model_worker(command: str | None) -> bool:
+    """True for engine/worker children that are not public model HTTP APIs."""
+    if not command:
+        return False
+    lowered = command.lower()
+    return any(marker in lowered for marker in MODEL_SERVER_INTERNAL_COMMAND_MARKERS)
+
+
 def command_looks_like_model_server(command: str | None) -> bool:
+    """True when a live process looks like a model server (including workers).
+
+    Use command_is_internal_model_worker() to filter workers out of discovery
+    probes; keep this broader so stop/kill ownership matching still sees
+    EngineCore leftovers on a profile port.
+    """
     if not command:
         return False
     lowered = command.lower()
@@ -821,6 +851,11 @@ def discover_live_model_endpoints(
 
         command = listener.get("command")
         looks_model = command_looks_like_model_server(command)
+        # Never surface or HTTP-probe internal engine/worker ports. They match
+        # "vllm" etc. but are not OpenAI-compatible APIs; each failed probe is
+        # up to ~3× DISCOVERY_PROBE_TIMEOUT and serializes /api/status.
+        if looks_model and command_is_internal_model_worker(command):
+            continue
         claimed = port in profile_ports or port in claim_ports
         if not looks_model and not claimed:
             continue
