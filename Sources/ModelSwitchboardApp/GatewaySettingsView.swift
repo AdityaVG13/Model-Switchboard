@@ -154,7 +154,7 @@ struct GatewaySettingsSection: View {
 
     private var addButton: some View {
         linkButton("Add Remote Gateway…", emphasized: true) {
-            draft = GatewayConfig(name: "", kind: .ssh)
+            draft = GatewayConfig.ssh(name: "", sshHost: "")
             draftToken = ""
             draftIsNew = true
             validationMessage = nil
@@ -208,24 +208,28 @@ struct GatewaySettingsSection: View {
                     .foregroundStyle(theme.label)
                 Spacer(minLength: 0)
                 HStack(spacing: 2) {
-                    connectionKindChip("SSH tunnel", kind: .ssh, selection: binding.kind)
-                    connectionKindChip("Direct URL", kind: .direct, selection: binding.kind)
+                    connectionKindChip("SSH tunnel", kind: .ssh, isOn: binding.wrappedValue.kind == .ssh) {
+                        switchKind(&binding.wrappedValue, to: .ssh)
+                    }
+                    connectionKindChip("Direct URL", kind: .direct, isOn: binding.wrappedValue.kind == .direct) {
+                        switchKind(&binding.wrappedValue, to: .direct)
+                    }
                 }
                 .padding(2)
                 .background(theme.btnBg, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
             }
 
-            switch binding.wrappedValue.kind {
+            switch binding.wrappedValue.connection {
             case .ssh:
-                field("SSH user", text: binding.sshUser, prompt: NSUserName(), monospaced: true)
-                field("SSH host", text: binding.sshHost, prompt: "spark.local", monospaced: true)
+                field("SSH user", text: sshTextBinding(binding, \.sshUser), prompt: NSUserName(), monospaced: true)
+                field("SSH host", text: sshTextBinding(binding, \.sshHost), prompt: "spark.local", monospaced: true)
                 HStack(spacing: 10) {
-                    numberField("SSH port", value: binding.sshPort)
-                    numberField("Agent port", value: binding.remotePort)
+                    numberField("SSH port", value: sshIntBinding(binding, \.sshPort))
+                    numberField("Agent port", value: sshIntBinding(binding, \.remotePort))
                 }
                 field(
                     "Identity file (optional)",
-                    text: optionalText(binding.identityFile),
+                    text: optionalText(sshOptionalTextBinding(binding, \.identityFile)),
                     prompt: "~/.ssh/id_ed25519",
                     monospaced: true
                 )
@@ -236,7 +240,7 @@ struct GatewaySettingsSection: View {
 
                 deploySection(config: binding.wrappedValue)
             case .direct:
-                field("Controller URL", text: binding.baseURL, prompt: "http://spark.tail1234.ts.net:8877", monospaced: true)
+                field("Controller URL", text: directTextBinding(binding, \.baseURL), prompt: "http://spark.tail1234.ts.net:8877", monospaced: true)
                 Text("The agent must be reachable at this URL. Tailscale is the easy path: run the agent with --tailscale (token required by default; paste the installer-generated token here). Plain LAN binds require --unsafe-bind plus a bearer token.")
                     .font(.system(size: 10))
                     .foregroundStyle(theme.sub)
@@ -331,36 +335,48 @@ struct GatewaySettingsSection: View {
     }
 
     private func save() {
-        guard var config = draft else { return }
-        config.name = config.name.trimmingCharacters(in: .whitespaces)
-        config.baseURL = config.baseURL.trimmingCharacters(in: .whitespaces)
-        config.sshHost = config.sshHost.trimmingCharacters(in: .whitespaces)
-        config.sshUser = config.sshUser.trimmingCharacters(in: .whitespaces)
-
-        if config.name.isEmpty {
+        guard let draft else { return }
+        let trimmedName = draft.name.trimmingCharacters(in: .whitespaces)
+        if trimmedName.isEmpty {
             validationMessage = "Give this gateway a name."
             return
         }
-        switch config.kind {
-        case .ssh:
-            if config.sshHost.isEmpty {
+        let saved: GatewayConfig
+        switch draft.connection {
+        case .ssh(var ssh):
+            ssh.sshHost = ssh.sshHost.trimmingCharacters(in: .whitespaces)
+            ssh.sshUser = ssh.sshUser.trimmingCharacters(in: .whitespaces)
+            if ssh.sshHost.isEmpty {
                 validationMessage = "SSH host is required."
                 return
             }
-            if config.hasUnsafeSSHDestination {
+            let candidate = GatewayConfig.ssh(
+                id: draft.id,
+                name: trimmedName,
+                sshUser: ssh.sshUser,
+                sshHost: ssh.sshHost,
+                sshPort: ssh.sshPort,
+                remotePort: ssh.remotePort,
+                identityFile: ssh.identityFile,
+                identityAgent: ssh.identityAgent,
+                enabled: draft.enabled
+            )
+            if candidate.hasUnsafeSSHDestination {
                 validationMessage = "SSH user/host cannot start with '-' (would be parsed as an ssh option)."
                 return
             }
-            guard (1...65535).contains(config.sshPort) else {
+            guard (1...65535).contains(candidate.sshPort) else {
                 validationMessage = "SSH port must be between 1 and 65535."
                 return
             }
-            guard (1...65535).contains(config.remotePort) else {
+            guard (1...65535).contains(candidate.remotePort) else {
                 validationMessage = "Agent port must be between 1 and 65535."
                 return
             }
-        case .direct:
-            guard let url = URL(string: config.baseURL),
+            saved = candidate
+        case .direct(var direct):
+            direct.baseURL = direct.baseURL.trimmingCharacters(in: .whitespaces)
+            guard let url = URL(string: direct.baseURL),
                   let scheme = url.scheme?.lowercased(),
                   ["http", "https"].contains(scheme),
                   let host = url.host
@@ -374,9 +390,117 @@ struct GatewaySettingsSection: View {
                 validationMessage = "Use the host's MagicDNS name (.ts.net) for Tailscale direct mode — raw 100.x addresses are blocked by App Transport Security."
                 return
             }
+            saved = GatewayConfig.direct(
+                id: draft.id,
+                name: trimmedName,
+                baseURL: direct.baseURL,
+                remotePort: direct.remotePort,
+                enabled: draft.enabled
+            )
         }
-        hub.upsertGateway(config, token: draftToken)
+        hub.upsertGateway(saved, token: draftToken)
         closeEditor()
+    }
+
+    /// Switching the connection kind rebuilds the payload from scratch — the
+    /// other kind's fields cannot (and must not) carry over, so a gateway can
+    /// never be saved with dead SSH/URL fields from a previous kind.
+    private func switchKind(_ config: inout GatewayConfig, to kind: GatewayKind) {
+        guard config.kind != kind else { return }
+        let id = config.id
+        let name = config.name
+        let enabled = config.enabled
+        let remotePort = config.remotePort
+        switch kind {
+        case .ssh:
+            config = .ssh(id: id, name: name, sshUser: NSUserName(), sshHost: "", remotePort: remotePort, enabled: enabled)
+        case .direct:
+            config = .direct(id: id, name: name, baseURL: "", remotePort: remotePort, enabled: enabled)
+        }
+    }
+
+    // Kind-scoped form bindings: read/write only the active connection
+    // payload. The collapsed union means a text field can never write into
+    // the other kind's (nonexistent) fields.
+
+    private func sshTextBinding(
+        _ editing: Binding<GatewayConfig>,
+        _ keyPath: WritableKeyPath<GatewayConfig.Connection.SSH, String>
+    ) -> Binding<String> {
+        Binding(
+            get: {
+                if case .ssh(let ssh) = editing.wrappedValue.connection { return ssh[keyPath: keyPath] }
+                return ""
+            },
+            set: { newValue in
+                var value = editing.wrappedValue
+                if case .ssh(var ssh) = value.connection {
+                    ssh[keyPath: keyPath] = newValue
+                    value.connection = .ssh(ssh)
+                    editing.wrappedValue = value
+                }
+            }
+        )
+    }
+
+    private func sshIntBinding(
+        _ editing: Binding<GatewayConfig>,
+        _ keyPath: WritableKeyPath<GatewayConfig.Connection.SSH, Int>
+    ) -> Binding<Int> {
+        Binding(
+            get: {
+                if case .ssh(let ssh) = editing.wrappedValue.connection { return ssh[keyPath: keyPath] }
+                return 0
+            },
+            set: { newValue in
+                var value = editing.wrappedValue
+                if case .ssh(var ssh) = value.connection {
+                    ssh[keyPath: keyPath] = newValue
+                    value.connection = .ssh(ssh)
+                    editing.wrappedValue = value
+                }
+            }
+        )
+    }
+
+    private func sshOptionalTextBinding(
+        _ editing: Binding<GatewayConfig>,
+        _ keyPath: WritableKeyPath<GatewayConfig.Connection.SSH, String?>
+    ) -> Binding<String?> {
+        Binding(
+            get: {
+                if case .ssh(let ssh) = editing.wrappedValue.connection { return ssh[keyPath: keyPath] }
+                return nil
+            },
+            set: { newValue in
+                var value = editing.wrappedValue
+                if case .ssh(var ssh) = value.connection {
+                    ssh[keyPath: keyPath] = newValue
+                    value.connection = .ssh(ssh)
+                    editing.wrappedValue = value
+                }
+            }
+        )
+    }
+
+    private func directTextBinding(
+        _ editing: Binding<GatewayConfig>,
+        _ keyPath: WritableKeyPath<GatewayConfig.Connection.Direct, String>
+    ) -> Binding<String> {
+        Binding(
+            get: {
+                if case .direct(let direct) = editing.wrappedValue.connection { return direct[keyPath: keyPath] }
+                return ""
+            },
+            set: { newValue in
+                var value = editing.wrappedValue
+                if case .direct(var direct) = value.connection {
+                    direct[keyPath: keyPath] = newValue
+                    value.connection = .direct(direct)
+                    editing.wrappedValue = value
+                }
+            }
+        )
     }
 
     // MARK: - Agent deployment
@@ -441,12 +565,10 @@ struct GatewaySettingsSection: View {
     private func connectionKindChip(
         _ title: String,
         kind: GatewayKind,
-        selection: Binding<GatewayKind>
+        isOn: Bool,
+        action: @escaping () -> Void
     ) -> some View {
-        let isOn = selection.wrappedValue == kind
-        return Button {
-            selection.wrappedValue = kind
-        } label: {
+        return Button(action: action) {
             Text(title)
                 .font(.system(size: 11, weight: isOn ? .semibold : .regular))
                 .padding(.horizontal, 10)

@@ -70,8 +70,8 @@ private func makeSources() throws -> (agent: URL, discovery: URL, installer: URL
         discoverySourceURL: sources.discovery,
         installerURL: sources.installer
     )
-    let config = GatewayConfig(
-        name: "Spark", kind: .ssh,
+    let config = GatewayConfig.ssh(
+        name: "Spark",
         sshUser: "gpuadmin", sshHost: "spark.local", sshPort: 2222, remotePort: 9001,
         identityFile: "~/.ssh/spark_key"
     )
@@ -110,7 +110,7 @@ private func makeSources() throws -> (agent: URL, discovery: URL, installer: URL
         discoverySourceURL: sources.discovery,
         installerURL: sources.installer
     )
-    let config = GatewayConfig(name: "Spark", kind: .ssh, sshUser: "gpuadmin", sshHost: "spark.local")
+    let config = GatewayConfig.ssh(name: "Spark", sshUser: "gpuadmin", sshHost: "spark.local")
 
     _ = try await deployer.deploy(to: config, useTailscale: true)
 
@@ -130,7 +130,7 @@ private func makeSources() throws -> (agent: URL, discovery: URL, installer: URL
         discoverySourceURL: sources.discovery,
         installerURL: sources.installer
     )
-    let config = GatewayConfig(name: "Spark", kind: .ssh, sshUser: "gpuadmin", sshHost: "spark.local")
+    let config = GatewayConfig.ssh(name: "Spark", sshUser: "gpuadmin", sshHost: "spark.local")
 
     do {
         _ = try await deployer.deploy(to: config)
@@ -172,7 +172,7 @@ private func makeSources() throws -> (agent: URL, discovery: URL, installer: URL
         installerURL: sources.installer
     )
     let result = try await deployer.deploy(
-        to: GatewayConfig(name: "Spark", kind: .ssh, sshUser: "a", sshHost: "spark"),
+        to: GatewayConfig.ssh(name: "Spark", sshUser: "a", sshHost: "spark"),
         useTailscale: true
     )
     #expect(result.authToken == "tailscale-token-0123456789")
@@ -206,7 +206,7 @@ private func makeSources() throws -> (agent: URL, discovery: URL, installer: URL
     )
     #expect(deployer.resourcesAvailable == false)
     await #expect(throws: RemoteAgentDeployer.DeployError.missingResources) {
-        _ = try await deployer.deploy(to: GatewayConfig(name: "x", kind: .ssh, sshHost: "h"))
+        _ = try await deployer.deploy(to: GatewayConfig.ssh(name: "x", sshHost: "h"))
     }
 }
 

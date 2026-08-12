@@ -58,7 +58,7 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
         #expect(hub.remoteRuntimes.isEmpty)
         #expect(hub.hasRemoteGateways == false)
 
-        let config = GatewayConfig(name: "Lab", kind: .direct, baseURL: "http://10.0.0.9:8877")
+        let config = GatewayConfig.direct(name: "Lab", baseURL: "http://10.0.0.9:8877")
         hub.upsertGateway(config, token: "lab-token-0123456789abcdef")
         defer { hub.removeGateway(id: config.id) }
 
@@ -78,7 +78,7 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
 @Test func removingGatewayCancelsRefreshAndDeletesToken() throws {
     try withTestDefaults { defaults, service in
         let hub = makeHub(defaults: defaults, keychainService: service, autoStartRemoteRefresh: true)
-        let config = GatewayConfig(name: "Lab", kind: .direct, baseURL: "http://10.0.0.9:8877")
+        let config = GatewayConfig.direct(name: "Lab", baseURL: "http://10.0.0.9:8877")
         hub.upsertGateway(config, token: "lab-token-0123456789abcdef")
 
         let runtime = try #require(hub.remoteRuntimes.first)
@@ -99,8 +99,8 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
 @Test func editingGatewayRebuildsRuntimeKeepingOthers() throws {
     try withTestDefaults { defaults, service in
         let hub = makeHub(defaults: defaults, keychainService: service)
-        var first = GatewayConfig(name: "Lab", kind: .direct, baseURL: "http://10.0.0.9:8877")
-        let second = GatewayConfig(name: "Attic", kind: .direct, baseURL: "http://10.0.0.7:8877")
+        var first = GatewayConfig.direct(name: "Lab", baseURL: "http://10.0.0.9:8877")
+        let second = GatewayConfig.direct(name: "Attic", baseURL: "http://10.0.0.7:8877")
         hub.upsertGateway(first, token: "")
         hub.upsertGateway(second, token: "")
         defer {
@@ -110,7 +110,7 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
 
         let untouched = try #require(hub.remoteRuntimes.first { $0.id == second.id })
 
-        first.baseURL = "http://10.0.0.10:8877"
+        first = GatewayConfig.direct(id: first.id, name: first.name, baseURL: "http://10.0.0.10:8877")
         hub.upsertGateway(first, token: "")
 
         let rebuilt = try #require(hub.remoteRuntimes.first { $0.id == first.id })
@@ -124,7 +124,7 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
 @Test func tokenOnlyEditUpdatesLiveStoreWithoutRebuild() throws {
     try withTestDefaults { defaults, service in
         let hub = makeHub(defaults: defaults, keychainService: service)
-        let config = GatewayConfig(name: "Lab", kind: .direct, baseURL: "http://10.0.0.9:8877")
+        let config = GatewayConfig.direct(name: "Lab", baseURL: "http://10.0.0.9:8877")
         hub.upsertGateway(config, token: "old-token-0123456789ab")
         defer { hub.removeGateway(id: config.id) }
 
@@ -143,7 +143,7 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
 @Test func aggregatesSumAcrossGateways() throws {
     try withTestDefaults { defaults, service in
         let hub = makeHub(defaults: defaults, keychainService: service)
-        let config = GatewayConfig(name: "Spark", kind: .direct, baseURL: "http://10.0.0.9:8877")
+        let config = GatewayConfig.direct(name: "Spark", baseURL: "http://10.0.0.9:8877")
         hub.upsertGateway(config, token: "")
         defer { hub.removeGateway(id: config.id) }
 
@@ -173,7 +173,7 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
 @Test func tunnelFailureRoutesDiagnosticToThatStoreOnly() throws {
     try withTestDefaults { defaults, service in
         let hub = makeHub(defaults: defaults, keychainService: service)
-        let config = GatewayConfig(name: "Spark", kind: .ssh, sshUser: "a", sshHost: "spark.invalid")
+        let config = GatewayConfig.ssh(name: "Spark", sshUser: "a", sshHost: "spark.invalid")
         hub.upsertGateway(config, token: "")
         defer { hub.removeGateway(id: config.id) }
 
@@ -191,7 +191,7 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
 @Test func tunnelEstablishedStartsRemoteRefresh() throws {
     try withTestDefaults { defaults, service in
         let hub = makeHub(defaults: defaults, keychainService: service)
-        let config = GatewayConfig(name: "Spark", kind: .ssh, sshUser: "a", sshHost: "spark.invalid")
+        let config = GatewayConfig.ssh(name: "Spark", sshUser: "a", sshHost: "spark.invalid")
         hub.upsertGateway(config, token: "")
         defer { hub.removeGateway(id: config.id) }
 
@@ -208,7 +208,7 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
 @Test func staleTunnelCallbackIsIgnoredAfterReplacement() throws {
     try withTestDefaults { defaults, service in
         let hub = makeHub(defaults: defaults, keychainService: service)
-        let config = GatewayConfig(name: "Spark", kind: .ssh, sshUser: "a", sshHost: "spark.invalid")
+        let config = GatewayConfig.ssh(name: "Spark", sshUser: "a", sshHost: "spark.invalid")
         hub.upsertGateway(config, token: "")
         defer { hub.removeGateway(id: config.id) }
 
@@ -226,7 +226,7 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
 
 @MainActor
 @Test func reachableEndpointURLHonorsForwardsAndDirectHosts() {
-    let sshConfig = GatewayConfig(name: "Spark", kind: .ssh, sshUser: "a", sshHost: "spark")
+    let sshConfig = GatewayConfig.ssh(name: "Spark", sshUser: "a", sshHost: "spark")
     let sshStore = SwitchboardStore(
         controllerBaseURL: "http://127.0.0.1:9999",
         features: .base,
@@ -245,7 +245,7 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
     sshRuntime.forwardedPorts = [8081: 49152]
     #expect(sshRuntime.reachableEndpointURL(for: loopbackStatus) == "http://127.0.0.1:49152/v1")
 
-    let directConfig = GatewayConfig(name: "Lab", kind: .direct, baseURL: "http://10.0.0.9:8877")
+    let directConfig = GatewayConfig.direct(name: "Lab", baseURL: "http://10.0.0.9:8877")
     let directRuntime = GatewayRuntime(config: directConfig, store: sshStore, tunnel: nil)
     // Default loopback bind is not reachable via the controller host.
     #expect(directRuntime.reachableEndpointURL(for: loopbackStatus) == nil)
@@ -269,7 +269,7 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
 @Test func renameGatewayUpdatesLabelWithoutReplacingRuntime() throws {
     try withTestDefaults { defaults, service in
         let hub = makeHub(defaults: defaults, keychainService: service)
-        let config = GatewayConfig(name: "Spark", kind: .direct, baseURL: "http://10.0.0.9:8877")
+        let config = GatewayConfig.direct(name: "Spark", baseURL: "http://10.0.0.9:8877")
         hub.upsertGateway(config, token: "tok-0123456789abcdef")
         defer { hub.removeGateway(id: config.id) }
 
@@ -291,7 +291,7 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
 @Test func discardLiveStatusForForceUpdateClearsBoard() throws {
     try withTestDefaults { defaults, service in
         let hub = makeHub(defaults: defaults, keychainService: service)
-        let config = GatewayConfig(name: "Spark", kind: .direct, baseURL: "http://10.0.0.9:8877")
+        let config = GatewayConfig.direct(name: "Spark", baseURL: "http://10.0.0.9:8877")
         hub.upsertGateway(config, token: "")
         defer { hub.removeGateway(id: config.id) }
 
@@ -343,9 +343,8 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
                 )
             }
         )
-        let config = GatewayConfig(
+        let config = GatewayConfig.ssh(
             name: "Spark",
-            kind: .ssh,
             sshUser: "ubuntu",
             sshHost: "spark.local",
             remotePort: 8877
@@ -389,15 +388,16 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
                 return RemoteAgentDeployer.Result(pairingLink: nil, authToken: nil, log: "ok")
             }
         )
-        let config = GatewayConfig(
+        // A direct gateway carries no ssh fields (the collapsed union forbids
+        // the old `.direct` + sshUser hybrid); the deploy target is built as
+        // an SSH-kind config whose host is derived from the URL hostname.
+        let config = GatewayConfig.direct(
             name: "Spark",
-            kind: .direct,
-            baseURL: "http://dgx-spark.tail123.ts.net:8877",
-            sshUser: "spark"
+            baseURL: "http://dgx-spark.tail123.ts.net:8877"
         )
         let deploy = GatewayHub.agentDeployConfig(for: config)
         #expect(deploy?.sshHost == "dgx-spark.tail123.ts.net")
-        #expect(deploy?.kind == .direct)
+        #expect(deploy?.kind == .ssh)
         hub.upsertGateway(config, token: "tok")
         defer { hub.removeGateway(id: config.id) }
 
@@ -437,9 +437,8 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
                 return RemoteAgentDeployer.Result(pairingLink: nil, authToken: nil, log: "ok")
             }
         )
-        let config = GatewayConfig(
+        let config = GatewayConfig.ssh(
             name: "Spark",
-            kind: .ssh,
             sshUser: "ubuntu",
             sshHost: "spark.local",
             remotePort: 8877

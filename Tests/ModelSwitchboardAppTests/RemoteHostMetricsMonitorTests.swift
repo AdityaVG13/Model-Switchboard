@@ -121,9 +121,8 @@ private func withMetricsHub(
     )
 
     for item in hosts {
-        let config = GatewayConfig(
+        let config = GatewayConfig.direct(
             name: item.name,
-            kind: .direct,
             baseURL: "http://\(item.host):8877"
         )
         hub.upsertGateway(config, token: "token-\(item.name)")

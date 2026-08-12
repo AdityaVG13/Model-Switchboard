@@ -171,11 +171,7 @@ final class GatewayHub {
 
     /// Connection identity: everything except the operator-facing display name.
     private static func sameConnection(_ lhs: GatewayConfig, _ rhs: GatewayConfig) -> Bool {
-        var a = lhs
-        var b = rhs
-        a.name = ""
-        b.name = ""
-        return a == b
+        lhs.id == rhs.id && lhs.enabled == rhs.enabled && lhs.connection == rhs.connection
     }
 
     func applyConfigs(_ configs: [GatewayConfig]) {
@@ -489,22 +485,36 @@ final class GatewayHub {
         live.forceUpdatePhase = .idle
     }
 
-    /// SSH target for pushing the bundled agent. Prefer explicit Settings SSH
-    /// fields; for DIRECT Tailscale gateways fall back to the URL hostname so
+    /// SSH target for pushing the bundled agent. SSH gateways deploy as-is;
+    /// for DIRECT gateways the SSH host falls back to the URL hostname so
     /// operators can force-update without re-entering the MagicDNS name.
+    /// The result is always an SSH-kind config: the deployer only speaks SSH,
+    /// and a direct config can no longer smuggle ssh fields (the collapsed
+    /// union forbids it).
     static func agentDeployConfig(for config: GatewayConfig) -> GatewayConfig? {
-        var deploy = config
-        let explicitHost = deploy.sshHost.trimmingCharacters(in: .whitespacesAndNewlines)
-        if explicitHost.isEmpty {
-            guard config.kind == .direct,
-                  let host = URL(string: config.baseURL)?.host?
-                    .trimmingCharacters(in: .whitespacesAndNewlines),
-                  !host.isEmpty
+        switch config.connection {
+        case .ssh(let ssh):
+            guard !ssh.sshHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return nil
+            }
+            let deploy = config
+            guard !deploy.hasUnsafeSSHDestination else { return nil }
+            return deploy
+        case .direct(let direct):
+            guard let host = URL(string: direct.baseURL)?.host?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+                !host.isEmpty
             else { return nil }
-            deploy.sshHost = host
+            let deploy = GatewayConfig.ssh(
+                id: config.id,
+                name: config.name,
+                sshHost: host,
+                remotePort: direct.remotePort,
+                enabled: config.enabled
+            )
+            guard !deploy.hasUnsafeSSHDestination else { return nil }
+            return deploy
         }
-        guard !deploy.hasUnsafeSSHDestination else { return nil }
-        return deploy
     }
 
     private func bounceSSHRuntime(id: String, preservingPhase: GatewayForceUpdatePhase) {

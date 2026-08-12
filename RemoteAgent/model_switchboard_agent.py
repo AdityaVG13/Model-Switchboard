@@ -3166,7 +3166,7 @@ def build_link_code(agent_port: int, direct_host: str | None = None) -> dict[str
     link = (
         "modelswitchboard-gateway://"
         f"{urllib.parse.quote(user)}@{host}"
-        f"?name={urllib.parse.quote(short_host)}&agent_port={agent_port}"
+        f"?name={urllib.parse.quote(short_host)}&agent_port={agent_port}&mode=ssh"
     )
     return {
         "user": user,
