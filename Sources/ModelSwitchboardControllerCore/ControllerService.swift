@@ -253,7 +253,7 @@ public final class ControllerService: @unchecked Sendable {
       ControllerIntegration(
         id: "droid",
         displayName: "Factory Droid",
-        kind: "model_registry",
+        kind: .modelRegistry,
         capabilities: ["sync"],
         syncLabel: "Sync Droid",
         description: "Sync managed local profiles into Factory Droid custom model settings."

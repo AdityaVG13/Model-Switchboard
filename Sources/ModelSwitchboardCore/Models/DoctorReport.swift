@@ -32,24 +32,59 @@ public struct LaunchAgentStatus: Codable, Equatable, Sendable {
     }
 }
 
+/// Severity of a doctor finding, parsed once at the decode boundary. Wire
+/// strings are the raw values ("P0"…"P3"); anything unrecognized decodes to
+/// `.unknown` instead of failing the whole report (L27).
+public enum DoctorSeverity: String, Equatable, Sendable {
+    case p0 = "P0"
+    case p1 = "P1"
+    case p2 = "P2"
+    case p3 = "P3"
+    /// Unrecognized wire value, tolerated at decode. Never a blocker.
+    case unknown = "unknown"
+
+    /// P0/P1 findings block health; everything else (including `.unknown`)
+    /// is non-blocking — matches the old string comparison semantics.
+    public var isBlocker: Bool { self == .p0 || self == .p1 }
+
+    public init(wireValue: String?) {
+        self = wireValue.flatMap(DoctorSeverity.init(rawValue:)) ?? .unknown
+    }
+}
+
+extension DoctorSeverity: Codable {
+    public init(from decoder: Decoder) throws {
+        self = DoctorSeverity(wireValue: try? decoder.singleValueContainer().decode(String.self))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}
+
 public struct DoctorFinding: Codable, Equatable, Sendable, Identifiable {
     public let id: String
-    public let severity: String
+    public let severity: DoctorSeverity
     public let subsystem: String
     public let message: String
     public let evidence: String?
     public let remediation: String?
-    public let autoFixable: Bool?
+    /// The fixer command that can auto-remediate this finding. A finding is
+    /// auto-fixable iff it names a fixer: `autoFixable` is DERIVED, never
+    /// stored, so `autoFixable == true` without a fixer (or a fixer that is
+    /// not auto-fixable) is unrepresentable (L27).
     public let fixer: String?
+
+    public var autoFixable: Bool { fixer != nil }
 
     public init(
         id: String,
-        severity: String,
+        severity: DoctorSeverity,
         subsystem: String,
         message: String,
         evidence: String? = nil,
         remediation: String? = nil,
-        autoFixable: Bool? = nil,
         fixer: String? = nil
     ) {
         self.id = id
@@ -58,7 +93,6 @@ public struct DoctorFinding: Codable, Equatable, Sendable, Identifiable {
         self.message = message
         self.evidence = evidence
         self.remediation = remediation
-        self.autoFixable = autoFixable
         self.fixer = fixer
     }
 
@@ -69,7 +103,6 @@ public struct DoctorFinding: Codable, Equatable, Sendable, Identifiable {
         case message
         case evidence
         case remediation
-        case autoFixable = "auto_fixable"
         case fixer
     }
 }
@@ -85,9 +118,15 @@ public struct DoctorReport: Codable, Equatable, Sendable {
     public let doctorContractVersion: String?
     public let toolVersion: String?
     public let generatedAt: String?
-    public let healthy: Bool?
     public let findings: [DoctorFinding]?
     public let nextSteps: [String]?
+
+    /// Derived from `findings` — a P0/P1 finding means unhealthy. This is the
+    /// single owner; `healthy` is never carried on the wire (L27), so the
+    /// report cannot claim healthy while a blocker finding exists.
+    public var healthy: Bool {
+        !(findings ?? []).contains { $0.severity.isBlocker }
+    }
 
     public init(
         controller: ControllerHeartbeat,
@@ -100,7 +139,6 @@ public struct DoctorReport: Codable, Equatable, Sendable {
         doctorContractVersion: String? = nil,
         toolVersion: String? = nil,
         generatedAt: String? = nil,
-        healthy: Bool? = nil,
         findings: [DoctorFinding]? = nil,
         nextSteps: [String]? = nil
     ) {
@@ -114,7 +152,6 @@ public struct DoctorReport: Codable, Equatable, Sendable {
         self.doctorContractVersion = doctorContractVersion
         self.toolVersion = toolVersion
         self.generatedAt = generatedAt
-        self.healthy = healthy
         self.findings = findings
         self.nextSteps = nextSteps
     }
@@ -130,7 +167,6 @@ public struct DoctorReport: Codable, Equatable, Sendable {
         case doctorContractVersion = "doctor_contract_version"
         case toolVersion = "tool_version"
         case generatedAt = "generated_at"
-        case healthy
         case findings
         case nextSteps = "next_steps"
     }

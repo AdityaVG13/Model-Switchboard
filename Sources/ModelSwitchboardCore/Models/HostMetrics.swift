@@ -1,5 +1,30 @@
 import Foundation
 
+/// Where the agent's GPU metrics came from, parsed once at the decode
+/// boundary. Wire strings are the raw values ("nvidia-smi" / "unavailable");
+/// anything unrecognized decodes to `.unknown` instead of failing the payload
+/// (L28).
+public enum GPUSource: String, Equatable, Sendable {
+    case nvidiaSmi = "nvidia-smi"
+    case unavailable = "unavailable"
+    case unknown = "unknown"
+
+    public init(wireValue: String?) {
+        self = wireValue.flatMap(GPUSource.init(rawValue:)) ?? .unknown
+    }
+}
+
+extension GPUSource: Codable {
+    public init(from decoder: Decoder) throws {
+        self = GPUSource(wireValue: try? decoder.singleValueContainer().decode(String.self))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}
+
 /// Live host stats from a remote agent (`GET /api/host/metrics`).
 ///
 /// Units (documented for UI):
@@ -12,7 +37,7 @@ public struct HostMetricsPayload: Codable, Equatable, Sendable {
     public let cpuPercent: Double?
     public let memory: HostMemoryMetrics?
     public let gpus: [HostGPUMetrics]
-    public let gpuSource: String?
+    public let gpuSource: GPUSource?
     public let processes: [HostGPUProcess]
     public let agentVersion: String?
 
@@ -22,7 +47,7 @@ public struct HostMetricsPayload: Codable, Equatable, Sendable {
         cpuPercent: Double? = nil,
         memory: HostMemoryMetrics? = nil,
         gpus: [HostGPUMetrics] = [],
-        gpuSource: String? = nil,
+        gpuSource: GPUSource? = nil,
         processes: [HostGPUProcess] = [],
         agentVersion: String? = nil
     ) {
@@ -54,7 +79,7 @@ public struct HostMetricsPayload: Codable, Equatable, Sendable {
         cpuPercent = try container.decodeIfPresent(Double.self, forKey: .cpuPercent)
         memory = try container.decodeIfPresent(HostMemoryMetrics.self, forKey: .memory)
         gpus = try container.decodeIfPresent([HostGPUMetrics].self, forKey: .gpus) ?? []
-        gpuSource = try container.decodeIfPresent(String.self, forKey: .gpuSource)
+        gpuSource = try container.decodeIfPresent(GPUSource.self, forKey: .gpuSource)
         processes = try container.decodeIfPresent([HostGPUProcess].self, forKey: .processes) ?? []
         agentVersion = try container.decodeIfPresent(String.self, forKey: .agentVersion)
     }
@@ -89,7 +114,16 @@ public struct HostGPUMetrics: Codable, Equatable, Identifiable, Sendable {
     public let vramUsedMB: Double?
     public let vramTotalMB: Double?
 
-    public var id: Int { index ?? name?.hashValue ?? 0 }
+    /// Stable identity for chart/row continuity: the nvidia-smi index when
+    /// present, else the GPU name, else a fixed fallback. The former
+    /// `name?.hashValue` id was unstable across launches (Swift String hashing
+    /// is randomized per process), so identical rows could change identity
+    /// between polls (L28).
+    public var id: String {
+        if let index { return "gpu-\(index)" }
+        if let name { return name }
+        return "gpu-unknown"
+    }
 
     public init(
         index: Int? = nil,

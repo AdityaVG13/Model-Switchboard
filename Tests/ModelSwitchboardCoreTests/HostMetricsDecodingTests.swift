@@ -31,7 +31,9 @@ import Testing
     #expect(payload.memory?.usedMB == 32768)
     #expect(payload.gpus.count == 1)
     #expect(payload.gpus[0].vramUsedMB == 55296)
-    #expect(payload.gpuSource == "nvidia-smi")
+    // L28: gpu_source parsed once at the boundary into the typed source.
+    #expect(payload.gpuSource == .nvidiaSmi)
+    #expect(payload.gpus[0].id == "gpu-0")
     #expect(payload.processes.first?.pid == 4242)
 }
 

@@ -215,8 +215,10 @@ struct RemoteAgentConformanceTests {
 
         let metrics = try await client.fetchHostMetrics()
         #expect(!(metrics.host ?? "").isEmpty)
+        // L28: gpu_source is typed at the decode boundary; the agent emits
+        // exactly these two values.
         if let source = metrics.gpuSource {
-            #expect(["nvidia-smi", "unavailable"].contains(source))
+            #expect(source == .nvidiaSmi || source == .unavailable)
         }
 
         let started = try await client.start(profile: "conformance-stub")

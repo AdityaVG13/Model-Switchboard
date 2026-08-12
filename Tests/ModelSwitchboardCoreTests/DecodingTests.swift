@@ -66,14 +66,22 @@ import ModelSwitchboardTestSupport
     #expect(report.launchAgent.running)
     #expect(report.profilesDirectory == "/Users/example/.model-switchboard/model-profiles")
     #expect(report.profiles.count == 1)
-    #expect(report.profiles[0].runtimeLabel == "MLX")
-    #expect(report.profiles[0].runtimeTags?.contains("apple-silicon") == true)
-    #expect(report.profiles[0].launchMode == "adapter")
+    // L12: the diagnostic is a role-flagged view over the shared snapshot —
+    // status facts live in `status` exactly once.
+    #expect(report.profiles[0].status.runtimeLabel == "MLX")
+    #expect(report.profiles[0].status.runtimeTags?.contains("apple-silicon") == true)
+    #expect(report.profiles[0].status.launchMode == "adapter")
     #expect(report.profiles[0].errors == ["missing MODEL_DIR or MODEL_REPO"])
     #expect(report.profiles[0].warnings == ["base_url is empty; endpoint health checks may fail"])
+    // L27: healthy is DERIVED from findings (one P1 blocker) — the wire key
+    // is gone from the fixture.
     #expect(report.healthy == false)
     #expect(report.findings?.count == 1)
     #expect(report.findings?.first?.id == "fm-profile-example-mlx-missing-model")
+    #expect(report.findings?.first?.severity == .p1)
+    // L27: autoFixable derives from fixer presence — no fixer means not
+    // auto-fixable, and the pair cannot disagree.
+    #expect(report.findings?.first?.autoFixable == false)
     #expect(report.nextSteps?.first?.contains("Fix missing model sources") == true)
 }
 

@@ -26,7 +26,7 @@ private func sparkMetrics(
                 vramTotalMB: vramTotal
             )
         ],
-        gpuSource: "nvidia-smi",
+        gpuSource: .nvidiaSmi,
         processes: processPID.map { [HostGPUProcess(pid: $0, vramMB: processVRAM)] } ?? [],
         agentVersion: "1.1.2"
     )

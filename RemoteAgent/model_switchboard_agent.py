@@ -2701,7 +2701,6 @@ class AgentService:
             "schema_version": "1",
             "tool_version": AGENT_VERSION,
             "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "healthy": True,
             "findings": [],
             "next_steps": [],
         }

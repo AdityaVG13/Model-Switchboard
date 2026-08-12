@@ -141,18 +141,9 @@ import ModelSwitchboardTestSupport
         actionName: "Start",
         status: StressController.status(running: true, ready: false),
         diagnostic: ProfileDiagnostic(
-            profile: StressTestConfig.profile,
-            displayName: "Stress Profile",
-            runtime: "llama.cpp",
-            runtimeLabel: "llama.cpp",
-            runtimeTags: ["llama.cpp"],
-            launchMode: "adapter",
+            status: StressController.status(running: false, ready: false),
             errors: ["llama-server not found in controller PATH; set SERVER_BIN to an absolute executable path"],
-            warnings: [],
-            running: false,
-            ready: false,
-            pid: nil,
-            baseURL: "http://127.0.0.1:8999/v1"
+            warnings: []
         )
     )
 
