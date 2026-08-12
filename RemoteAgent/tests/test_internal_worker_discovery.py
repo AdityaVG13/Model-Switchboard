@@ -44,15 +44,12 @@ class InternalWorkerDiscoveryTests(unittest.TestCase):
             },
         ]
         with mock.patch.object(discovery, "probe_model_endpoint") as probe:
-            probe.side_effect = lambda port, host="127.0.0.1": {
-                "port": port,
-                "host": host,
-                "ready": True,
-                "health_ok": True,
-                "openai_models": True,
-                "model_ids": [f"model-{port}"],
-                "base_url": f"http://{host}:{port}/v1",
-            }
+            probe.side_effect = lambda port, host="127.0.0.1": discovery.ProbeOutcome(
+                port=port,
+                host=host,
+                health_ok=True,
+                model_ids=[f"model-{port}"],
+            )
             with mock.patch.object(discovery, "port_is_listening", return_value=True):
                 found = discovery.discover_live_model_endpoints(listeners=listeners)
 

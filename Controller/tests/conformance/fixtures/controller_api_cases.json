@@ -92,7 +92,7 @@
     "description": "POST /api/start requires a non-empty profile string",
     "arrange": "none",
     "request": {"method": "POST", "path": "/api/start", "json": {}},
-    "expected": {"status": 400, "json_path_equals": {"error": "invalid_request"}}
+    "expected": {"status": 400, "json_path_equals": {"error": "usage_error"}}
   },
   {
     "id": "MSB-API-ACTION-003",

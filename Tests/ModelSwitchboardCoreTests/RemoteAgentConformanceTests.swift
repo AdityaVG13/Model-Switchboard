@@ -76,8 +76,21 @@ struct RemoteAgentConformanceTests {
         }
 
         func shutdown() {
-            process.terminate()
-            process.waitUntilExit()
+            // Race-safe teardown: waitUntilExit() blocks on a run-loop
+            // termination notification that is silently dropped when the
+            // agent exits before the observer is registered (seen under
+            // parallel suite load), wedging the whole test run. Poll with
+            // a bounded deadline instead, escalating to SIGKILL.
+            if process.isRunning {
+                let exited = DispatchSemaphore(value: 0)
+                process.terminationHandler = { _ in exited.signal() }
+                process.terminate()
+                if exited.wait(timeout: .now() + 5) == .timedOut {
+                    kill(process.processIdentifier, SIGKILL)
+                    _ = exited.wait(timeout: .now() + 2)
+                }
+                process.terminationHandler = nil
+            }
             try? FileManager.default.removeItem(at: root)
         }
 

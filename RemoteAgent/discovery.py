@@ -12,6 +12,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -26,8 +27,11 @@ from model_switchboard_agent import (
     Profile,
     RUNTIME_SPECS,
     SCAN_ROOTS_ENV,
+    _WEIGHT_SUFFIXES,
+    _looks_like_local_fs_path,
     _urlopen_no_redirect,
     canonical_runtime,
+    first_known,
     listener_pid_from_inventory,
     load_agent_config,
     port_is_listening,
@@ -528,21 +532,38 @@ def infer_model_from_command(command: str | None) -> str | None:
     return None
 
 
-def _empty_probe(port: int, host: str = "127.0.0.1") -> dict[str, Any]:
-    return {
-        "port": port,
-        "host": host,
-        "ready": False,
-        "health_ok": False,
-        "openai_models": False,
-        "model_ids": [],
-        "base_url": f"http://{host}:{port}/v1",
-    }
+@dataclass
+class ProbeOutcome:
+    """Outcome of probing one endpoint (L25).
+
+    Make-unrepresentable: `ready` and `openai_models` are DERIVED, never
+    stored — a probe can no longer claim ready while every check failed.
+    The wire-facing dict shape (port/host/ready/health_ok/openai_models/
+    model_ids/base_url) is preserved via as_item_dict().
+    """
+
+    port: int
+    host: str = "127.0.0.1"
+    health_ok: bool = False
+    model_ids: list[str] = field(default_factory=list)
+
+    @property
+    def openai_models(self) -> bool:
+        return bool(self.model_ids)
+
+    @property
+    def ready(self) -> bool:
+        return self.health_ok or self.openai_models
+
+    @property
+    def base_url(self) -> str:
+        return f"http://{self.host}:{self.port}/v1"
 
 
-def probe_model_endpoint(port: int, host: str = "127.0.0.1") -> dict[str, Any]:
+def probe_model_endpoint(port: int, host: str = "127.0.0.1") -> ProbeOutcome:
     """Probe common local model HTTP surfaces. Does not invent identity."""
-    result = _empty_probe(port, host)
+    health_ok = False
+    model_ids: list[str] = []
     health_urls = (
         f"http://{host}:{port}/health",
         f"http://{host}:{port}/v1/health",
@@ -552,7 +573,7 @@ def probe_model_endpoint(port: int, host: str = "127.0.0.1") -> dict[str, Any]:
             request = urllib.request.Request(url, headers={"Accept": "application/json"})
             with _urlopen_no_redirect(request, DISCOVERY_PROBE_TIMEOUT) as response:
                 if 200 <= response.status < 300:
-                    result["health_ok"] = True
+                    health_ok = True
                     break
         except (urllib.error.URLError, OSError, ValueError):
             continue
@@ -570,13 +591,11 @@ def probe_model_endpoint(port: int, host: str = "127.0.0.1") -> dict[str, Any]:
             if isinstance(entry, dict) and isinstance(entry.get("id"), str) and entry["id"]
         ]
         if ids:
-            result["openai_models"] = True
-            result["model_ids"] = ids
+            model_ids = ids
     except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError, AttributeError):
         pass
 
-    result["ready"] = bool(result["health_ok"] or result["openai_models"])
-    return result
+    return ProbeOutcome(port=port, host=host, health_ok=health_ok, model_ids=model_ids)
 
 
 def _roots_hinted_by_path_token(token: str) -> list[Path]:
@@ -753,7 +772,7 @@ def scan_port_claim_directories(
             "markers": markers,
             "display_name": display,
             "model_hint": model_hint,
-            "runtime_hint": runtime_hint or "unknown",
+            "runtime_hint": first_known(runtime_hint),
             "host": flags.get("HOST") or "127.0.0.1",
             "start_command": start_command,
             "flags": {
@@ -859,17 +878,17 @@ def discover_live_model_endpoints(
         if not looks_model and not claimed:
             continue
 
-        probe = _empty_probe(port)
+        probe = ProbeOutcome(port=port)
         if probes_left > 0 and port_is_listening(str(port)):
             probes_left -= 1
             probe = probe_model_endpoint(port)
 
-        if not probe["ready"] and not looks_model and not claimed:
+        if not probe.ready and not looks_model and not claimed:
             continue
 
         runtime = infer_runtime_from_command(command)
         model_from_cmd = infer_model_from_command(command)
-        model_ids = list(probe.get("model_ids") or [])
+        model_ids = list(probe.model_ids)
         request_model = (
             (model_ids[0] if model_ids else None)
             or model_from_cmd
@@ -889,9 +908,9 @@ def discover_live_model_endpoints(
                 "request_model": request_model,
                 "server_ids": model_ids,
                 "display_name": display,
-                "ready": bool(probe.get("ready")),
-                "health_ok": bool(probe.get("health_ok")),
-                "base_url": probe.get("base_url") or f"http://127.0.0.1:{port}/v1",
+                "ready": probe.ready,
+                "health_ok": probe.health_ok,
+                "base_url": probe.base_url,
                 "source": "discovery",
             }
         )
@@ -907,7 +926,7 @@ def status_dict_from_discovery(
 ) -> dict[str, Any]:
     """Shape a discovery/claim record like a controller status entry."""
     port = str(item.get("port", ""))
-    runtime = item.get("runtime") or item.get("runtime_hint") or "unknown"
+    runtime = first_known(item.get("runtime"), item.get("runtime_hint"))
     label, tags, launch_mode = RUNTIME_SPECS.get(
         runtime, (runtime, ["discovered", "external"], "external")
     )
@@ -986,13 +1005,12 @@ def profile_from_claim(claim: dict[str, Any]) -> Profile:
     flags_safe = flags if isinstance(flags, dict) else {}
     model_raw = str(flags_safe.get("MODEL") or flags_safe.get("MODEL_PATH") or request_s)
     model_file_flag = str(flags_safe.get("MODEL_FILE") or "").strip()
-    weight_suffixes = (".gguf", ".safetensors", ".bin", ".pt", ".pth", ".onnx")
     # Prefer explicit MODEL_FILE; otherwise only treat MODEL= as a file when it
     # has a weight suffix. HF/vLLM directories stay on MODEL_PATH / MODEL_DIR so
     # missing_artifacts does not false-positive on live directory checkpoints.
     if model_file_flag:
         model_file = model_file_flag
-    elif any(model_raw.lower().endswith(suffix) for suffix in weight_suffixes):
+    elif any(model_raw.lower().endswith(suffix) for suffix in _WEIGHT_SUFFIXES):
         model_file = model_raw
     elif request_s.endswith(".gguf"):
         model_file = request_s
@@ -1001,16 +1019,17 @@ def profile_from_claim(claim: dict[str, Any]) -> Profile:
     model_dir = str(flags_safe.get("MODEL_DIR") or flags_safe.get("MODEL_REPO") or "")
     if not model_dir and model_raw and not model_file:
         candidate = Path(model_raw).expanduser()
-        looks_local = model_raw.startswith(("/", "~", "./", "../")) or any(
-            model_raw.lower().endswith(suffix) for suffix in weight_suffixes
-        )
         if candidate.is_dir() or (
-            looks_local and not any(model_raw.lower().endswith(s) for s in weight_suffixes)
+            _looks_like_local_fs_path(model_raw)
+            and not any(model_raw.lower().endswith(s) for s in _WEIGHT_SUFFIXES)
         ):
             model_dir = model_raw
     values: dict[str, str] = {
         "DISPLAY_NAME": str(display),
-        "RUNTIME": "command",
+        # L21: the claim scan's boundary inference (flags RUNTIME/BACKEND/
+        # LLAMA_BIN/VLLM_BIN) is the single runtime source for claim profiles.
+        # No interior re-derivation from START_COMMAND later.
+        "RUNTIME": first_known(claim.get("runtime_hint")),
         "REQUEST_MODEL": request_s,
         "SERVER_MODEL_ID": Path(request_s).name if ("/" in request_s or request_s.endswith(".gguf")) else request_s,
         "PORT": port,
@@ -1022,10 +1041,11 @@ def profile_from_claim(claim: dict[str, Any]) -> Profile:
         "MODEL_FILE": model_file,
         "MODEL_DIR": model_dir,
         "MODEL_REPO": str(flags_safe.get("MODEL_REPO") or ""),
-        "RUNTIME_TAGS": "claimed,launch-folder",
     }
     if stop:
         values["STOP_COMMAND"] = stop
     if not start:
         values["LAUNCH_MODE"] = "external"
-    return Profile(name=name, values=values)
+    # L24: tags pass as a parsed list (no comma-string re-encoding); the
+    # env-file comma format is only for real files on disk.
+    return Profile(name=name, values=values, tags=["claimed", "launch-folder"])

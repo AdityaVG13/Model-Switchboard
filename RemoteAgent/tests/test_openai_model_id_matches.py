@@ -10,7 +10,7 @@ AGENT_DIR = Path(__file__).resolve().parents[1]
 if str(AGENT_DIR) not in sys.path:
     sys.path.insert(0, str(AGENT_DIR))
 
-from model_switchboard_agent import openai_model_id_matches  # noqa: E402
+from model_switchboard_agent import ANY_MODEL_ID, openai_model_id_matches  # noqa: E402
 
 
 class OpenAIModelIdMatchesTests(unittest.TestCase):
@@ -36,10 +36,22 @@ class OpenAIModelIdMatchesTests(unittest.TestCase):
             )
         )
 
-    def test_empty_expected_requires_any_id(self) -> None:
-        self.assertTrue(openai_model_id_matches(None, ["a"]))
-        self.assertFalse(openai_model_id_matches(None, []))
+    def test_no_expected_id_never_matches(self) -> None:
+        # L23: None means "no expected id" — identity must be verifiable.
+        # The old "None matches anything" encoding is gone; use ANY_MODEL_ID
+        # for an explicit accept-any.
+        self.assertFalse(openai_model_id_matches(None, ["a"]))
+        self.assertFalse(openai_model_id_matches("", ["a"]))
         self.assertFalse(openai_model_id_matches("", []))
+        self.assertTrue(openai_model_id_matches(ANY_MODEL_ID, ["a"]))
+        self.assertFalse(openai_model_id_matches(ANY_MODEL_ID, []))
+
+    def test_full_path_expected_matches_basename_id(self) -> None:
+        # Explicit basename rule, other direction: expected full path vs
+        # basename id from the server.
+        self.assertTrue(
+            openai_model_id_matches("/data/models/x/model.gguf", ["model.gguf"])
+        )
 
     def test_mismatch(self) -> None:
         self.assertFalse(

@@ -67,7 +67,7 @@ import Testing
     let router = ControllerRouter(service: fixture.service, authToken: nil)
     let missingField = router.handle(jsonRequest(path: "/api/start", object: [:]))
     #expect(missingField.status == 400)
-    #expect(errorCode(missingField) == "invalid_request")
+    #expect(errorCode(missingField) == "usage_error")
 
     let malformed = router.handle(
       .init(method: "POST", target: "/api/stop-all", body: Data("{".utf8)))

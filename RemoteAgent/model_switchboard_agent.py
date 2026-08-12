@@ -114,14 +114,57 @@ def is_tailscale_ip(address: str) -> bool:
     return first == 100 and 64 <= second <= 127
 
 
-def tailscale_status() -> tuple[str | None, str | None]:
-    """Return (ipv4, magic_dns_name) for this host's tailnet presence.
+@dataclass(frozen=True)
+class TailscalePresence:
+    """This host's tailnet presence — present / absent / failed (L19).
+
+    Smart-constructor union: the two-optional tuple is gone. A failed or
+    absent presence carries no ipv4, and a present presence carries no error —
+    the illegal combinations are unrepresentable.
+    """
+
+    _ipv4: str | None = None
+    _dns_name: str | None = None
+    _error: str | None = None
+
+    @classmethod
+    def present_with(cls, ipv4: str, dns_name: str | None = None) -> "TailscalePresence":
+        return cls(_ipv4=ipv4, _dns_name=dns_name)
+
+    @classmethod
+    def absent(cls) -> "TailscalePresence":
+        return cls()
+
+    @classmethod
+    def failed(cls, error: str) -> "TailscalePresence":
+        return cls(_error=error)
+
+    @property
+    def present(self) -> bool:
+        return self._ipv4 is not None
+
+    @property
+    def ipv4(self) -> str | None:
+        return self._ipv4
+
+    @property
+    def dns_name(self) -> str | None:
+        return self._dns_name
+
+    @property
+    def error(self) -> str | None:
+        return self._error
+
+
+def tailscale_status() -> TailscalePresence:
+    """Tailnet presence for this host (CLI-backed, no interface sniffing).
 
     Requires the Tailscale CLI (`tailscale status` or `tailscale ip`). Interface
     scans for any CGNAT address are intentionally not used for bind decisions —
     that could treat a non-tailnet 100.64/10 address as "tailnet-only" and skip
     the normal non-loopback auth rules.
     """
+    status_failed: str | None = None
     try:
         result = subprocess.run(
             ["tailscale", "status", "--json"],
@@ -133,9 +176,9 @@ def tailscale_status() -> tuple[str | None, str | None]:
             ips = [ip for ip in self_info.get("TailscaleIPs") or [] if is_tailscale_ip(ip)]
             dns_name = (self_info.get("DNSName") or "").rstrip(".") or None
             if ips:
-                return ips[0], dns_name
-    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
-        pass
+                return TailscalePresence.present_with(ips[0], dns_name)
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError) as error:
+        status_failed = f"tailscale status failed: {error}"
     try:
         result = subprocess.run(
             ["tailscale", "ip", "-4"],
@@ -144,10 +187,12 @@ def tailscale_status() -> tuple[str | None, str | None]:
         if result.returncode == 0:
             for line in result.stdout.split():
                 if is_tailscale_ip(line.strip()):
-                    return line.strip(), None
-    except (OSError, subprocess.TimeoutExpired):
-        pass
-    return None, None
+                    return TailscalePresence.present_with(line.strip(), None)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        status_failed = status_failed or f"tailscale ip failed: {error}"
+    if status_failed:
+        return TailscalePresence.failed(status_failed)
+    return TailscalePresence.absent()
 
 
 class AgentError(Exception):
@@ -164,19 +209,19 @@ class AgentError(Exception):
 
 class UsageError(AgentError):
     http_status = 400
-    code = "invalid_request"
+    code = "usage_error"
     public_message = "invalid request"
 
 
 class InvalidConfigurationError(AgentError):
     http_status = 400
-    code = "invalid_request"
+    code = "invalid_configuration"
     public_message = "invalid request"
 
 
 class InvalidProfileError(AgentError):
     http_status = 400
-    code = "invalid_request"
+    code = "invalid_profile"
     public_message = "invalid request"
 
 
@@ -282,6 +327,19 @@ def canonical_runtime(value: str | None) -> str:
     return RUNTIME_ALIASES.get(normalized, normalized)
 
 
+def first_known(*values: str | None) -> str:
+    """First value that is not None/empty and not the "unknown" sentinel.
+
+    L07: the single place "unknown" is special-cased for prefer-known merges.
+    Every caller that must prefer a real runtime over an unknown one routes
+    through here instead of re-implementing the rule.
+    """
+    for value in values:
+        if value and value != "unknown":
+            return value
+    return "unknown"
+
+
 def _parse_env_value(raw: str, file: Path, line: int) -> str:
     first = raw[:1]
     if first not in ("'", '"'):
@@ -361,6 +419,10 @@ def parse_json_profile(file: Path) -> dict[str, str]:
 class Profile:
     name: str
     values: dict[str, str]
+    # L24: parsed tag list supplied at the claim boundary (profile_from_claim).
+    # Env-file profiles leave this None; RUNTIME_TAGS/TAGS parse in
+    # runtime_tags below — the single comma-string parse site.
+    tags: list[str] | None = None
 
     def __post_init__(self) -> None:
         normalized = dict(self.values)
@@ -398,9 +460,9 @@ class Profile:
     @property
     def runtime_tags(self) -> list[str]:
         configured = (
-            (self.values.get("RUNTIME_TAGS") or self.values.get("TAGS") or "")
-            .replace(",", " ")
-            .split()
+            list(self.tags)
+            if self.tags is not None
+            else parse_tag_string(self.values.get("RUNTIME_TAGS") or self.values.get("TAGS") or "")
         )
         _, spec_tags, _ = self.runtime_spec
         result: list[str] = []
@@ -499,14 +561,35 @@ def _looks_like_local_fs_path(raw: str) -> bool:
     return any(lower.endswith(suffix) for suffix in _WEIGHT_SUFFIXES)
 
 
-def missing_local_model_artifacts(values: dict[str, str] | dict[str, Any]) -> list[str]:
-    """Return local MODEL_* paths that are missing on disk (empty = ok / nothing to check)."""
-    missing: list[str] = []
+def resolve_model_artifact_fields(
+    values: dict[str, str] | dict[str, Any],
+) -> tuple[str, str, str]:
+    """Single owner of the MODEL_DIR / MODEL_PATH / MODEL_FILE precedence (L20).
+
+    Documented precedence:
+      1. MODEL_DIR  — weights/checkpoint directory (HF / vLLM style).
+      2. MODEL_PATH — explicit path, file or directory.
+      3. MODEL_FILE — single-file weights; a RELATIVE MODEL_FILE resolves
+         against MODEL_DIR when the directory looks like a local path.
+    Non-local values (HF ids, URLs) are kept as data but never validated
+    against disk. Callers use this one function instead of re-deriving the
+    triple or re-implementing the relative-join rule.
+    """
     model_dir_raw = str(values.get("MODEL_DIR") or "").strip()
     model_path_raw = str(values.get("MODEL_PATH") or "").strip()
     model_file_raw = str(values.get("MODEL_FILE") or "").strip()
+    resolved_file = model_file_raw
+    if model_file_raw and not Path(model_file_raw).expanduser().is_absolute():
+        if model_dir_raw and _looks_like_local_fs_path(model_dir_raw):
+            resolved_file = str(Path(model_dir_raw).expanduser() / model_file_raw)
+    return model_dir_raw, model_path_raw, resolved_file
 
-    model_dir: Path | None = None
+
+def missing_local_model_artifacts(values: dict[str, str] | dict[str, Any]) -> list[str]:
+    """Return local MODEL_* paths that are missing on disk (empty = ok / nothing to check)."""
+    missing: list[str] = []
+    model_dir_raw, model_path_raw, model_file_raw = resolve_model_artifact_fields(values)
+
     if model_dir_raw and _looks_like_local_fs_path(model_dir_raw):
         model_dir = Path(model_dir_raw).expanduser()
         if not model_dir.is_dir():
@@ -519,10 +602,6 @@ def missing_local_model_artifacts(values: dict[str, str] | dict[str, Any]) -> li
 
     if model_file_raw and _looks_like_local_fs_path(model_file_raw):
         model_file = Path(model_file_raw).expanduser()
-        if not model_file.is_absolute() and model_dir is not None:
-            model_file = model_dir / model_file_raw
-        elif not model_file.is_absolute() and model_dir_raw and _looks_like_local_fs_path(model_dir_raw):
-            model_file = Path(model_dir_raw).expanduser() / model_file_raw
         # HF / vLLM style checkpoints are directories; single-file weights are files.
         # Claim profiles historically stuffed MODEL= into MODEL_FILE for both.
         if not (model_file.is_file() or model_file.is_dir()):
@@ -536,6 +615,15 @@ def missing_local_model_artifacts(values: dict[str, str] | dict[str, Any]) -> li
             seen.add(path)
             ordered.append(path)
     return ordered
+
+
+def parse_tag_string(raw: str) -> list[str]:
+    """Comma/space-separated tag list from an env value (L20/L24).
+
+    The single parse owner for the RUNTIME_TAGS/TAGS env format; claim
+    profiles pass a parsed list via Profile.tags instead of re-encoding.
+    """
+    return (raw or "").replace(",", " ").split()
 
 
 class ProfileRepository:
@@ -1255,7 +1343,6 @@ from discovery import (  # noqa: E402  — after Profile/process helpers + path 
     command_looks_like_model_server,
     discover_live_model_endpoints,
     infer_model_from_command,
-    infer_runtime_from_command,
     list_listening_tcp,
     parse_loose_env_assignments,
     probe_model_endpoint,
@@ -1629,15 +1716,26 @@ class AgentConfiguration:
 
 
 
+# L23: explicit sentinel for "accept any reported model id". None is not
+# overloaded to mean this — a missing expected id never matches. The value
+# cannot be a real /v1/models id (angle brackets are not valid in ids).
+ANY_MODEL_ID = "<any-model-id>"
+
+
 def openai_model_id_matches(expected: str | None, ids: list[str], *aliases: str) -> bool:
     """True when *expected* matches a /v1/models id loosely.
 
-    llama.cpp often returns a full weights path as `id` while claim profiles
-    store SERVER_MODEL_ID as the basename (or the reverse). Also accept any
-    explicit aliases (e.g. REQUEST_MODEL).
+    Explicit matching rule (tested): an exact id match, or basename equality
+    in either direction — llama.cpp often returns a full weights path as `id`
+    while claim profiles store SERVER_MODEL_ID as the basename (or the
+    reverse). Explicit aliases (e.g. REQUEST_MODEL) join the candidate set.
+    L23: None (no expected id) NEVER matches — identity must be verifiable.
+    Pass ANY_MODEL_ID to accept any non-empty id list explicitly.
     """
-    if not expected:
+    if expected is ANY_MODEL_ID or expected == ANY_MODEL_ID:
         return bool(ids)
+    if not expected:
+        return False
     candidates = {expected}
     for alias in aliases:
         alias_s = (alias or "").strip()
@@ -1713,7 +1811,9 @@ class AgentService:
                     name=name,
                     values={
                         "DISPLAY_NAME": str(item.get("display_name") or request),
-                        "RUNTIME": str(item.get("runtime") or "unknown"),
+                        # L07: canonical_runtime is the single owner of the
+                        # "absent runtime stays unknown" rule.
+                        "RUNTIME": canonical_runtime(item.get("runtime")),
                         "REQUEST_MODEL": request,
                         "SERVER_MODEL_ID": request,
                         "PORT": str(port),
@@ -1804,9 +1904,12 @@ class AgentService:
                             "ready": live.get("ready"),
                             "server_ids": live.get("server_ids"),
                             "base_url": live.get("base_url"),
-                            "runtime": live.get("runtime")
-                            if live.get("runtime") != "unknown"
-                            else claim.get("runtime_hint") or "unknown",
+                            # L07: prefer-known merge routes through the one
+                            # helper — live discovery inference wins, the claim
+                            # flag hint backs it up, "unknown" is the fallback.
+                            "runtime": first_known(
+                                live.get("runtime"), claim.get("runtime_hint")
+                            ),
                             "request_model": live.get("request_model")
                             if live.get("request_model")
                             and not str(live.get("request_model")).startswith("port-")
@@ -1818,7 +1921,7 @@ class AgentService:
                 else:
                     merged["ready"] = False
                     merged["request_model"] = claim.get("model_hint") or f"port-{port}"
-                    merged["runtime"] = claim.get("runtime_hint") or "unknown"
+                    merged["runtime"] = first_known(claim.get("runtime_hint"))
                 statuses.append(
                     status_dict_from_discovery(
                         merged,
@@ -2324,22 +2427,11 @@ class AgentService:
         # L08: `launchable` was deleted from the wire — Swift derives it from
         # missing_artifacts + running + ready (provably the same formula).
         command = process_command(pid) if ((alive or zombie) and pid) else None
-        # Claim/command profiles often launch vLLM/llama.cpp via START_COMMAND
-        # but keep RUNTIME=command. Prefer the live process (or start command)
-        # so Mac filters like "vLLM" still match running servers.
-        inferred_source = command or (profile.get("START_COMMAND") or "")
-        inferred = infer_runtime_from_command(inferred_source)
-        if inferred != "unknown":
-            runtime = inferred
-            inferred_label, inferred_tags, inferred_mode = RUNTIME_SPECS.get(
-                inferred, (inferred, ["discovered", "external"], "external")
-            )
-            label = inferred_label
-            # Keep claim/managed tags while adding the real family.
-            merged_tags = list(dict.fromkeys(list(inferred_tags) + list(tags or [])))
-            tags = merged_tags
-            if launch_mode == "command" and inferred_mode != "command":
-                launch_mode = inferred_mode
+        # L21: no interior runtime re-derivation. `runtime` / `label` / `tags` /
+        # `launch_mode` come from the boundary parse (profile.runtime_spec on
+        # the profile's RUNTIME + START_COMMAND). The live process command
+        # never overrides the configured runtime here; discovery rows get their
+        # runtime inferred once at the discovery boundary instead.
         return {
             "profile": profile.name,
             "display_name": profile.display_name,
@@ -3164,12 +3256,12 @@ def build_configuration(args: argparse.Namespace) -> AgentConfiguration:
         host = args.unsafe_bind
         unsafe = True
     if getattr(args, "tailscale", False):
-        ipv4, _ = tailscale_status()
-        if ipv4 is None:
+        presence = tailscale_status()
+        if not presence.present:
             raise InvalidConfigurationError(
                 "--tailscale: no Tailscale address found — is tailscaled running?"
             )
-        host = ipv4
+        host = presence.ipv4 or host
         tailscale = True
     explicit_profiles = getattr(args, "profiles_dir", None)
     if explicit_profiles is not None:
@@ -3213,12 +3305,12 @@ def _run_link(args: argparse.Namespace, configuration: AgentConfiguration) -> in
 
     direct_host: str | None = None
     if getattr(args, "tailscale", False):
-        ipv4, dns_name = tailscale_status()
-        if ipv4 is None and dns_name is None:
+        presence = tailscale_status()
+        if not presence.present:
             raise InvalidConfigurationError(
                 "--tailscale: no Tailscale address found — is tailscaled running?"
             )
-        direct_host = dns_name or ipv4
+        direct_host = presence.dns_name or presence.ipv4
     info = build_link_code(configuration.port, direct_host=direct_host)
     info["profiles_dir"] = str(configuration.profiles_directory)
     claims = scan_port_claim_directories(agent_root=configuration.root)

@@ -117,8 +117,14 @@ public final class ControllerRouter: @unchecked Sendable {
         return
           (try? error(status: 409, code: "profile_conflict", message: controllerError.description))
           ?? fallback()
-      case .usage, .invalidConfiguration, .invalidProfile:
-        return (try? error(status: 400, code: "invalid_request", message: "invalid request"))
+      case .usage:
+        return (try? error(status: 400, code: "usage_error", message: "invalid request"))
+          ?? fallback()
+      case .invalidConfiguration:
+        return (try? error(status: 400, code: "invalid_configuration", message: "invalid request"))
+          ?? fallback()
+      case .invalidProfile:
+        return (try? error(status: 400, code: "invalid_profile", message: "invalid request"))
           ?? fallback()
       case .unsupported:
         return
