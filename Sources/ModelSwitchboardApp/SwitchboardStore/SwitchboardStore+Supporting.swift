@@ -9,7 +9,7 @@ extension SwitchboardStore {
         // Only offer reopen when those profiles still exist in this store
         // (avoids a dead "Reopen Last Active" after profiles were removed).
         lastActiveProfiles.contains { name in statuses.contains { $0.profile == name } } &&
-        !pendingGlobalActions.contains("reopen-last") &&
+        !pendingGlobalActions.contains(.reopenLastActive) &&
         !statuses.contains(where: \.running) &&
         pendingProfileActions.isEmpty
     }
@@ -113,7 +113,28 @@ extension SwitchboardStore {
         return message
     }
 
-    /// Map raw URLSession / ATS failures to short dashboard copy.
+    /// Record a transient refresh/action failure unless a sticky gateway
+    /// diagnostic (`.blocked`) is active — refresh failures must not clobber it.
+    func recordRefreshFailure(
+        _ error: Error,
+        actionName: String? = nil,
+        profile: String? = nil
+    ) {
+        if case .blocked = refreshState { return }
+        refreshState = .failed(
+            message: Self.userFacingErrorDescription(
+                for: error,
+                actionName: actionName,
+                status: profile.flatMap(statusForProfile),
+                diagnostic: profile.flatMap(diagnosticForProfile)
+            )
+        )
+    }
+
+    /// Map raw URLSession / ATS / socket failures to short dashboard copy.
+    /// Code-based only: NSError domain+code (URLError, POSIX, ATS -1022/-1200)
+    /// walked through the underlying-error chain. Never sniffs
+    /// localizedDescription text.
     static func mapTransportError(_ error: Error) -> String? {
         let nsError = error as NSError
         var chain: [NSError] = [nsError]
@@ -122,32 +143,48 @@ extension SwitchboardStore {
             chain.append(next)
             current = next
         }
-        let joined = chain
-            .map { "\($0.localizedDescription)" }
-            .joined(separator: " ")
-            .lowercased()
 
         // NSURLErrorAppTransportSecurityRequiresSecureConnection == -1022
+        // NSURLErrorSecureConnectionFailed == -1200 (previously matched via the
+        // "secure connection" text; kept code-based so those errors keep the
+        // same ATS copy instead of regressing to the generic description).
         let isATS = chain.contains {
             $0.domain == NSURLErrorDomain && $0.code == -1022
-        } || joined.contains("app transport security") || joined.contains("secure connection")
+        } || chain.contains {
+            $0.domain == NSURLErrorDomain && $0.code == -1200
+        }
         if isATS {
             return "Blocked plain HTTP to this gateway (App Transport Security). Rebuild the app with ATS exceptions, or switch the gateway to SSH tunnel."
         }
-        if let urlError = error as? URLError {
-            switch urlError.code {
-            case .notConnectedToInternet:
-                return "No network route to the gateway."
-            case .cannotFindHost, .dnsLookupFailed:
-                return "Gateway host not found. Check MagicDNS / hostname."
-            case .cannotConnectToHost:
-                return "Gateway refused the connection. Is the agent running?"
-            case .networkConnectionLost:
-                return "Connection to the gateway was lost."
-            case .userAuthenticationRequired, .userCancelledAuthentication:
-                return "Gateway rejected the request (auth). Check the bearer token in Settings."
-            default:
-                break
+
+        for entry in chain {
+            if entry.domain == NSURLErrorDomain {
+                switch URLError.Code(rawValue: entry.code) {
+                case .notConnectedToInternet:
+                    return "No network route to the gateway."
+                case .cannotFindHost, .dnsLookupFailed:
+                    return "Gateway host not found. Check MagicDNS / hostname."
+                case .cannotConnectToHost:
+                    return "Gateway refused the connection. Is the agent running?"
+                case .networkConnectionLost:
+                    return "Connection to the gateway was lost."
+                case .userAuthenticationRequired, .userCancelledAuthentication:
+                    return "Gateway rejected the request (auth). Check the bearer token in Settings."
+                default:
+                    break
+                }
+            } else if entry.domain == NSPOSIXErrorDomain {
+                // POSIX socket codes surfacing from lower layers (tunnel, runner).
+                switch entry.code {
+                case Int(ECONNREFUSED):
+                    return "Gateway refused the connection. Is the agent running?"
+                case Int(ENETUNREACH), Int(EHOSTUNREACH):
+                    return "No network route to the gateway."
+                case Int(ECONNRESET), Int(ENOTCONN):
+                    return "Connection to the gateway was lost."
+                default:
+                    break
+                }
             }
         }
         return nil
@@ -157,15 +194,6 @@ extension SwitchboardStore {
         if let urlError = error as? URLError, urlError.code == .timedOut { return true }
         let nsError = error as NSError
         return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorTimedOut
-    }
-
-    static func actionName(forPendingLabel label: String) -> String {
-        switch label {
-        case "ACTIVATING": "Activate"
-        case "STARTING": "Start"
-        case "STOPPING": "Stop"
-        case "RESTARTING": "Restart"
-        default: label.capitalized
-        }
+            || nsError.domain == NSPOSIXErrorDomain && nsError.code == Int(ETIMEDOUT)
     }
 }

@@ -359,7 +359,7 @@ final class GatewayHub {
     }
 
     var isStopEverythingBusy: Bool {
-        allStores.contains { $0.pendingGlobalActions.contains("stop-all") }
+        allStores.contains { $0.pendingGlobalActions.contains(.stopAll) }
     }
 
     func stopEverything() async {

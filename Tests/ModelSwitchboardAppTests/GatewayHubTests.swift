@@ -182,7 +182,7 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
         hub.tunnelStateChanged(gatewayID: config.id, tunnelID: tunnelID, state: .failed("SSH auth failed."))
 
         #expect(runtime.tunnelState == .failed("SSH auth failed."))
-        #expect(runtime.store.lastError == "SSH auth failed.")
+        #expect(runtime.store.refreshState == .blocked(message: "SSH auth failed."))
         #expect(hub.localStore.lastError == nil)
     }
 }
@@ -300,12 +300,13 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
             ModelFixtures.profileStatus(profile: "stale", port: "8000", running: true, ready: true)
         ]
         runtime.store.lastUpdated = Date()
-        runtime.store.lastError = "stale"
+        runtime.store.refreshState = .failed(message: "stale")
 
         runtime.store.discardLiveStatusForForceUpdate()
 
         #expect(runtime.store.statuses.isEmpty)
         #expect(runtime.store.lastUpdated == nil)
+        #expect(runtime.store.refreshState == .idle)
         #expect(runtime.store.lastError == nil)
     }
 }

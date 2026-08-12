@@ -15,7 +15,7 @@ import ModelSwitchboardTestSupport
         gateway: GatewayContext(config: config),
         autoStartRefresh: false
     )
-    store.lastError = "agent unreachable"
+    store.refreshState = .failed(message: "agent unreachable")
     let runtime = GatewayRuntime(config: config, store: store, tunnel: nil)
     #expect(GatewayConnectionBadge.text(for: runtime) == "DIRECT · ERROR")
 }
@@ -38,7 +38,7 @@ import ModelSwitchboardTestSupport
     #expect(GatewayConnectionBadge.text(for: runtime) == "SSH · FAILED")
 
     runtime.tunnelState = .established
-    store.lastError = "status timeout"
+    store.refreshState = .failed(message: "status timeout")
     #expect(GatewayConnectionBadge.text(for: runtime) == "SSH · ERROR")
 }
 

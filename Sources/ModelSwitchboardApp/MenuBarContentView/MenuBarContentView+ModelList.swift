@@ -185,7 +185,7 @@ extension MenuBarContentView {
                 .foregroundStyle(theme.faint)
             heroButton(
                 "Reopen Last Active",
-                disabled: store.pendingGlobalActions.contains("reopen-last") || store.pendingGlobalActions.contains("stop-all")
+                disabled: store.pendingGlobalActions.contains(.reopenLastActive) || store.pendingGlobalActions.contains(.stopAll)
             ) {
                 Task { await store.reopenLastActive() }
             }

@@ -22,26 +22,20 @@ extension SwitchboardStore {
             if let controllerRoot = response.controllerRoot { self.controllerRoot = controllerRoot }
             try await verify?(client)
             cacheCurrentState()
-            lastError = nil
-            bootstrapDiagnostic = nil
+            refreshState = .refreshed
             lastUpdated = Date()
             await syncAuxiliaryStateAfterMutation()
             return true
         } catch {
             if isBenignCancellation(error) { return false }
-            lastError = bootstrapDiagnostic ?? Self.userFacingErrorDescription(
-                for: error,
-                actionName: actionName,
-                status: profile.flatMap(statusForProfile),
-                diagnostic: profile.flatMap(diagnosticForProfile)
-            )
+            recordRefreshFailure(error, actionName: actionName, profile: profile)
             return false
         }
     }
 
     func runProfileAction(
         _ profile: String,
-        label: String,
+        label: ProfileAction,
         optimisticUpdate: () -> Void,
         action: @escaping (ControllerClient) async throws -> ControllerActionResponse,
         verify: ((ControllerClient) async throws -> Void)? = nil
@@ -55,7 +49,7 @@ extension SwitchboardStore {
         let succeeded = await run(
             action,
             verify: verify,
-            actionName: Self.actionName(forPendingLabel: label),
+            actionName: label.displayName,
             profile: profile
         )
         if !succeeded {

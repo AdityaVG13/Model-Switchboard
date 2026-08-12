@@ -55,7 +55,9 @@ private func makeRemoteStore(
     // A remote store must not fall back to the local gateway's cache file.
     #expect(store.statuses.isEmpty)
     #expect(store.lastError != nil)
-    #expect(store.lastError?.contains("cached") != true)
+    // Structured provenance, not message text: the failure is a plain .failed,
+    // never the cached-state fallback.
+    #expect(store.statusFreshness(relativeTo: .now) != .cached)
 }
 
 @MainActor

@@ -30,6 +30,81 @@ final class SwitchboardStore {
         case error
     }
 
+    /// Single source of truth for the refresh lifecycle and the store's ONE error
+    /// slot. Replaces the parallel `isRefreshing` boolean + `lastError` /
+    /// `bootstrapDiagnostic` string slots: refreshing-while-failed, two errors at
+    /// once, and stale-vs-cached-vs-blocked ambiguity are all unrepresentable now.
+    enum RefreshState: Equatable {
+        /// No refresh has completed yet (initial store, or after a force-update discard).
+        case idle
+        /// A refresh is in flight.
+        case refreshing
+        /// The last refresh (or successful action) completed; freshness is
+        /// time-derived from `lastUpdated`.
+        case refreshed
+        /// The last attempt failed. `message` is user-facing; the board may still
+        /// hold stale data (freshness falls back to .stale/.error by statuses).
+        case failed(message: String)
+        /// A refresh failed and the board is showing the cached payload. The
+        /// "cached" provenance is this case — never re-derived from message text.
+        case failedShowingCached(message: String)
+        /// Sticky gateway-level diagnostic (e.g. tunnel down). Refresh failures
+        /// must not clobber it; only a success (or a discard) clears it.
+        case blocked(message: String)
+
+        /// The user-facing message carried by any failing case.
+        var message: String? {
+            switch self {
+            case .failed(let message), .failedShowingCached(let message), .blocked(let message):
+                return message
+            case .idle, .refreshing, .refreshed:
+                return nil
+            }
+        }
+    }
+
+    /// A pending per-profile action. The case is the identity; `label` is the
+    /// display token shown in the UI (kept byte-stable: hero copy uppercases it).
+    enum ProfileAction: String, Equatable, Hashable {
+        case activating, starting, stopping, restarting
+
+        var label: String {
+            switch self {
+            case .activating: "ACTIVATING"
+            case .starting: "STARTING"
+            case .stopping: "STOPPING"
+            case .restarting: "RESTARTING"
+            }
+        }
+
+        /// User-facing action name for error copy ("Start", "Stop", …).
+        var displayName: String {
+            switch self {
+            case .activating: "Activate"
+            case .starting: "Start"
+            case .stopping: "Stop"
+            case .restarting: "Restart"
+            }
+        }
+    }
+
+    /// A pending global action. Benchmarks carry their target as data instead of
+    /// encoding it in a `bench-<profile>` string that callers prefix-sniff.
+    enum GlobalAction: Equatable, Hashable {
+        case stopAll
+        case reopenLastActive
+        case benchmarkAll
+        case benchmarkSelected
+        case benchmark(profile: String)
+
+        var isBenchmark: Bool {
+            switch self {
+            case .benchmarkAll, .benchmarkSelected, .benchmark: true
+            case .stopAll, .reopenLastActive: false
+            }
+        }
+    }
+
     enum ProfileBadgeState: Equatable {
         case pending(String)
         case running
@@ -58,16 +133,14 @@ final class SwitchboardStore {
     var integrations: [ControllerIntegration] = []
     var profilesDirectory: String?
     var controllerRoot: String?
-    var lastError: String?
-    /// Sticky bootstrap message that refresh failures must not clobber.
-    var bootstrapDiagnostic: String?
-    var isRefreshing = false
+    /// Refresh lifecycle + single error slot (see `RefreshState`).
+    var refreshState: RefreshState = .idle
     /// Coalesce overlapping refresh() calls into one follow-up instead of dropping them.
     var needsRefreshAgain = false
     var isRunningControllerDoctor = false
     var lastUpdated: Date?
-    var pendingProfileActions: [String: String] = [:]
-    var pendingGlobalActions: Set<String> = []
+    var pendingProfileActions: [String: ProfileAction] = [:]
+    var pendingGlobalActions: Set<GlobalAction> = []
     var pendingIntegrationActions: Set<String> = []
     var lastActiveProfiles: [String] = []
     var lastBenchmarkStartedAt: Date?
@@ -163,6 +236,17 @@ final class SwitchboardStore {
             payload: currentPayload,
             hasPendingActions: hasPendingActions
         )
+    }
+
+    /// Derived view convenience: the user-facing error message when the refresh
+    /// state holds one. Read-only projection of `refreshState` — not a slot.
+    var lastError: String? {
+        refreshState.message
+    }
+
+    /// Derived view convenience: a refresh is in flight.
+    var isRefreshing: Bool {
+        refreshState == .refreshing
     }
 
     var hasPendingActions: Bool {

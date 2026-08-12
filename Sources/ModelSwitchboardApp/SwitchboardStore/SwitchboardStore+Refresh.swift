@@ -33,14 +33,17 @@ extension SwitchboardStore {
     }
 
     func refresh() async {
-        if isRefreshing {
+        if refreshState == .refreshing {
             needsRefreshAgain = true
             return
         }
-        isRefreshing = true
         needsRefreshAgain = false
+        let previousState = refreshState
+        refreshState = .refreshing
         defer {
-            isRefreshing = false
+            if refreshState == .refreshing {
+                refreshState = previousState
+            }
             if needsRefreshAgain {
                 needsRefreshAgain = false
                 Task { await self.refresh() }
@@ -58,18 +61,23 @@ extension SwitchboardStore {
             if let report = try? await doctorTask {
                 apply(doctorReport: report)
             }
-            lastError = nil
-            bootstrapDiagnostic = nil
+            refreshState = .refreshed
             lastUpdated = Date()
         } catch {
             if isBenignCancellation(error) { return }
             if statuses.isEmpty, let cached = cachedStateLoader() {
                 apply(payload: cached.payload)
                 lastUpdated = cached.cachedAt
-                lastError = bootstrapDiagnostic ?? "Controller unavailable. Showing cached state."
+                // A sticky gateway diagnostic (blocked before this refresh) keeps
+                // the slot: it outranks the cache-fallback copy and must never be
+                // re-derived from message text. Otherwise the fallback is
+                // recorded as the structured .failedShowingCached provenance.
+                if case .blocked = previousState { return }
+                refreshState = .failedShowingCached(message: "Controller unavailable. Showing cached state.")
                 return
             }
-            lastError = bootstrapDiagnostic ?? Self.userFacingErrorDescription(for: error)
+            if case .blocked = previousState { return }
+            refreshState = .failed(message: Self.userFacingErrorDescription(for: error))
         }
     }
 
@@ -81,18 +89,19 @@ extension SwitchboardStore {
         do {
             let report = try await client.fetchDoctorReport()
             apply(doctorReport: report)
-            lastError = nil
-            bootstrapDiagnostic = nil
+            refreshState = .refreshed
         } catch {
             if isBenignCancellation(error) { return }
-            lastError = bootstrapDiagnostic ?? Self.userFacingErrorDescription(for: error)
+            recordRefreshFailure(error)
         }
     }
 
     func applyBootstrapDiagnostic(_ message: String?) {
-        bootstrapDiagnostic = message
         if let message {
-            lastError = message
+            refreshState = .blocked(message: message)
+        } else if case .blocked = refreshState {
+            // Clearing the sticky diagnostic leaves any transient failure intact.
+            refreshState = .idle
         }
     }
 
@@ -101,8 +110,7 @@ extension SwitchboardStore {
     func discardLiveStatusForForceUpdate() {
         statuses = []
         lastUpdated = nil
-        lastError = nil
-        bootstrapDiagnostic = nil
+        refreshState = .idle
         needsRefreshAgain = false
     }
 }
