@@ -90,3 +90,6 @@ tests/artifacts/
 
 # Local session state for Mac↔spark ModelSwitchboard coordination (never commit)
 .ms-session/
+
+# state-space-collapse campaign artifacts (machine-local, never ship)
+.state-space-collapse/
