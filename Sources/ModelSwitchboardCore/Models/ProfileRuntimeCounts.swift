@@ -28,17 +28,8 @@ public struct ProfileRuntimeCounts: Equatable, Sendable {
 
 extension ModelProfileStatus {
     /// True for discovery/listening rows (not file-backed profiles or port claims).
+    /// Origin is the single owner — names are data, not identity (L05).
     public var isSyntheticDiscoveryProfile: Bool {
-        if let source {
-            switch source {
-            case "profile", "claim":
-                return false
-            case "discovery", "listening":
-                return true
-            default:
-                break
-            }
-        }
-        return profile.hasPrefix("discovered-")
+        origin == .discovery || origin == .listening
     }
 }

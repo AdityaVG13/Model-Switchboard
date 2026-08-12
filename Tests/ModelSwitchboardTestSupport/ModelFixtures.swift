@@ -18,9 +18,8 @@ public enum ModelFixtures {
         rssMB: Double? = 4096,
         vramMB: Double? = nil,
         command: String? = nil,
-        logPath: String = "/tmp/qwen.log",
-        source: String? = nil,
-        launchable: Bool? = nil,
+        logPath: String? = "/tmp/qwen.log",
+        origin: ModelProfileStatus.Origin = .unknown,
         missingArtifacts: [String]? = nil
     ) -> ModelProfileStatus {
         ModelProfileStatus(
@@ -43,8 +42,7 @@ public enum ModelFixtures {
             vramMB: running ? vramMB : nil,
             command: command,
             logPath: logPath,
-            source: source,
-            launchable: launchable,
+            origin: origin,
             missingArtifacts: missingArtifacts
         )
     }

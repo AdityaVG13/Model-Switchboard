@@ -271,11 +271,14 @@ RUNTIME_SPECS: dict[str, tuple[str, list[str], str]] = {
     "localai": ("LocalAI", ["external", "openai-compatible", "multi-backend"], "external"),
     "external": ("OpenAI-compatible endpoint", ["external", "openai-compatible"], "external"),
     "command": ("Custom command", ["managed", "custom", "openai-compatible"], "command"),
+    # L07-part: unknown is a first-class runtime id, not a special-cased string.
+    "unknown": ("Unknown", ["discovered", "external"], "external"),
 }
 
 
 def canonical_runtime(value: str | None) -> str:
-    normalized = (value or "llama.cpp").strip().lower().replace("_", "-")
+    # L06: an absent runtime stays unknown — never silently "llama.cpp".
+    normalized = (value or "unknown").strip().lower().replace("_", "-")
     return RUNTIME_ALIASES.get(normalized, normalized)
 
 
@@ -1340,20 +1343,6 @@ def _profiles_dir_from_scan_roots(root: Path) -> Path | None:
 
 
 
-def _status_is_launch_folder_claim(item: dict[str, Any]) -> bool:
-    """True for port-claim / launch-folder rows (keep visible when weights missing)."""
-    tags = item.get("runtime_tags") or []
-    if isinstance(tags, str):
-        tags = [part.strip() for part in tags.split(",") if part.strip()]
-    tag_set = {str(tag).strip().lower() for tag in tags}
-    if tag_set & {"claimed", "launch-folder"}:
-        return True
-    if item.get("source") == "claim":
-        return True
-    profile = str(item.get("profile") or "")
-    return profile.startswith("port-")
-
-
 def resolve_profiles_directory(
     root: Path,
     explicit: Path | str | None = None,
@@ -1768,17 +1757,9 @@ class AgentService:
         listening: list[dict[str, Any]] = []
         # Full discovery only when listing everything — targeted stays profile-only.
         if selected is None:
-            # Drop stale flat configs whose weights are gone and that are not
-            # currently answering. Keep launch-folder / claimed port profiles
-            # visible (missing weights still show as not launchable).
-            statuses = [
-                item
-                for item in statuses
-                if item.get("launchable", True)
-                or item.get("running")
-                or item.get("ready")
-                or _status_is_launch_folder_claim(item)
-            ]
+            # Visibility is owned by Swift (isBoardVisible on the wire facts):
+            # stale flat configs are shipped and hidden client-side (L04) —
+            # no second claim-visibility filter here.
             # Reuse the same listeners snapshot (no second inventory).
             start_cmds = [
                 profile.get("START_COMMAND")
@@ -2340,7 +2321,8 @@ class AgentService:
             alive = False
         ready_flag = bool(ready and (alive or listening))
         missing = missing_local_model_artifacts(profile.values)
-        launchable = (not missing) or alive or ready_flag
+        # L08: `launchable` was deleted from the wire — Swift derives it from
+        # missing_artifacts + running + ready (provably the same formula).
         command = process_command(pid) if ((alive or zombie) and pid) else None
         # Claim/command profiles often launch vLLM/llama.cpp via START_COMMAND
         # but keep RUNTIME=command. Prefer the live process (or start command)
@@ -2382,7 +2364,6 @@ class AgentService:
             "command": command,
             "log_path": profile.log_path,
             "source": "profile",
-            "launchable": launchable,
             "missing_artifacts": missing,
         }
 

@@ -25,7 +25,7 @@ import ModelSwitchboardTestSupport
     let counts = ProfileRuntimeCounts(statuses: [
         ModelFixtures.profileStatus(profile: "llama", running: true, ready: true),
         ModelFixtures.profileStatus(profile: "port-8000", running: true, ready: true),
-        ModelFixtures.profileStatus(profile: "discovered-9000", running: true, ready: true),
+        ModelFixtures.profileStatus(profile: "discovered-9000", running: true, ready: true, origin: .discovery),
     ])
 
     #expect(counts.total == 2)
@@ -45,9 +45,9 @@ import ModelSwitchboardTestSupport
 
 @Test func profileRuntimeCountsTreatClaimSourceAsFileBacked() {
     let counts = ProfileRuntimeCounts(statuses: [
-        ModelFixtures.profileStatus(profile: "port-8000", running: true, ready: true, source: "claim"),
-        ModelFixtures.profileStatus(profile: "port-9000", running: true, ready: true, source: "discovery"),
-        ModelFixtures.profileStatus(profile: "x", running: false, ready: false, source: "listening"),
+        ModelFixtures.profileStatus(profile: "port-8000", running: true, ready: true, origin: .claim),
+        ModelFixtures.profileStatus(profile: "port-9000", running: true, ready: true, origin: .discovery),
+        ModelFixtures.profileStatus(profile: "x", running: false, ready: false, origin: .listening),
     ])
 
     #expect(counts.total == 1)
@@ -57,9 +57,9 @@ import ModelSwitchboardTestSupport
 
 @Test func profileRuntimeCountsPreferSourceOverName() {
     let counts = ProfileRuntimeCounts(statuses: [
-        ModelFixtures.profileStatus(profile: "llama", running: true, ready: true, source: "profile"),
-        ModelFixtures.profileStatus(profile: "odd-name", running: true, ready: true, source: "discovery"),
-        ModelFixtures.profileStatus(profile: "port-like-but-real", running: false, ready: false, source: "profile"),
+        ModelFixtures.profileStatus(profile: "llama", running: true, ready: true, origin: .profile),
+        ModelFixtures.profileStatus(profile: "odd-name", running: true, ready: true, origin: .discovery),
+        ModelFixtures.profileStatus(profile: "port-like-but-real", running: false, ready: false, origin: .profile),
     ])
 
     #expect(counts.total == 2)
@@ -73,23 +73,21 @@ import ModelSwitchboardTestSupport
             profile: "stale-flat",
             running: false,
             ready: false,
-            source: "profile",
-            launchable: false,
+            origin: .profile,
             missingArtifacts: ["/tmp/gone.gguf"]
         ),
         ModelFixtures.profileStatus(
             profile: "port-8027",
             running: false,
             ready: false,
-            source: "claim",
-            launchable: false,
+            origin: .claim,
             missingArtifacts: ["/tmp/gone.gguf"]
         ),
         ModelFixtures.profileStatus(
             profile: "alive",
             running: true,
             ready: true,
-            source: "profile"
+            origin: .profile
         ),
     ])
     #expect(counts.total == 2)

@@ -117,20 +117,22 @@ import ModelSwitchboardTestSupport
 
 
 
-@Test func boardShowsUnlaunchableLaunchFolderClaims() {
+@Test func boardShowsUnlaunchableLaunchFolderClaimsByOriginOnly() {
     let claim = ModelFixtures.profileStatus(
         profile: "port-8027",
         pid: nil,
         running: false,
         ready: false,
         rssMB: nil,
-        source: "claim",
-        launchable: false,
+        origin: .claim,
         missingArtifacts: ["/data/models/missing.gguf"]
     )
     #expect(claim.isBoardVisible)
     #expect(claim.isLaunchFolderClaim)
 
+    // L04/L05: origin is the single owner of claim-ness. Tags and name
+    // prefixes are descriptive data — a profile row with claimed tags is a
+    // flat config and hides when stale, exactly like any other.
     let tagged = ModelFixtures.profileStatus(
         profile: "port-8081",
         runtimeTags: ["claimed", "launch-folder"],
@@ -138,12 +140,11 @@ import ModelSwitchboardTestSupport
         running: false,
         ready: false,
         rssMB: nil,
-        source: "profile",
-        launchable: false,
+        origin: .profile,
         missingArtifacts: ["/data/models/missing"]
     )
-    #expect(tagged.isBoardVisible)
-    #expect(tagged.isLaunchFolderClaim)
+    #expect(!tagged.isBoardVisible)
+    #expect(!tagged.isLaunchFolderClaim)
 }
 
 @Test func boardHidesUnlaunchableStoppedProfiles() {
@@ -153,7 +154,6 @@ import ModelSwitchboardTestSupport
         running: false,
         ready: false,
         rssMB: nil,
-        launchable: false,
         missingArtifacts: ["/tmp/msw-does-not-exist.gguf"]
     )
     #expect(!hidden.isBoardVisible)
@@ -164,7 +164,6 @@ import ModelSwitchboardTestSupport
         running: true,
         ready: false,
         rssMB: nil,
-        launchable: false,
         missingArtifacts: ["/tmp/msw-does-not-exist.gguf"]
     )
     #expect(live.isBoardVisible)
@@ -175,7 +174,6 @@ import ModelSwitchboardTestSupport
         running: false,
         ready: true,
         rssMB: nil,
-        launchable: false,
         missingArtifacts: ["/tmp/msw-does-not-exist.gguf"]
     )
     #expect(ready.isBoardVisible)

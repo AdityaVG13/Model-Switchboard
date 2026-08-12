@@ -938,7 +938,7 @@ def status_dict_from_discovery(
         "profile": name,
         "display_name": display,
         "runtime": runtime,
-        "runtime_label": label if runtime != "unknown" else "Discovered",
+        "runtime_label": label,
         "runtime_tags": tags,
         "launch_mode": launch_mode,
         "host": item.get("host") or "127.0.0.1",
@@ -955,12 +955,8 @@ def status_dict_from_discovery(
         "rss_mb": process_rss_mb(pid) if alive and pid else None,
         "vram_mb": process_vram_mb(pid) if alive and pid else None,
         "command": item.get("command") if alive else None,
-        "log_path": item.get("log_path")
-        or (
-            f"/tmp/launch-{port}.log"
-            if port
-            else f"/tmp/{name}.log"
-        ),
+        # L09: no invented log path — None when the row has no launch claim.
+        "log_path": item.get("log_path"),
         "source": source,
     }
 

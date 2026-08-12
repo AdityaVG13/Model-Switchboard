@@ -188,7 +188,7 @@ struct RemoteAgentConformanceTests {
         #expect(stub.displayName == "Conformance Stub")
         #expect(stub.requestModel == "conformance-stub-model")
         #expect(stub.running == false)
-        #expect(stub.source == "profile")
+        #expect(stub.origin == .profile)
         // L03: Swift derives the census from statuses — the wire carries no
         // profile_*_count fields (single owner: ProfileRuntimeCounts).
         let counts = ProfileRuntimeCounts(statuses: status.statuses)
@@ -283,7 +283,7 @@ struct RemoteAgentConformanceTests {
         }
     }
 
-    @Test func hidesProfilesWhoseModelPathIsGone() async throws {
+    @Test func hidesProfilesWhoseModelPathIsGoneFromBoard() async throws {
         guard FileManager.default.isReadableFile(atPath: Self.agentScript.path),
               FileManager.default.isReadableFile(atPath: Self.discoveryScript.path)
         else {
@@ -305,14 +305,21 @@ struct RemoteAgentConformanceTests {
         ])
         defer { harness.shutdown() }
         let client = try harness.makeClient()
-        try await Self.waitForAgent(client, expectedProfiles: 1)
+        // L04: no server-side filter anymore — both rows ship on the wire.
+        try await Self.waitForAgent(client, expectedProfiles: 2)
 
         let status = try await client.fetchStatus()
+        // L04: visibility is owned by Swift. The stale row ships on the wire
+        // and the board hides it — no second server-side filter.
         let names = Set(status.statuses.map(\.profile))
         #expect(names.contains("conformance-stub"))
-        #expect(!names.contains("stale-missing"))
+        #expect(names.contains("stale-missing"))
+        let staleRow = try #require(status.statuses.first { $0.profile == "stale-missing" })
+        #expect(!staleRow.isBoardVisible)
+        #expect(!staleRow.isLaunchable)
         let stub = try #require(status.statuses.first { $0.profile == "conformance-stub" })
-        #expect(stub.launchable != false)
+        #expect(stub.isLaunchable)
+        #expect(stub.isBoardVisible)
     }
 
     @Test func setProfilesDirectoryHotReloads() async throws {
@@ -373,7 +380,7 @@ struct RemoteAgentConformanceTests {
             "profile", "display_name", "runtime", "runtime_label", "runtime_tags",
             "launch_mode", "host", "port", "base_url", "request_model",
             "server_model_id", "pid", "running", "ready", "server_ids", "rss_mb",
-            "vram_mb", "command", "log_path", "source", "launchable",
+            "vram_mb", "command", "log_path", "source",
             "missing_artifacts",
         ]
         for status in statuses {

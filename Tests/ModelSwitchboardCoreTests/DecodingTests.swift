@@ -87,7 +87,7 @@ import ModelSwitchboardTestSupport
     #expect(switchURL.path == "/api/switch")
 }
 
-@Test func nullLogPathDecodesToEmptyString() throws {
+@Test func nullLogPathDecodesToNil() throws {
     let json = """
     {
       "profile": "port-1",
@@ -108,6 +108,8 @@ import ModelSwitchboardTestSupport
     }
     """
     let status = try JSONDecoder().decode(ModelProfileStatus.self, from: Data(json.utf8))
-    #expect(status.logPath == "")
+    // L09: parse-at-boundary — absent log_path is nil, not an invented "".
+    #expect(status.logPath == nil)
     #expect(status.profile == "port-1")
+    #expect(status.origin == .unknown)
 }
