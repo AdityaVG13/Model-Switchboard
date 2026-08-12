@@ -80,7 +80,6 @@ public final class ControllerService: @unchecked Sendable {
   public func actionResponse() throws -> ControllerActionResponse {
     let payload = try statusPayload()
     return ControllerActionResponse(
-      ok: true,
       statuses: payload.statuses,
       benchmark: payload.benchmark,
       integrations: payload.integrations,

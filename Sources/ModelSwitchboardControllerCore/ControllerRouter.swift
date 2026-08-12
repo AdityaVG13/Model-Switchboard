@@ -184,7 +184,7 @@ public final class ControllerRouter: @unchecked Sendable {
   }
 
   private func error(status: Int, code: String, message: String) throws -> ControllerHTTPResponse {
-    try json(["ok": false, "error": code, "message": message], status: status)
+    try json(["error": code, "message": message], status: status)
   }
 
   private func jsonObjects<T: Encodable>(_ values: [T]) throws -> [Any] {
@@ -194,7 +194,7 @@ public final class ControllerRouter: @unchecked Sendable {
 
   private func fallback() -> ControllerHTTPResponse {
     ControllerHTTPResponse(
-      status: 500, body: Data("{\"ok\":false,\"error\":\"internal_error\"}".utf8))
+      status: 500, body: Data("{\"error\":\"internal_error\"}".utf8))
   }
 
   private func constantTimeEqual(_ lhs: String, _ rhs: String) -> Bool {

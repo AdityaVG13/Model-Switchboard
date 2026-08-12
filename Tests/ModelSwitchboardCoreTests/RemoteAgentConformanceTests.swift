@@ -189,11 +189,11 @@ struct RemoteAgentConformanceTests {
         #expect(stub.requestModel == "conformance-stub-model")
         #expect(stub.running == false)
         #expect(stub.source == "profile")
-        #expect(status.profileTotalCount == status.statuses.filter { $0.source == "profile" }.count)
-        #expect(status.profileReadyCount == status.statuses.filter { $0.source == "profile" && $0.ready }.count)
+        // L03: Swift derives the census from statuses — the wire carries no
+        // profile_*_count fields (single owner: ProfileRuntimeCounts).
         let counts = ProfileRuntimeCounts(statuses: status.statuses)
-        #expect(counts.total == status.profileTotalCount)
-        #expect(counts.ready == status.profileReadyCount)
+        #expect(counts.total == status.statuses.count)
+        #expect(counts.ready == 0)
         #expect(status.integrations.isEmpty)
         #expect(status.benchmark?.running == false)
 
@@ -207,7 +207,8 @@ struct RemoteAgentConformanceTests {
         }
 
         let started = try await client.start(profile: "conformance-stub")
-        #expect(started.ok == true)
+        // L02: `ok` was deleted from the wire; error == nil is the success signal.
+        #expect(started.error == nil)
 
         var ready = false
         for _ in 0..<60 {
@@ -223,7 +224,7 @@ struct RemoteAgentConformanceTests {
         #expect(ready, "profile never became ready via the remote agent")
 
         let stopped = try await client.stopAll()
-        #expect(stopped.ok == true)
+        #expect(stopped.error == nil)
         let final = try await client.fetchStatus()
         #expect(final.statuses.first?.running == false)
         #expect(final.statuses.first?.ready == false)
@@ -330,11 +331,97 @@ struct RemoteAgentConformanceTests {
         let next = harness.root.appendingPathComponent("alt-profiles", isDirectory: true)
         let expectedPath = next.resolvingSymlinksInPath().path
         let response = try await client.setProfilesDirectory(next.path)
-        #expect(response.ok == true)
+        #expect(response.error == nil)
         #expect(response.profilesDirectory.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path } == expectedPath)
 
         let status = try await client.fetchStatus()
         #expect(status.profilesDirectory.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path } == expectedPath)
         #expect(status.statuses.isEmpty)
+    }
+
+    // MARK: - L30: contract key-set policing
+
+    /// The remote agent must emit exactly the contract key sets — no extras
+    /// (ok / state / claim_path / health_ok / profile_*_count / discovery) and
+    /// no missing keys. This is the anti-drift assertion for the wire contract
+    /// shared by the Python remote agent and the Swift local controller.
+    @Test func agentStatusKeySetsMatchContract() async throws {
+        guard FileManager.default.isReadableFile(atPath: Self.agentScript.path),
+              FileManager.default.isReadableFile(atPath: Self.discoveryScript.path)
+        else {
+            Issue.record("RemoteAgent python modules missing from repo checkout")
+            return
+        }
+
+        let harness = try AgentHarness()
+        defer { harness.shutdown() }
+        let client = try harness.makeClient()
+        try await Self.waitForAgent(client)
+
+        let (data, response) = try await URLSession.shared.data(
+            from: ControllerClient.apiURL(baseURL: URL(string: harness.baseURL)!, path: "api/status"))
+        #expect((response as? HTTPURLResponse)?.statusCode == 200)
+        let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let allowedTopLevel: Set<String> = [
+            "statuses", "benchmark", "integrations", "profiles_dir", "controller_root",
+        ]
+        #expect(Set(object.keys) == allowedTopLevel)
+
+        let statuses = try #require(object["statuses"] as? [[String: Any]])
+        #expect(!statuses.isEmpty)
+        let allowedStatusKeys: Set<String> = [
+            "profile", "display_name", "runtime", "runtime_label", "runtime_tags",
+            "launch_mode", "host", "port", "base_url", "request_model",
+            "server_model_id", "pid", "running", "ready", "server_ids", "rss_mb",
+            "vram_mb", "command", "log_path", "source", "launchable",
+            "missing_artifacts",
+        ]
+        for status in statuses {
+            #expect(Set(status.keys) == allowedStatusKeys)
+        }
+    }
+
+    /// Action responses and error bodies also have exact key sets: an action
+    /// carries statuses + error (null on success), an error carries only
+    /// error + message. No `ok` flag anywhere on the wire.
+    @Test func agentActionAndErrorKeySetsMatchContract() async throws {
+        guard FileManager.default.isReadableFile(atPath: Self.agentScript.path),
+              FileManager.default.isReadableFile(atPath: Self.discoveryScript.path)
+        else {
+            Issue.record("RemoteAgent python modules missing from repo checkout")
+            return
+        }
+
+        let harness = try AgentHarness()
+        defer { harness.shutdown() }
+        let client = try harness.makeClient()
+        try await Self.waitForAgent(client)
+
+        var actionRequest = URLRequest(
+            url: ControllerClient.apiURL(baseURL: URL(string: harness.baseURL)!, path: "api/stop-all"))
+        actionRequest.httpMethod = "POST"
+        actionRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        actionRequest.httpBody = Data("{}".utf8)
+        let (actionData, actionResponse) = try await URLSession.shared.data(for: actionRequest)
+        #expect((actionResponse as? HTTPURLResponse)?.statusCode == 200)
+        let actionObject = try #require(
+            JSONSerialization.jsonObject(with: actionData) as? [String: Any])
+        let allowedActionKeys: Set<String> = [
+            "statuses", "benchmark", "integrations", "profiles_dir",
+            "controller_root", "error",
+        ]
+        #expect(Set(actionObject.keys) == allowedActionKeys)
+        #expect(actionObject["error"] is NSNull)
+
+        var errorRequest = URLRequest(
+            url: ControllerClient.apiURL(baseURL: URL(string: harness.baseURL)!, path: "api/start"))
+        errorRequest.httpMethod = "POST"
+        errorRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        errorRequest.httpBody = Data(#"{"profile":"does-not-exist"}"#.utf8)
+        let (errorData, errorResponse) = try await URLSession.shared.data(for: errorRequest)
+        #expect((errorResponse as? HTTPURLResponse)?.statusCode == 404)
+        let errorObject = try #require(
+            JSONSerialization.jsonObject(with: errorData) as? [String: Any])
+        #expect(Set(errorObject.keys) == ["error", "message"])
     }
 }

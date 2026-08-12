@@ -67,20 +67,6 @@ import ModelSwitchboardTestSupport
     #expect(counts.ready == 1)
 }
 
-@Test func dashboardSummaryIgnoresAgentProfileCountOverrides() {
-    let payload = ModelFixtures.statusPayload(
-        statuses: [
-            ModelFixtures.profileStatus(profile: "llama", running: true, ready: true, source: "profile"),
-            ModelFixtures.profileStatus(profile: "discovered-9", running: true, ready: true, source: "discovery"),
-        ],
-        profileTotalCount: 99,
-        profileReadyCount: 99
-    )
-    let summary = DashboardSummary(payload: payload)
-    #expect(summary.totalProfiles == 1)
-    #expect(summary.readyProfiles == 1)
-}
-
 @Test func profileRuntimeCountsMatchBoardVisibility() {
     let counts = ProfileRuntimeCounts(statuses: [
         ModelFixtures.profileStatus(

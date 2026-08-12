@@ -54,18 +54,14 @@ public enum ModelFixtures {
         benchmark: BenchmarkStatus? = BenchmarkStatus(running: false, pid: nil, logPath: nil, latest: nil),
         integrations: [ControllerIntegration] = [],
         profilesDirectory: String? = nil,
-        controllerRoot: String? = nil,
-        profileTotalCount: Int? = nil,
-        profileReadyCount: Int? = nil
+        controllerRoot: String? = nil
     ) -> ControllerStatusPayload {
         ControllerStatusPayload(
             statuses: statuses,
             benchmark: benchmark,
             integrations: integrations,
             profilesDirectory: profilesDirectory,
-            controllerRoot: controllerRoot,
-            profileTotalCount: profileTotalCount,
-            profileReadyCount: profileReadyCount
+            controllerRoot: controllerRoot
         )
     }
 

@@ -773,21 +773,6 @@ def process_is_alive(pid: int | None) -> bool:
     return True
 
 
-def process_lifecycle_state(pid: int | None, *, ready: bool = False) -> str:
-    """Coarse lifecycle for status payloads: ready|running|zombie|dead."""
-    if ready:
-        return "ready"
-    if not pid or pid <= 0:
-        return "dead"
-    if reap_child(pid):
-        return "dead"
-    if process_is_zombie(pid):
-        return "zombie"
-    if process_is_alive(pid):
-        return "running"
-    return "dead"
-
-
 def _signal_process_tree(pid: int, signal_number: int) -> None:
     try:
         pgid = os.getpgid(pid)
@@ -1879,34 +1864,14 @@ class AgentService:
                 covered_ports.add(port)
 
         benchmark = self.benchmark_status()
-        file_backed = [
-            item
-            for item in statuses
-            if item.get("source") in ("profile", "claim")
-            or _status_is_launch_folder_claim(item)
-        ]
+        # Ready N/M is derived by Swift (ProfileRuntimeCounts) from board-visible
+        # statuses — the single owner. The wire no longer carries counts.
         return {
             "statuses": statuses,
             "benchmark": benchmark,
             "integrations": [],
             "profiles_dir": str(self.configuration.profiles_directory),
             "controller_root": str(self.configuration.root),
-            "profile_total_count": len(file_backed),
-            "profile_ready_count": sum(1 for item in file_backed if item.get("ready")),
-            "discovery": {
-                "listening": listening if selected is None else [],
-                "claims": [
-                    {
-                        "port": item["port"],
-                        "path": item["path"],
-                        "display_name": item.get("display_name"),
-                        "model_hint": item.get("model_hint"),
-                        "runtime_hint": item.get("runtime_hint"),
-                    }
-                    for item in (claims if selected is None else [])
-                ],
-                "scan_roots_env": SCAN_ROOTS_ENV,
-            },
         }
 
     def ports_payload(self) -> dict[str, Any]:
@@ -1971,7 +1936,6 @@ class AgentService:
     def action_response(self) -> dict[str, Any]:
         payload = self.status_payload()
         return {
-            "ok": True,
             "statuses": payload["statuses"],
             "benchmark": payload["benchmark"],
             "integrations": payload["integrations"],
@@ -2369,15 +2333,11 @@ class AgentService:
             listening = port_is_listening(profile.endpoint_port)
         # Health can succeed on a foreign listener; keep ready visible without
         # claiming ownership (running/pid stay unset) so stop stays safe.
-        state = process_lifecycle_state(pid, ready=ready and alive)
-        if ready and alive:
-            state = "ready"
-        elif ready and listening and not alive:
-            state = "ready"
-        if zombie and not process_is_alive(pid):
-            state = "zombie"
-            if not ready:
-                alive = False
+        # The stringly lifecycle "state" key was deleted from the wire contract
+        # (L22): running/ready booleans are the single encoding Swift decodes.
+        # A zombie that is not ready must not report running.
+        if zombie and not process_is_alive(pid) and not ready:
+            alive = False
         ready_flag = bool(ready and (alive or listening))
         missing = missing_local_model_artifacts(profile.values)
         launchable = (not missing) or alive or ready_flag
@@ -2412,7 +2372,6 @@ class AgentService:
             "server_model_id": profile.server_model_id,
             "pid": pid if (alive or zombie) else None,
             "running": alive,
-            "state": state,
             # Health alone when the port answers (Swift-like). Unowned ready
             # endpoints stay stop-safe because pid/running stay false.
             "ready": ready_flag,
@@ -2903,7 +2862,7 @@ class AgentService:
 
 
 def _error_body(status: int, code: str, message: str) -> tuple[int, dict[str, Any]]:
-    return status, {"ok": False, "error": code, "message": message}
+    return status, {"error": code, "message": message}
 
 
 class AgentRequestHandler(BaseHTTPRequestHandler):

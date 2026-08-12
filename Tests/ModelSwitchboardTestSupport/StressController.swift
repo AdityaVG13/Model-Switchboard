@@ -122,7 +122,6 @@ public final class StressController: @unchecked Sendable {
         benchmark: BenchmarkStatus? = idleBenchmark
     ) -> ControllerActionResponse {
         ControllerActionResponse(
-            ok: true,
             statuses: [status(running: running, ready: ready)],
             benchmark: benchmark,
             integrations: [integration],

@@ -82,7 +82,7 @@ import Testing
     let started = router.handle(jsonRequest(path: "/api/start", object: ["profile": "test"]))
     #expect(started.status == 200)
     let startedPayload = try JSONSerialization.jsonObject(with: started.body) as? [String: Any]
-    #expect(startedPayload?["ok"] as? Bool == true)
+    #expect(startedPayload?["error"] as? String == nil)
   }
 }
 
@@ -125,7 +125,7 @@ import Testing
       ))
     #expect(benchmark.status == 200)
     let payload = try JSONSerialization.jsonObject(with: benchmark.body) as? [String: Any]
-    #expect(payload?["ok"] as? Bool == true)
+    #expect(payload?["error"] as? String == nil)
     let benchmarkStatus = payload?["benchmark"] as? [String: Any]
     #expect((benchmarkStatus?["log_path"] as? String)?.hasSuffix("benchmark.log") == true)
   }
@@ -168,7 +168,7 @@ private func errorCode(_ response: ControllerHTTPResponse) -> String? {
       jsonRequest(path: "/api/config/profiles-dir", object: ["profiles_dir": next.path]))
     #expect(response.status == 200)
     let payload = try JSONSerialization.jsonObject(with: response.body) as? [String: Any]
-    #expect(payload?["ok"] as? Bool == true)
+    #expect(payload?["error"] as? String == nil)
     #expect(payload?["profiles_dir"] as? String == next.path)
     #expect(fixture.service.configuration.profilesDirectory.path == next.path)
 

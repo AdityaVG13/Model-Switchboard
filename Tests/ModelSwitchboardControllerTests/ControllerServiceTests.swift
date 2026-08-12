@@ -99,7 +99,7 @@ import Testing
   try withFixtureRoot { fixture in
     let next = fixture.temporary.appendingPathComponent("alt-profiles", isDirectory: true)
     let response = try fixture.service.setProfilesDirectory(next.path)
-    #expect(response.ok == true)
+    #expect(response.error == nil)
     #expect(response.profilesDirectory == next.path)
     #expect(fixture.service.configuration.profilesDirectory.path == next.path)
     #expect(FileManager.default.fileExists(atPath: next.path))

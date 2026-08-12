@@ -33,7 +33,6 @@ from model_switchboard_agent import (
     port_is_listening,
     process_command,
     process_is_alive,
-    process_lifecycle_state,
     process_rss_mb,
     process_vram_mb,
 )
@@ -932,9 +931,8 @@ def status_dict_from_discovery(
     name = profile_name or f"discovered-{port}"
     # Mirror profile status(): ready can be visible without claiming ownership.
     # Do not force running=True / pid attribution for unmatched ready listeners.
-    state = process_lifecycle_state(pid if alive else None, ready=ready and alive)
-    if ready and not alive:
-        state = "ready"
+    # (The stringly lifecycle "state" key was deleted from the wire contract —
+    # L22: running/ready booleans are the single encoding Swift decodes.)
 
     return {
         "profile": name,
@@ -952,7 +950,6 @@ def status_dict_from_discovery(
         ),
         "pid": pid if alive else None,
         "running": alive,
-        "state": state,
         "ready": ready,
         "server_ids": item.get("server_ids") or item.get("model_ids") or [],
         "rss_mb": process_rss_mb(pid) if alive and pid else None,
@@ -965,7 +962,6 @@ def status_dict_from_discovery(
             else f"/tmp/{name}.log"
         ),
         "source": source,
-        "claim_path": item.get("path"),
     }
 
 
