@@ -333,10 +333,10 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
                 KeychainTokenStorage(service: service, accessGroup: nil, account: "gateway-\(id)")
             },
             sshExecutableURL: URL(fileURLWithPath: "/usr/bin/true"),
-            deployAgent: { config, useTailscale, _ in
+            deployAgent: { ssh, useTailscale, _ in
                 deployCalls += 1
                 sawTailscale = useTailscale
-                #expect(config.sshHost == "spark.local")
+                #expect(ssh.sshHost == "spark.local")
                 return RemoteAgentDeployer.Result(
                     pairingLink: nil,
                     authToken: "new-token-0123456789ab",
@@ -383,22 +383,20 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
                 KeychainTokenStorage(service: service, accessGroup: nil, account: "gateway-\(id)")
             },
             sshExecutableURL: URL(fileURLWithPath: "/usr/bin/true"),
-            deployAgent: { config, useTailscale, _ in
-                deployHosts.append(config.sshHost)
+            deployAgent: { ssh, useTailscale, _ in
+                deployHosts.append(ssh.sshHost)
                 sawTailscale = useTailscale
                 return RemoteAgentDeployer.Result(pairingLink: nil, authToken: nil, log: "ok")
             }
         )
-        // A direct gateway carries no ssh fields (the collapsed union forbids
-        // the old `.direct` + sshUser hybrid); the deploy target is built as
-        // an SSH-kind config whose host is derived from the URL hostname.
+        // A direct gateway carries no ssh fields. Force-update derives an SSH
+        // target from the URL hostname without minting a fake SSH gateway.
         let config = GatewayConfig.direct(
             name: "Spark",
             baseURL: "http://dgx-spark.tail123.ts.net:8877"
         )
-        let deploy = GatewayHub.agentDeployConfig(for: config)
+        let deploy = GatewayHub.agentDeployTarget(for: config)
         #expect(deploy?.sshHost == "dgx-spark.tail123.ts.net")
-        #expect(deploy?.kind == .ssh)
         hub.upsertGateway(config, token: "tok")
         defer { hub.removeGateway(id: config.id) }
 

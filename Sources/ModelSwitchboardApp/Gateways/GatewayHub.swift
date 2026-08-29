@@ -47,7 +47,7 @@ final class GatewayRuntime: Identifiable {
     /// A URL for this profile that is valid from this Mac, or nil when the
     /// endpoint is only reachable on the remote host.
     func reachableEndpointURL(for status: ModelProfileStatus) -> String? {
-        switch config.kind {
+        switch config.connection {
         case .ssh:
             // Forwards may remap remote N → a different local port when N is
             // already taken (second gateway, local server, etc.).
@@ -58,7 +58,7 @@ final class GatewayRuntime: Identifiable {
             components.host = "127.0.0.1"
             components.port = localPort
             return components.url?.absoluteString
-        case .direct:
+        case .direct(let direct):
             if !status.usesLoopbackEndpoint {
                 return status.baseURL
             }
@@ -69,7 +69,7 @@ final class GatewayRuntime: Identifiable {
             // remote-only — Copy Endpoint would otherwise hand out a dead URL.
             guard !LoopbackHost.isLoopback(status.host) else { return nil }
             guard
-                let controllerHost = URL(string: config.baseURL)?.host,
+                let controllerHost = URL(string: direct.baseURL)?.host,
                 !LoopbackHost.isLoopback(controllerHost),
                 var components = URLComponents(string: status.baseURL)
             else { return nil }
@@ -96,7 +96,9 @@ final class GatewayHub {
     @ObservationIgnored private let remoteStoreFactory: RemoteStoreFactory
     @ObservationIgnored private let tokenStorageFactory: (String) -> KeychainTokenStorage
     @ObservationIgnored private let sshExecutableURL: URL
-    @ObservationIgnored private let deployAgent: @MainActor (GatewayConfig, Bool, String?) async throws -> RemoteAgentDeployer.Result
+    @ObservationIgnored private let deployAgent: @MainActor (
+        GatewayConfig.Connection.SSH, Bool, String?
+    ) async throws -> RemoteAgentDeployer.Result
     /// Coalesce spam-clicks on the dashboard refresh control.
     @ObservationIgnored private var lastManualRefreshAt: Date?
 
@@ -106,16 +108,18 @@ final class GatewayHub {
         remoteStoreFactory: RemoteStoreFactory? = nil,
         tokenStorageFactory: @escaping (String) -> KeychainTokenStorage = { KeychainTokenStorage.forGateway(id: $0) },
         sshExecutableURL: URL = URL(fileURLWithPath: "/usr/bin/ssh"),
-        deployAgent: (@MainActor (GatewayConfig, Bool, String?) async throws -> RemoteAgentDeployer.Result)? = nil
+        deployAgent: (@MainActor (
+            GatewayConfig.Connection.SSH, Bool, String?
+        ) async throws -> RemoteAgentDeployer.Result)? = nil
     ) {
         self.localStore = localStore
         self.defaults = defaults
         self.remoteStoreFactory = remoteStoreFactory ?? Self.makeRemoteStore
         self.tokenStorageFactory = tokenStorageFactory
         self.sshExecutableURL = sshExecutableURL
-        self.deployAgent = deployAgent ?? { config, useTailscale, profilesDirectory in
+        self.deployAgent = deployAgent ?? { ssh, useTailscale, profilesDirectory in
             try await RemoteAgentDeployer().deploy(
-                to: config, useTailscale: useTailscale, profilesDirectory: profilesDirectory)
+                to: ssh, useTailscale: useTailscale, profilesDirectory: profilesDirectory)
         }
         applyConfigs(GatewayConfigStore.load(from: defaults))
     }
@@ -212,15 +216,15 @@ final class GatewayHub {
 
     private func makeRuntime(config: GatewayConfig) -> GatewayRuntime {
         let token = tokenStorageFactory(config.id).load() ?? ""
-        switch config.kind {
-        case .direct:
-            let store = remoteStoreFactory(config, config.baseURL, token)
+        switch config.connection {
+        case .direct(let direct):
+            let store = remoteStoreFactory(config, direct.baseURL, token)
             return GatewayRuntime(config: config, store: store, tunnel: nil)
-        case .ssh:
+        case .ssh(let ssh):
             let hubReference = WeakHub(self)
             let tunnel = SSHTunnelManager(
                 gatewayID: config.id,
-                configuration: .init(config: config),
+                configuration: .init(ssh: ssh),
                 executableURL: sshExecutableURL,
                 onStateChange: { tunnelID, state in
                     await hubReference.value?.tunnelStateChanged(
@@ -407,9 +411,9 @@ final class GatewayHub {
         runtime.store.discardLiveStatusForForceUpdate()
 
         let config = runtime.config
-        guard let deployConfig = Self.agentDeployConfig(for: config) else {
+        guard let deployTarget = Self.agentDeployTarget(for: config) else {
             runtime.forceUpdatePhase = .failed(
-                "Add an SSH user/host in Settings for this gateway, then click the badge again to push a fresh agent from this Mac."
+                "Add an SSH user/host in Settings for this gateway, then click Update to push a fresh agent from this Mac."
             )
             await runtime.store.refresh()
             return
@@ -424,7 +428,7 @@ final class GatewayHub {
         let profilesDirectory =
             (trimmedProfiles?.isEmpty == false) ? trimmedProfiles : nil
         do {
-            let result = try await deployAgent(deployConfig, useTailscale, profilesDirectory)
+            let result = try await deployAgent(deployTarget, useTailscale, profilesDirectory)
             if let token = result.authToken?.trimmingCharacters(in: .whitespacesAndNewlines),
                !token.isEmpty {
                 tokenStorageFactory(config.id).save(token)
@@ -488,32 +492,26 @@ final class GatewayHub {
     /// SSH target for pushing the bundled agent. SSH gateways deploy as-is;
     /// for DIRECT gateways the SSH host falls back to the URL hostname so
     /// operators can force-update without re-entering the MagicDNS name.
-    /// The result is always an SSH-kind config: the deployer only speaks SSH,
-    /// and a direct config can no longer smuggle ssh fields (the collapsed
-    /// union forbids it).
-    static func agentDeployConfig(for config: GatewayConfig) -> GatewayConfig? {
+    /// Returns `Connection.SSH` rather than minting a fake SSH-kind gateway.
+    static func agentDeployTarget(for config: GatewayConfig) -> GatewayConfig.Connection.SSH? {
         switch config.connection {
         case .ssh(let ssh):
             guard !ssh.sshHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 return nil
             }
-            let deploy = config
-            guard !deploy.hasUnsafeSSHDestination else { return nil }
-            return deploy
+            guard !ssh.hasUnsafeDestination else { return nil }
+            return ssh
         case .direct(let direct):
             guard let host = URL(string: direct.baseURL)?.host?
                 .trimmingCharacters(in: .whitespacesAndNewlines),
                 !host.isEmpty
             else { return nil }
-            let deploy = GatewayConfig.ssh(
-                id: config.id,
-                name: config.name,
+            let ssh = GatewayConfig.Connection.SSH(
                 sshHost: host,
-                remotePort: direct.remotePort,
-                enabled: config.enabled
+                remotePort: direct.remotePort
             )
-            guard !deploy.hasUnsafeSSHDestination else { return nil }
-            return deploy
+            guard !ssh.hasUnsafeDestination else { return nil }
+            return ssh
         }
     }
 

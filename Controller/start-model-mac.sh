@@ -73,15 +73,18 @@ if [ -z "$MODEL_PROFILE" ]; then
     MODEL_PROFILE="${MODEL_PROFILE%.*}"
 fi
 
+controller_bin() {
+    local bin="${MODEL_SWITCHBOARD_CONTROLLER_BIN:-$WORK_DIR/bin/ModelSwitchboardController}"
+    if [ ! -x "$bin" ]; then
+        die "Native controller not found: $bin"
+    fi
+    printf '%s\n' "$bin"
+}
+
 load_profile_exports() {
     local path="$1"
-    local controller_bin
     local exports
-    controller_bin="${MODEL_SWITCHBOARD_CONTROLLER_BIN:-$WORK_DIR/bin/ModelSwitchboardController}"
-    if [ ! -x "$controller_bin" ]; then
-        die "Native controller not found: $controller_bin"
-    fi
-    if ! exports="$("$controller_bin" profile-exports --root "$WORK_DIR" --profile-file "$path")"; then
+    if ! exports="$("$(controller_bin)" profile-exports --root "$WORK_DIR" --profile-file "$path")"; then
         die "Failed to load profile: $path"
     fi
     eval "$exports"
@@ -328,15 +331,16 @@ resolve_first_executable() {
 
 append_json_args() {
     local raw_json="${1:-}"
+    local parsed
     local arg
     [ -n "$raw_json" ] || return 0
-    if ! printf '%s' "$raw_json" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    if ! parsed="$(printf '%s' "$raw_json" | "$(controller_bin)" json-strings)"; then
         die "SERVER_ARGS_JSON must be a JSON array"
     fi
     while IFS= read -r arg; do
         cmd+=("$arg")
     done <<EOF
-$(printf '%s' "$raw_json" | jq -r '.[] | tostring')
+$parsed
 EOF
 }
 
@@ -392,7 +396,7 @@ wait_for_models_endpoint() {
     local response
     while [ "$retries" -gt 0 ]; do
         if response="$(curl -fsS "$models_url" 2>/dev/null)"; then
-            if [ -n "$expected_id" ] && ! printf '%s' "$response" | jq -e --arg id "$expected_id" 'any(.data[]?; .id == $id)' >/dev/null 2>&1; then
+            if [ -n "$expected_id" ] && ! printf '%s' "$response" | "$(controller_bin)" openai-models-contains --id "$expected_id"; then
                 sleep 2
                 retries=$((retries - 1))
                 continue

@@ -73,24 +73,24 @@ import Testing
     ))
     #expect(config.kind == .ssh)
     #expect(config.name == "spark")
-    #expect(config.sshUser == "gpuadmin")
-    #expect(config.sshHost == "spark.local")
-    #expect(config.sshPort == 22)
+    #expect(config.ssh?.sshUser == "gpuadmin")
+    #expect(config.ssh?.sshHost == "spark.local")
+    #expect(config.ssh?.sshPort == 22)
     #expect(config.remotePort == 8877)
 }
 
 @Test func linkCodeDefaultsAndDecoding() throws {
     let bare = try #require(GatewayLinkCode.parse("modelswitchboard-gateway://box-01"))
     #expect(bare.name == "box-01")
-    #expect(bare.sshUser.isEmpty)
+    #expect(bare.ssh?.sshUser.isEmpty == true)
     #expect(bare.remotePort == 8877)
 
     let encoded = try #require(GatewayLinkCode.parse(
         "modelswitchboard-gateway://gpu%20admin@10.0.0.9:2222?name=lab%20box&agent_port=9001"
     ))
-    #expect(encoded.sshUser == "gpu admin")
+    #expect(encoded.ssh?.sshUser == "gpu admin")
     #expect(encoded.name == "lab box")
-    #expect(encoded.sshPort == 2222)
+    #expect(encoded.ssh?.sshPort == 2222)
     #expect(encoded.remotePort == 9001)
 }
 
@@ -101,13 +101,13 @@ import Testing
     ))
     #expect(config.kind == .direct)
     #expect(config.name == "spark")
-    #expect(config.baseURL == "http://spark.tail1234.ts.net:8877")
-    #expect(config.sshHost.isEmpty)
+    #expect(config.direct?.baseURL == "http://spark.tail1234.ts.net:8877")
+    #expect(config.ssh == nil)
 
     let customPort = try #require(GatewayLinkCode.parse(
         "modelswitchboard-gateway://100.101.102.103?agent_port=9001&mode=direct"
     ))
-    #expect(customPort.baseURL == "http://100.101.102.103:9001")
+    #expect(customPort.direct?.baseURL == "http://100.101.102.103:9001")
     #expect(customPort.name == "100.101.102.103")
 }
 
@@ -127,13 +127,13 @@ import Testing
     ) == nil)
     #expect(GatewayConfig.ssh(
         name: "x", sshUser: "-oProxyCommand=x", sshHost: "spark"
-    ).hasUnsafeSSHDestination)
+    ).ssh?.hasUnsafeDestination == true)
     #expect(GatewayConfig.ssh(
         name: "x", sshHost: "-oProxyCommand=x"
-    ).hasUnsafeSSHDestination)
-    #expect(!GatewayConfig.ssh(
+    ).ssh?.hasUnsafeDestination == true)
+    #expect(GatewayConfig.ssh(
         name: "x", sshUser: "gpuadmin", sshHost: "spark.local"
-    ).hasUnsafeSSHDestination)
+    ).ssh?.hasUnsafeDestination == false)
 }
 
 @Test func endpointSummaryDescribesConnection() {
@@ -144,7 +144,7 @@ import Testing
     #expect(ssh.endpointSummary == "ssh gpuadmin@spark.local → 127.0.0.1:8877")
 
     let customPort = GatewayConfig.ssh(name: "Spark", sshHost: "spark.local", sshPort: 2222)
-    #expect(customPort.sshDestination == "spark.local")
+    #expect(customPort.ssh?.destination == "spark.local")
     #expect(customPort.endpointSummary == "ssh spark.local -p 2222 → 127.0.0.1:8877")
 }
 
@@ -178,14 +178,14 @@ import Testing
         "modelswitchboard-gateway://gpuadmin@spark.local?name=spark&agent_port=8877&mode=ssh"
     ))
     #expect(ssh.kind == .ssh)
-    #expect(ssh.sshUser == "gpuadmin")
-    #expect(ssh.sshHost == "spark.local")
+    #expect(ssh.ssh?.sshUser == "gpuadmin")
+    #expect(ssh.ssh?.sshHost == "spark.local")
 
     let direct = try #require(GatewayLinkCode.parse(
         "modelswitchboard-gateway://spark.tail1234.ts.net?name=spark&agent_port=8877&mode=direct"
     ))
     #expect(direct.kind == .direct)
-    #expect(direct.baseURL == "http://spark.tail1234.ts.net:8877")
+    #expect(direct.direct?.baseURL == "http://spark.tail1234.ts.net:8877")
 }
 
 @Test func linkCodeRefusesUnknownModeInsteadOfGuessingKind() {
@@ -234,9 +234,8 @@ import Testing
     let decoded = try JSONDecoder().decode([GatewayConfig].self, from: Data(legacy.utf8))
     let gateway = try #require(decoded.first)
     #expect(gateway.kind == .direct)
-    #expect(gateway.baseURL == "http://10.0.0.9:8877")
-    #expect(gateway.sshHost.isEmpty)
-    #expect(gateway.sshUser.isEmpty)
+    #expect(gateway.direct?.baseURL == "http://10.0.0.9:8877")
+    #expect(gateway.ssh == nil)
 
     let reencoded = try JSONEncoder().encode(decoded)
     let object = try #require(
@@ -249,12 +248,12 @@ import Testing
 @Test func illegalDirectSSHHybridIsUnrepresentable() {
     // The old open product (`GatewayConfig(name:kind:.direct, sshHost: ...)`)
     // no longer compiles: the factories take exactly the fields their kind
-    // may carry. A direct gateway's ssh projections are always empty, and a
-    // kind switch must rebuild the payload (asserted in the settings form
-    // tests). This pins the factory surface: `.direct` takes no ssh args.
+    // may carry. SSH fields are unrepresentable on a direct gateway (nil
+    // payload, not empty-string projections).
     let direct = GatewayConfig.direct(name: "Lab", baseURL: "http://10.0.0.9:8877")
-    #expect(direct.sshHost.isEmpty)
-    #expect(direct.sshUser.isEmpty)
-    #expect(direct.identityFile == nil)
-    #expect(direct.sshDestination == "")
+    #expect(direct.ssh == nil)
+    #expect(direct.direct != nil)
+    let ssh = GatewayConfig.ssh(name: "Spark", sshHost: "spark.local")
+    #expect(ssh.direct == nil)
+    #expect(ssh.ssh != nil)
 }

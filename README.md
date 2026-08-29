@@ -111,7 +111,7 @@ Everything` span all gateways.
 
 | Item | Summary |
 |---|---|
-| Install/pair/update | In *Settings → Remote Gateways*, enter `user` + `host` and click **Install Agent on Host**. The app pushes the bundled stdlib-only Python agent over SSH; pairing-code and `curl \| bash` alternatives are documented below. Re-run installation to update. |
+| Install/pair/update | In *Settings → Remote Gateways*, paste a `modelswitchboard-gateway://` pairing code, or enter `user` + `host` and click **Install Agent on Host**. **Update** on the dashboard, Remote Hosts, or Settings pushes the bundled agent over SSH and refreshes models. `curl \| bash` is the no-app fallback. |
 | SSH (recommended) | Loopback-only agent; app-managed `BatchMode` tunnel uses your SSH config/keys/agent, never passwords, and forwards model ports for Mac-reachable copied URLs. |
 | Tailscale/direct | `--tailscale` binds only the WireGuard tailnet address and uses MagicDNS without a tunnel. Plain-LAN non-loopback binds require `--unsafe-bind` plus a ≥16-byte bearer token stored in Keychain. |
 | Profiles/runtimes | Remote default: `~/model-profiles/`; Mac controller also supports `--profiles-dir`. `link` scans existing `.env` / `.json`. Templates: vLLM, llama.cpp, SGLang, TGI; use `START_COMMAND` otherwise. |

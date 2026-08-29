@@ -50,6 +50,7 @@ die() { printf '[ERR] %s\n' "$*" >&2; exit 1; }
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 AGENT_SOURCE="$SCRIPT_DIR/model_switchboard_agent.py"
 DISCOVERY_SOURCE="$SCRIPT_DIR/discovery.py"
+CORE_SOURCE="$SCRIPT_DIR/agent_core.py"
 INSTALL_ROOT="$HOME/.local/share/model-switchboard-agent"
 BIN_DIR="$HOME/.local/bin"
 BIN_PATH="$BIN_DIR/model-switchboard-agent"
@@ -140,6 +141,7 @@ install_agent_module() {
     fi
 }
 
+install_agent_module "agent_core.py" "$CORE_SOURCE"
 install_agent_module "discovery.py" "$DISCOVERY_SOURCE"
 if [ -f "$AGENT_SOURCE" ]; then
     install -m 0755 "$AGENT_SOURCE" "$INSTALL_ROOT/model_switchboard_agent.py"
@@ -153,6 +155,7 @@ else
         || die "could not download the agent"
     chmod 0755 "$INSTALL_ROOT/model_switchboard_agent.py"
 fi
+[ -f "$INSTALL_ROOT/agent_core.py" ] || die "agent_core.py missing next to the agent"
 [ -f "$INSTALL_ROOT/discovery.py" ] || die "discovery.py missing next to the agent"
 
 # Persist the profiles folder so `serve` (systemd) keeps using it without flags.

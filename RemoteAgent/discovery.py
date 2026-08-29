@@ -16,10 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-# Imported from the agent after its Profile / process helpers exist. The agent
-# imports this module only once those symbols are defined (see the import site
-# in model_switchboard_agent.py), so the cycle is safe at runtime.
-from model_switchboard_agent import (
+from agent_core import (
     DEFAULT_PORT,
     InvalidProfileError,
     PROFILE_KEY_RE,

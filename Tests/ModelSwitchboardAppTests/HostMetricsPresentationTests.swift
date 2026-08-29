@@ -35,7 +35,7 @@ private func sparkMetrics(
 @Test func compactGPUStripUsesHostVRAMNotRSS() {
     let metrics = sparkMetrics()
     let strip = HostMetricsPresentation.compactGPUStrip(metrics)
-    #expect(strip == "GPU 42% · 54/128 GB · 51°C")
+    #expect(strip == "GPU 42% · 54.0/128.0 GB · 51°C")
     #expect(strip?.contains("RSS") != true)
 }
 
@@ -62,8 +62,17 @@ private func sparkMetrics(
 @Test func hostVRAMPercentAndChip() {
     let metrics = sparkMetrics()
     #expect(HostMetricsPresentation.hostVRAMPercent(metrics).map { Int($0.rounded()) } == 42)
-    #expect(HostMetricsPresentation.hostVRAMUsedTotalLabel(metrics) == "54/128 GB")
-    #expect(HostMetricsPresentation.sectionMetricsChip(metrics)?.contains("54/128 GB") == true)
+    #expect(HostMetricsPresentation.hostVRAMUsedTotalLabel(metrics) == "54.0/128.0 GB")
+    #expect(HostMetricsPresentation.sectionMetricsChip(metrics)?.contains("54.0/128.0 GB") == true)
+}
+
+@Test func gb10VRAMLabelMatchesDashboardGiBNotHostRAMUsed() {
+    // nvidia-smi compute-apps sum 26009.6 MiB / MemTotal 124620.8 MiB → SparkDash 25.4/121.7.
+    // Host RAM "used" (~34816 MiB → 34 GB) must not appear on the chip.
+    let metrics = sparkMetrics(vramUsed: 26009.6, vramTotal: 124620.8)
+    #expect(HostMetricsPresentation.hostVRAMUsedTotalLabel(metrics) == "25.4/121.7 GB")
+    #expect(HostMetricsPresentation.hostVRAMUsedTotalLabel(metrics) != "34.0/121.7 GB")
+    #expect(HostMetricsPresentation.compactGPUStrip(metrics) == "GPU 42% · 25.4/121.7 GB · 51°C")
 }
 
 @Test func missingMetricsYieldNilNotFakeVRAM() {

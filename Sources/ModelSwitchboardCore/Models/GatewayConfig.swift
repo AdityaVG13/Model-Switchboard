@@ -79,6 +79,18 @@ public struct GatewayConfig: Codable, Identifiable, Equatable, Sendable {
                 self.identityFile = identityFile
                 self.identityAgent = identityAgent
             }
+
+            /// `user@host`, or just `host` when the user is empty (OpenSSH default).
+            public var destination: String {
+                sshUser.isEmpty ? sshHost : "\(sshUser)@\(sshHost)"
+            }
+
+            /// OpenSSH treats argv tokens starting with `-` as options. Reject those
+            /// for host/user so pasted pairing codes and settings cannot inject flags.
+            public var hasUnsafeDestination: Bool {
+                GatewayConfig.looksLikeSSHOption(sshHost)
+                    || (!sshUser.isEmpty && GatewayConfig.looksLikeSSHOption(sshUser))
+            }
         }
     }
 
@@ -143,32 +155,17 @@ public struct GatewayConfig: Codable, Identifiable, Equatable, Sendable {
         }
     }
 
-    // Projections for callers that switch on `kind` first. Reading the
-    // inactive kind's projection returns the old empty/default values; callers
-    // only read the active kind's fields, exactly as before the collapse.
-
-    /// Direct gateways only; `""` for SSH gateways.
-    public var baseURL: String {
-        if case .direct(let details) = connection { return details.baseURL }
-        return ""
+    /// SSH payload when this gateway is an SSH tunnel; `nil` for direct.
+    /// Prefer switching on `connection` at call sites that already branch.
+    public var ssh: Connection.SSH? {
+        if case .ssh(let details) = connection { return details }
+        return nil
     }
 
-    /// SSH gateways only; `""` for direct gateways.
-    public var sshUser: String {
-        if case .ssh(let details) = connection { return details.sshUser }
-        return ""
-    }
-
-    /// SSH gateways only; `""` for direct gateways.
-    public var sshHost: String {
-        if case .ssh(let details) = connection { return details.sshHost }
-        return ""
-    }
-
-    /// SSH gateways only; `22` for direct gateways.
-    public var sshPort: Int {
-        if case .ssh(let details) = connection { return details.sshPort }
-        return 22
+    /// Direct payload when this gateway is a URL; `nil` for SSH.
+    public var direct: Connection.Direct? {
+        if case .direct(let details) = connection { return details }
+        return nil
     }
 
     /// Both kinds carry the remote agent port.
@@ -177,28 +174,6 @@ public struct GatewayConfig: Codable, Identifiable, Equatable, Sendable {
         case .direct(let details): return details.remotePort
         case .ssh(let details): return details.remotePort
         }
-    }
-
-    /// SSH gateways only; `nil` for direct gateways.
-    public var identityFile: String? {
-        if case .ssh(let details) = connection { return details.identityFile }
-        return nil
-    }
-
-    /// SSH gateways only; `nil` for direct gateways.
-    public var identityAgent: String? {
-        if case .ssh(let details) = connection { return details.identityAgent }
-        return nil
-    }
-
-    public var sshDestination: String {
-        sshUser.isEmpty ? sshHost : "\(sshUser)@\(sshHost)"
-    }
-
-    /// OpenSSH treats argv tokens starting with `-` as options. Reject those
-    /// for host/user so pasted pairing codes and settings cannot inject flags.
-    public var hasUnsafeSSHDestination: Bool {
-        Self.looksLikeSSHOption(sshHost) || (!sshUser.isEmpty && Self.looksLikeSSHOption(sshUser))
     }
 
     public static func looksLikeSSHOption(_ value: String) -> Bool {
@@ -211,9 +186,8 @@ public struct GatewayConfig: Codable, Identifiable, Equatable, Sendable {
         case .direct(let details):
             return details.baseURL
         case .ssh(let details):
-            let destination = sshDestination
             let port = details.sshPort == 22 ? "" : " -p \(details.sshPort)"
-            return "ssh \(destination)\(port) → 127.0.0.1:\(details.remotePort)"
+            return "ssh \(details.destination)\(port) → 127.0.0.1:\(details.remotePort)"
         }
     }
 

@@ -26,12 +26,12 @@ actor SSHTunnelManager {
         var identityFile: String?
         var identityAgent: String?
 
-        init(config: GatewayConfig) {
-            destination = config.sshDestination
-            sshPort = config.sshPort
-            remotePort = config.remotePort
-            identityFile = config.identityFile
-            identityAgent = config.identityAgent
+        init(ssh: GatewayConfig.Connection.SSH) {
+            destination = ssh.destination
+            sshPort = ssh.sshPort
+            remotePort = ssh.remotePort
+            identityFile = ssh.identityFile
+            identityAgent = ssh.identityAgent
         }
 
         init(

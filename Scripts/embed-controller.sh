@@ -34,6 +34,7 @@ cp "$ROOT_DIR/Resources/Controller/io.modelswitchboard.controller.plist" \
 # without the remote host downloading anything.
 mkdir -p "$APP_BUNDLE/Contents/Resources/RemoteAgent"
 cp "$ROOT_DIR/RemoteAgent/model_switchboard_agent.py" \
+  "$ROOT_DIR/RemoteAgent/agent_core.py" \
   "$ROOT_DIR/RemoteAgent/discovery.py" \
   "$ROOT_DIR/RemoteAgent/install-remote-agent.sh" \
   "$APP_BUNDLE/Contents/Resources/RemoteAgent/"

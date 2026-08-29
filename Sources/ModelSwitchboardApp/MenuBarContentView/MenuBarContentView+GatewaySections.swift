@@ -25,6 +25,19 @@ extension MenuBarContentView {
                 filter: profileFilter,
                 excludeProfileIDs: excludedByGateway[runtime.id] ?? [],
                 hostMetrics: hostMetricsMonitor.entry(forGatewayID: runtime.id).metrics,
+                agentStale: {
+                    let entry = hostMetricsMonitor.entry(forGatewayID: runtime.id)
+                    return RemoteAgentVersion.isRemoteStale(
+                        metrics: entry.metrics,
+                        unsupported: entry.unsupported
+                    )
+                }(),
+                onForceUpdate: {
+                    Task {
+                        await hub.forceUpdateGateway(id: runtime.id)
+                        await hostMetricsMonitor.pollOnce()
+                    }
+                },
                 theme: theme,
                 accent: accent,
                 onOpenBenchmarks: { setInspectorPanel(.benchmarks) }
@@ -42,6 +55,9 @@ struct RemoteGatewaySectionView: View {
     var excludeProfileIDs: Set<String> = []
     /// Live host metrics from GET /api/host/metrics (GPU/VRAM), not process RSS.
     var hostMetrics: HostMetricsPayload? = nil
+    /// Host agent is older than the agent bundled in this Mac app.
+    var agentStale: Bool = false
+    var onForceUpdate: (() -> Void)? = nil
     let theme: DashboardTheme
     let accent: Color
     var onOpenBenchmarks: (() -> Void)? = nil
@@ -134,10 +150,28 @@ struct RemoteGatewaySectionView: View {
                     theme: theme
                 )
                 Spacer(minLength: 0)
-                Text(GatewayConnectionBadge.text(for: runtime))
-                    .font(.system(size: 9, weight: .semibold))
-                    .kerning(0.5)
-                    .foregroundStyle(theme.faint)
+                GatewayForceUpdateControls(
+                    runtime: runtime,
+                    agentStale: agentStale,
+                    remoteVersion: hostMetrics?.agentVersion,
+                    theme: theme,
+                    accent: accent,
+                    onUpdate: { onForceUpdate?() }
+                )
+                .disabled(onForceUpdate == nil)
+            }
+            if case .failed(let message) = runtime.forceUpdatePhase {
+                Text(message)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(DashboardTheme.stopRed)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, 12)
+            } else if case .updating(let step) = runtime.forceUpdatePhase {
+                Text(step)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(theme.sub)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, 12)
             }
             if let chip = HostMetricsPresentation.sectionMetricsChip(hostMetrics) {
                 Text(chip)
@@ -149,10 +183,6 @@ struct RemoteGatewaySectionView: View {
             }
         }
         .padding(EdgeInsets(top: 10, leading: 4, bottom: 4, trailing: 4))
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(
-            "\(runtime.name), \(store.displayedReadyProfiles) of \(store.summary.totalProfiles) ready, \(GatewayConnectionBadge.text(for: runtime))"
-        )
     }
 
     private var statusColor: Color {

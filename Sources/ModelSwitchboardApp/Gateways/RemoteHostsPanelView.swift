@@ -57,6 +57,10 @@ struct RemoteHostsPanelView: View {
     private func gatewayCard(runtime: GatewayRuntime, entry: RemoteHostMetricsMonitor.Entry) -> some View {
         let metrics = entry.metrics
         let primaryGPU = metrics?.gpus.first
+        let agentStale = RemoteAgentVersion.isRemoteStale(
+            metrics: metrics,
+            unsupported: entry.unsupported
+        )
 
         return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -117,26 +121,20 @@ struct RemoteHostsPanelView: View {
                         .truncationMode(.middle)
                 }
                 Spacer(minLength: 0)
-                Button {
-                    Task {
-                        await hub.forceUpdateGateway(id: runtime.id)
-                        await metricsMonitor.pollOnce()
+                GatewayForceUpdateControls(
+                    runtime: runtime,
+                    agentStale: agentStale,
+                    remoteVersion: metrics?.agentVersion,
+                    theme: theme,
+                    accent: accent,
+                    capsuleUpdate: true,
+                    onUpdate: {
+                        Task {
+                            await hub.forceUpdateGateway(id: runtime.id)
+                            await metricsMonitor.pollOnce()
+                        }
                     }
-                } label: {
-                    Text(GatewayConnectionBadge.text(for: runtime))
-                        .font(.system(size: 9, weight: .semibold))
-                        .kerning(0.4)
-                        .foregroundStyle(badgeForeground(runtime))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(theme.btnBg.opacity(0.85), in: Capsule())
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(QuietCraftPressStyle())
-                .disabled(runtime.forceUpdatePhase.isUpdating)
-                .help(GatewayConnectionBadge.help(for: runtime))
-                .accessibilityLabel("Force update " + runtime.name)
-                .accessibilityHint(GatewayConnectionBadge.help(for: runtime))
+                )
             }
 
             if case .failed(let message) = runtime.forceUpdatePhase {
@@ -148,6 +146,15 @@ struct RemoteHostsPanelView: View {
                 Text(step)
                     .font(.system(size: 10.5))
                     .foregroundStyle(theme.sub)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if agentStale, !entry.unsupported {
+                Text(GatewayConnectionBadge.help(
+                    for: runtime,
+                    agentStale: true,
+                    remoteVersion: metrics?.agentVersion
+                ))
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(DashboardTheme.pendingOrange)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -298,7 +305,7 @@ struct RemoteHostsPanelView: View {
         if let util = gpu.utilPercent { parts.append(String(format: "%.0f%%", util)) }
         if let temp = gpu.tempC { parts.append(String(format: "%.0f°C", temp)) }
         if let used = gpu.vramUsedMB, let total = gpu.vramTotalMB {
-            parts.append(String(format: "%.0f/%.0f GB", used / 1024, total / 1024))
+            parts.append(String(format: "%.1f/%.1f GB", used / 1024, total / 1024))
         }
         return parts.joined(separator: " · ")
     }
@@ -316,15 +323,11 @@ struct RemoteHostsPanelView: View {
     }
 
     private func agentUpgradeHint(for runtime: GatewayRuntime) -> String {
-        let sshUser = runtime.config.sshUser.trimmingCharacters(in: .whitespacesAndNewlines)
-        switch runtime.config.kind {
+        switch runtime.config.connection {
         case .ssh:
-            return "Click the SSH badge above to push a fresh agent from this Mac (or use Settings → Install Agent / the one-liner below). Until then only process RSS is shown — not GPU VRAM."
+            return "Click Update to push a fresh agent from this Mac (or use Settings → Install Agent / the one-liner below). Until then only process RSS is shown, not GPU VRAM."
         case .direct:
-            if sshUser.isEmpty {
-                return "Click DIRECT above to push a fresh agent over SSH to this Tailscale host. Set SSH user in Settings if login is not your Mac username. Or paste the one-liner below on the box."
-            }
-            return "Click DIRECT above to push a fresh agent from this Mac over SSH as \(sshUser). Or paste the one-liner below on the box."
+            return "Click Update to push a fresh agent over SSH to this Tailscale host. Login uses your Mac username unless you SSH as a different user. Or paste the one-liner below on the box."
         }
     }
 
@@ -367,17 +370,6 @@ struct RemoteHostsPanelView: View {
             return host
         }
         return runtime.config.endpointSummary
-    }
-
-    private func badgeForeground(_ runtime: GatewayRuntime) -> Color {
-        switch runtime.forceUpdatePhase {
-        case .updating:
-            return accent
-        case .failed:
-            return DashboardTheme.stopRed
-        case .idle:
-            return theme.faint
-        }
     }
 
     private func statusColor(runtime: GatewayRuntime, entry: RemoteHostMetricsMonitor.Entry) -> Color {

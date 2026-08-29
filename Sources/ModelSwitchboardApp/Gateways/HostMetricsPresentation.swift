@@ -40,14 +40,14 @@ enum HostMetricsPresentation {
         return nil
     }
 
-    /// Host-level VRAM used/total, e.g. "54/128 GB".
+    /// Host-level VRAM used/total, e.g. "25.4/121.7 GB".
     static func hostVRAMUsedTotalLabel(_ metrics: HostMetricsPayload?) -> String? {
         guard let gpu = primaryGPU(metrics),
               let used = gpu.vramUsedMB,
               let total = gpu.vramTotalMB,
               total > 0
         else { return nil }
-        return String(format: "%.0f/%.0f GB", used / 1024, total / 1024)
+        return String(format: "%.1f/%.1f GB", used / 1024, total / 1024)
     }
 
     static func hostVRAMPercent(_ metrics: HostMetricsPayload?) -> Double? {
@@ -67,7 +67,7 @@ enum HostMetricsPresentation {
         primaryGPU(metrics)?.tempC
     }
 
-    /// Compact gateway strip: "GPU 42% · 54/128 GB · 51°C".
+    /// Compact gateway strip: "GPU 42% · 54.0/128.0 GB · 51°C".
     static func compactGPUStrip(_ metrics: HostMetricsPayload?) -> String? {
         guard metrics != nil else { return nil }
         var parts: [String] = []

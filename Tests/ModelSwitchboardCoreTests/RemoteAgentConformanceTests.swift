@@ -15,6 +15,7 @@ struct RemoteAgentConformanceTests {
         .deletingLastPathComponent()  // ModelSwitchboardCoreTests
         .deletingLastPathComponent()  // Tests
     static let agentScript = repoRoot.appendingPathComponent("RemoteAgent/model_switchboard_agent.py")
+    static let coreScript = repoRoot.appendingPathComponent("RemoteAgent/agent_core.py")
     static let discoveryScript = repoRoot.appendingPathComponent("RemoteAgent/discovery.py")
 
     final class AgentHarness {
@@ -184,6 +185,7 @@ struct RemoteAgentConformanceTests {
 
     @Test func swiftClientRunsFullLifecycleAgainstPythonAgent() async throws {
         guard FileManager.default.isReadableFile(atPath: Self.agentScript.path),
+              FileManager.default.isReadableFile(atPath: Self.coreScript.path),
               FileManager.default.isReadableFile(atPath: Self.discoveryScript.path)
         else {
             Issue.record("RemoteAgent python modules missing from repo checkout")
@@ -300,6 +302,7 @@ struct RemoteAgentConformanceTests {
 
     @Test func hidesProfilesWhoseModelPathIsGoneFromBoard() async throws {
         guard FileManager.default.isReadableFile(atPath: Self.agentScript.path),
+              FileManager.default.isReadableFile(atPath: Self.coreScript.path),
               FileManager.default.isReadableFile(atPath: Self.discoveryScript.path)
         else {
             Issue.record("RemoteAgent python modules missing from repo checkout")
@@ -339,6 +342,7 @@ struct RemoteAgentConformanceTests {
 
     @Test func setProfilesDirectoryHotReloads() async throws {
         guard FileManager.default.isReadableFile(atPath: Self.agentScript.path),
+              FileManager.default.isReadableFile(atPath: Self.coreScript.path),
               FileManager.default.isReadableFile(atPath: Self.discoveryScript.path)
         else {
             Issue.record("RemoteAgent python modules missing from repo checkout")
@@ -369,6 +373,7 @@ struct RemoteAgentConformanceTests {
     /// shared by the Python remote agent and the Swift local controller.
     @Test func agentStatusKeySetsMatchContract() async throws {
         guard FileManager.default.isReadableFile(atPath: Self.agentScript.path),
+              FileManager.default.isReadableFile(atPath: Self.coreScript.path),
               FileManager.default.isReadableFile(atPath: Self.discoveryScript.path)
         else {
             Issue.record("RemoteAgent python modules missing from repo checkout")
@@ -408,6 +413,7 @@ struct RemoteAgentConformanceTests {
     /// error + message. No `ok` flag anywhere on the wire.
     @Test func agentActionAndErrorKeySetsMatchContract() async throws {
         guard FileManager.default.isReadableFile(atPath: Self.agentScript.path),
+              FileManager.default.isReadableFile(atPath: Self.coreScript.path),
               FileManager.default.isReadableFile(atPath: Self.discoveryScript.path)
         else {
             Issue.record("RemoteAgent python modules missing from repo checkout")

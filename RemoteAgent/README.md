@@ -1,7 +1,7 @@
 # Model Switchboard Remote Agent
 
-This stdlib-only Python 3.10+ agent (`model_switchboard_agent.py` plus
-`discovery.py`) lets the Mac app control Linux/Unix model hosts. It uses the
+This stdlib-only Python 3.10+ agent (`model_switchboard_agent.py`,
+`agent_core.py`, and `discovery.py`) lets the Mac app control Linux/Unix model hosts. It uses the
 macOS controller's HTTP contract and `.env` / `.json` profiles.
 
 ## Install

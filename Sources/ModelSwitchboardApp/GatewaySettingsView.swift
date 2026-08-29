@@ -56,11 +56,19 @@ struct GatewaySettingsSection: View {
     // MARK: - List
 
     private var emptyState: some View {
-        Text("Launch and monitor model servers on other machines — a DGX box, a Linux workstation, anything running the Model Switchboard agent. SSH tunnels use your existing keys; nothing else is stored.")
-            .font(.system(size: 10.5))
-            .foregroundStyle(theme.sub)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(EdgeInsets(top: 9, leading: 12, bottom: 9, trailing: 12))
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Add any Linux or Unix host. Paste the pairing code the agent prints, or install over SSH from here.")
+                .font(.system(size: 10.5))
+                .foregroundStyle(theme.sub)
+                .fixedSize(horizontal: false, vertical: true)
+            pairingPasteField
+            HStack(spacing: 10) {
+                linkButton("Add without a code…") {
+                    beginManualAdd()
+                }
+            }
+        }
+        .padding(EdgeInsets(top: 9, leading: 12, bottom: 9, trailing: 12))
     }
 
     private var gatewayList: some View {
@@ -118,6 +126,11 @@ struct GatewaySettingsSection: View {
                             renameDraft = ""
                         }
                     } else {
+                        linkButton(GatewayConnectionBadge.updateActionTitle(for: runtime)) {
+                            Task { await hub.forceUpdateGateway(id: runtime.id) }
+                        }
+                        .disabled(runtime.forceUpdatePhase.isUpdating)
+                        .help(GatewayConnectionBadge.help(for: runtime))
                         linkButton("Edit") {
                             renamingGatewayID = nil
                             draft = runtime.config
@@ -126,6 +139,17 @@ struct GatewaySettingsSection: View {
                             validationMessage = nil
                         }
                     }
+                }
+                if case .failed(let message) = runtime.forceUpdatePhase {
+                    Text(message)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(DashboardTheme.stopRed)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if case .updating(let step) = runtime.forceUpdatePhase {
+                    Text(step)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(theme.sub)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .padding(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
@@ -154,12 +178,47 @@ struct GatewaySettingsSection: View {
 
     private var addButton: some View {
         linkButton("Add Remote Gateway…", emphasized: true) {
-            draft = GatewayConfig.ssh(name: "", sshHost: "")
-            draftToken = ""
-            draftIsNew = true
-            validationMessage = nil
+            beginManualAdd()
         }
         .padding(EdgeInsets(top: 9, leading: 12, bottom: 9, trailing: 12))
+    }
+
+    private func beginManualAdd() {
+        draft = GatewayConfig.ssh(name: "", sshHost: "")
+        draftToken = ""
+        draftIsNew = true
+        linkCode = ""
+        validationMessage = nil
+    }
+
+    @ViewBuilder
+    private var pairingPasteField: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            field(
+                "Paste pairing code",
+                text: $linkCode,
+                prompt: "modelswitchboard-gateway://…",
+                monospaced: true
+            )
+            Text("On the host, install the agent then run `model-switchboard-agent link`. Paste what it prints. Works for Spark, a lab box, or any other machine.")
+                .font(.system(size: 10))
+                .foregroundStyle(theme.sub)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .onChange(of: linkCode) { _, newValue in
+            applyPairingCode(newValue)
+        }
+    }
+
+    private func applyPairingCode(_ raw: String) {
+        guard var parsed = GatewayLinkCode.parse(raw) else { return }
+        if let existing = draft {
+            parsed.id = existing.id
+        } else {
+            draftIsNew = true
+        }
+        draft = parsed
+        validationMessage = nil
     }
 
     // MARK: - Editor
@@ -172,31 +231,12 @@ struct GatewaySettingsSection: View {
         )
         VStack(alignment: .leading, spacing: 8) {
             if draftIsNew {
-                VStack(alignment: .leading, spacing: 4) {
-                    field(
-                        "Link code (optional)",
-                        text: $linkCode,
-                        prompt: "modelswitchboard-gateway://…",
-                        monospaced: true
-                    )
-                    Text("Run `model-switchboard-agent link` on the remote host — it scans for existing model .env files, lets you confirm or paste a folder path, then prints a pairing code.")
-                        .font(.system(size: 10))
-                        .foregroundStyle(theme.sub)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .onChange(of: linkCode) { _, newValue in
-                    guard var parsed = GatewayLinkCode.parse(newValue) else { return }
-                    if let existing = draft {
-                        parsed.id = existing.id
-                    }
-                    draft = parsed
-                    validationMessage = nil
-                }
+                pairingPasteField
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                field("Display name", text: binding.name, prompt: "DGX Spark / Lab / Home")
-                Text("Your label for this machine — shown on the dashboard and Remote Hosts. Rename anytime.")
+                field("Display name", text: binding.name, prompt: "Lab GPU / home box")
+                Text("Your label for this machine. Shown on the dashboard and Remote Hosts. Rename anytime.")
                     .font(.system(size: 10))
                     .foregroundStyle(theme.sub)
                     .fixedSize(horizontal: false, vertical: true)
@@ -222,7 +262,7 @@ struct GatewaySettingsSection: View {
             switch binding.wrappedValue.connection {
             case .ssh:
                 field("SSH user", text: sshTextBinding(binding, \.sshUser), prompt: NSUserName(), monospaced: true)
-                field("SSH host", text: sshTextBinding(binding, \.sshHost), prompt: "spark.local", monospaced: true)
+                field("SSH host", text: sshTextBinding(binding, \.sshHost), prompt: "box.local or lab-gpu", monospaced: true)
                 HStack(spacing: 10) {
                     numberField("SSH port", value: sshIntBinding(binding, \.sshPort))
                     numberField("Agent port", value: sshIntBinding(binding, \.remotePort))
@@ -248,6 +288,33 @@ struct GatewaySettingsSection: View {
             }
 
             deployStatusText
+
+            if !draftIsNew, let runtime = hub.remoteRuntimes.first(where: { $0.id == config.id }) {
+                VStack(alignment: .leading, spacing: 4) {
+                    linkButton(
+                        GatewayConnectionBadge.updateActionTitle(for: runtime),
+                        emphasized: true
+                    ) {
+                        Task { await hub.forceUpdateGateway(id: runtime.id) }
+                    }
+                    .disabled(runtime.forceUpdatePhase.isUpdating)
+                    Text("Pushes the agent bundled in this app over SSH, then refreshes models and ports on this host.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(theme.sub)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if case .failed(let message) = runtime.forceUpdatePhase {
+                        Text(message)
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(DashboardTheme.stopRed)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else if case .updating(let step) = runtime.forceUpdatePhase {
+                        Text(step)
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(theme.sub)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
 
             if !draftIsNew, let runtime = hub.remoteRuntimes.first(where: { $0.id == config.id }) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -361,11 +428,11 @@ struct GatewaySettingsSection: View {
                 identityAgent: ssh.identityAgent,
                 enabled: draft.enabled
             )
-            if candidate.hasUnsafeSSHDestination {
+            if ssh.hasUnsafeDestination {
                 validationMessage = "SSH user/host cannot start with '-' (would be parsed as an ssh option)."
                 return
             }
-            guard (1...65535).contains(candidate.sshPort) else {
+            guard (1...65535).contains(ssh.sshPort) else {
                 validationMessage = "SSH port must be between 1 and 65535."
                 return
             }
@@ -507,7 +574,13 @@ struct GatewaySettingsSection: View {
 
     @ViewBuilder
     private func deploySection(config: GatewayConfig) -> some View {
-        let sshReady = !config.sshHost.trimmingCharacters(in: .whitespaces).isEmpty
+        let sshReady: Bool = {
+            if case .ssh(let ssh) = config.connection {
+                return !ssh.sshHost.trimmingCharacters(in: .whitespaces).isEmpty
+                    && !ssh.hasUnsafeDestination
+            }
+            return false
+        }()
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 12) {
                 deployButton(
@@ -529,7 +602,7 @@ struct GatewaySettingsSection: View {
             .toggleStyle(.checkbox)
             .disabled(deployState == .running)
             if deployState == .idle {
-                Text("Nothing to install on the remote by hand: this pushes the single-file agent over SSH and sets up its service. With Tailscale mode, this gateway is converted to a direct tailnet connection after install. Or copy the one-liner to run there yourself.")
+                Text("Nothing to install on the remote by hand: this pushes the bundled agent over SSH and sets up its service. With Tailscale mode, this gateway is converted to a direct tailnet connection after install. Or copy the one-liner to run there yourself.")
                     .font(.system(size: 10))
                     .foregroundStyle(theme.sub)
                     .fixedSize(horizontal: false, vertical: true)
@@ -615,7 +688,8 @@ struct GatewaySettingsSection: View {
         Task {
             let deployer = RemoteAgentDeployer()
             do {
-                let result = try await deployer.deploy(to: config, useTailscale: deployWithTailscale)
+                guard case .ssh(let ssh) = config.connection else { return }
+                let result = try await deployer.deploy(to: ssh, useTailscale: deployWithTailscale)
                 if deployWithTailscale,
                    let link = result.pairingLink,
                    var direct = GatewayLinkCode.parse(link),
@@ -633,8 +707,9 @@ struct GatewaySettingsSection: View {
                     let tokenHint = (result.authToken?.isEmpty == false)
                         ? " Bearer token captured into the form."
                         : " Paste the bearer token from the host if auth is enabled."
+                    let urlText = direct.direct?.baseURL ?? ""
                     deployState = .success(
-                        "Agent installed in Tailscale mode — gateway switched to direct URL \(direct.baseURL).\(tokenHint) Save to connect."
+                        "Agent installed in Tailscale mode — gateway switched to direct URL \(urlText).\(tokenHint) Save to connect."
                     )
                     return
                 }
@@ -643,7 +718,7 @@ struct GatewaySettingsSection: View {
                 }
                 let suffix = result.pairingLink == nil
                     ? "" : " The host printed its pairing code, so the connection details check out."
-                deployState = .success("Agent installed on \(config.sshHost).\(suffix) Save the gateway to connect.")
+                deployState = .success("Agent installed on \(ssh.sshHost).\(suffix) Save the gateway to connect.")
             } catch let error as RemoteAgentDeployer.DeployError {
                 switch error {
                 case .missingResources:

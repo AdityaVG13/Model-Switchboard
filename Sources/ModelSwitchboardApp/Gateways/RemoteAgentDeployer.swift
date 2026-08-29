@@ -23,17 +23,20 @@ actor RemoteAgentDeployer {
 
     private let executableURL: URL
     private let agentSourceURL: URL
+    private let coreSourceURL: URL
     private let discoverySourceURL: URL
     private let installerURL: URL
 
     init(
         executableURL: URL = URL(fileURLWithPath: "/usr/bin/ssh"),
         agentSourceURL: URL? = nil,
+        coreSourceURL: URL? = nil,
         discoverySourceURL: URL? = nil,
         installerURL: URL? = nil
     ) {
         self.executableURL = executableURL
         self.agentSourceURL = agentSourceURL ?? Self.bundledResource("model_switchboard_agent.py")
+        self.coreSourceURL = coreSourceURL ?? Self.bundledResource("agent_core.py")
         self.discoverySourceURL = discoverySourceURL ?? Self.bundledResource("discovery.py")
         self.installerURL = installerURL ?? Self.bundledResource("install-remote-agent.sh")
     }
@@ -46,6 +49,7 @@ actor RemoteAgentDeployer {
 
     nonisolated var resourcesAvailable: Bool {
         FileManager.default.isReadableFile(atPath: agentSourceURL.path)
+            && FileManager.default.isReadableFile(atPath: coreSourceURL.path)
             && FileManager.default.isReadableFile(atPath: discoverySourceURL.path)
             && FileManager.default.isReadableFile(atPath: installerURL.path)
     }
@@ -54,29 +58,32 @@ actor RemoteAgentDeployer {
     /// `useTailscale` the agent is set up bound to the host's tailnet address
     /// and the returned pairing link describes a direct (tunnel-less) gateway.
     func deploy(
-        to config: GatewayConfig,
+        to ssh: GatewayConfig.Connection.SSH,
         useTailscale: Bool = false,
         profilesDirectory: String? = nil
     ) async throws -> Result {
         guard resourcesAvailable else { throw DeployError.missingResources }
-        if config.hasUnsafeSSHDestination {
+        if ssh.hasUnsafeDestination {
             throw DeployError.sshFailed(
                 step: "validate",
                 message: "SSH user/host cannot start with '-' (would be parsed as an ssh option)."
             )
         }
-        let agentData = try Data(contentsOf: agentSourceURL)
+        let coreData = try Data(contentsOf: coreSourceURL)
         let discoveryData = try Data(contentsOf: discoverySourceURL)
+        let agentData = try Data(contentsOf: agentSourceURL)
         let installerData = try Data(contentsOf: installerURL)
 
-        // 1. Push discovery + agent into the install root (installer prefers
-        //    pre-pushed modules over downloading anything).
+        // 1. Push core + discovery + agent into the install root (installer
+        //    prefers pre-pushed modules over downloading anything). Core first:
+        //    discovery and the agent both import it.
         for (step, file, data) in [
+            ("push agent core", "agent_core.py", coreData),
             ("push discovery", "discovery.py", discoveryData),
             ("push agent", "model_switchboard_agent.py", agentData),
         ] {
             _ = try await runSSH(
-                config: config,
+                ssh: ssh,
                 step: step,
                 remoteCommand: "mkdir -p ~/\(Self.remoteRoot) && cat > ~/\(Self.remoteRoot)/\(file)",
                 stdin: data
@@ -85,7 +92,7 @@ actor RemoteAgentDeployer {
 
         // 2. Run the installer from stdin: no files land anywhere except the
         //    agent's own install root.
-        var installerFlags = "--port \(config.remotePort)" + (useTailscale ? " --tailscale" : "")
+        var installerFlags = "--port \(ssh.remotePort)" + (useTailscale ? " --tailscale" : "")
         var remotePrefix = ""
         if let profilesDirectory {
             let trimmed = profilesDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -99,7 +106,7 @@ actor RemoteAgentDeployer {
             }
         }
         let output = try await runSSH(
-            config: config,
+            ssh: ssh,
             step: "run installer",
             remoteCommand: "\(remotePrefix)bash -s -- \(installerFlags)",
             stdin: installerData
@@ -154,7 +161,7 @@ actor RemoteAgentDeployer {
     }
 
     private func runSSH(
-        config: GatewayConfig,
+        ssh: GatewayConfig.Connection.SSH,
         step: String,
         remoteCommand: String,
         stdin: Data
@@ -163,18 +170,18 @@ actor RemoteAgentDeployer {
             "-o", "BatchMode=yes",
             "-o", "ConnectTimeout=10",
         ]
-        if config.sshPort != 22 {
-            arguments += ["-p", String(config.sshPort)]
+        if ssh.sshPort != 22 {
+            arguments += ["-p", String(ssh.sshPort)]
         }
-        if let identityFile = config.identityFile, !identityFile.isEmpty {
+        if let identityFile = ssh.identityFile, !identityFile.isEmpty {
             arguments += ["-i", NSString(string: identityFile).expandingTildeInPath]
         }
-        if let identityAgent = config.identityAgent, !identityAgent.isEmpty {
+        if let identityAgent = ssh.identityAgent, !identityAgent.isEmpty {
             arguments += ["-o", "IdentityAgent=\(identityAgent)"]
         }
         // `--` terminates options so a crafted destination cannot inject
         // `-oProxyCommand=...` (or similar) ahead of the remote command.
-        arguments += ["--", config.sshDestination, remoteCommand]
+        arguments += ["--", ssh.destination, remoteCommand]
 
         let process = Process()
         process.executableURL = executableURL

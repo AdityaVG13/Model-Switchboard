@@ -15,6 +15,18 @@ enum ModelSwitchboardControllerMain {
 
   private static func run() throws {
     let arguments = Array(CommandLine.arguments.dropFirst())
+    if arguments.first == "json-strings" {
+      try runJSONStrings()
+      return
+    }
+    if arguments.first == "openai-models-contains" {
+      let expected = option("--id", in: arguments)
+      guard let expected, !expected.isEmpty else {
+        throw ControllerError.usage("missing --id")
+      }
+      let data = FileHandle.standardInput.readDataToEndOfFile()
+      exit(JSONSupport.openaiModelsContains(id: expected, json: data) ? 0 : 1)
+    }
     let knownCommands = Set([
       "serve", "serve-web", "status", "list", "start", "stop", "restart", "switch", "activate",
       "stop-all", "integrations", "run-integration", "doctor", "diagnose", "health", "triage",
@@ -179,6 +191,13 @@ enum ModelSwitchboardControllerMain {
       try printSwiftBar(service: service)
     default:
       throw ControllerError.usage("unknown command: \(command)")
+    }
+  }
+
+  private static func runJSONStrings() throws {
+    let data = FileHandle.standardInput.readDataToEndOfFile()
+    for item in try JSONSupport.stringArray(fromJSON: data) {
+      print(item)
     }
   }
 
