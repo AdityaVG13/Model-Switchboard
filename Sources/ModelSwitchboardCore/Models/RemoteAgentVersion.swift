@@ -6,7 +6,7 @@ import Foundation
 /// The Mac app is ahead of a host whenever that host reports an older (or
 /// missing) version; clicking the gateway badge pushes this build's agent.
 public enum RemoteAgentVersion {
-    public static let bundled = "1.1.3"
+    public static let bundled = "1.1.4"
 
     /// True when host metrics prove the remote agent is older than this app.
     /// No metrics yet is not stale (unknown). An agent that lacks the metrics

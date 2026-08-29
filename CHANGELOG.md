@@ -5,6 +5,8 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 ### Fixed
 
+- Unnamed port-claim folders (no MODEL*/REQUEST_MODEL/SERVER_MODEL_ID hint) are no longer stuck at "WARMING": their synthetic `port-N` identity is a placeholder, so readiness is proven by the endpoint serving any OpenAI `/v1/models` id, and the row adopts the served id as its visible name (previously "Port 8050" could never count toward the ready tally).
+- A `SERVER_MODEL_ID=` flag in a claim's `flags.env` now reaches the profile (it was silently dropped by the claim scanner's flag whitelist), and a bare `MODEL_FILE=*.gguf` claim reports the `llama.cpp` runtime family instead of Unknown.
 - Local `start-model-mac.sh` health-wait and `SERVER_ARGS_JSON` parse through the bundled Swift controller instead of `jq`, so LaunchAgent PATH (no Homebrew) can still start models.
 - Activate on a remote agent no longer walks claims and live-probes every listener just to decide which managed profiles to stop; idle siblings skip `STOP_COMMAND`, and a failed sibling stop cannot abort `start()`.
 - GB10 / DGX Spark VRAM chips no longer report host RAM used as VRAM (the `34/122 GB` lie). When nvidia-smi framebuffer is N/A, used is the compute-apps GPU-memory sum (SparkDash's `25.4/121.7 GB`) and total is the unified DRAM pool.

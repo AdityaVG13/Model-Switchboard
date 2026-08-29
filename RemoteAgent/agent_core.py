@@ -207,6 +207,16 @@ def first_known(*values: str | None) -> str:
             return value
     return "unknown"
 
+def is_placeholder_model_name(value: str | None) -> bool:
+    """True for the synthetic "port-N" identity the claim scanner invents.
+
+    A claim folder with no model-name key gets request_model="port-N" so the
+    profile validates; that placeholder is NOT an operator-asserted identity
+    and must never gate a health check or become the visible model name.
+    """
+    raw = (value or "").strip()
+    return raw.startswith("port-") and raw[len("port-"):].isdigit()
+
 def _parse_env_value(raw: str, file: Path, line: int) -> str:
     first = raw[:1]
     if first not in ("'", '"'):

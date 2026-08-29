@@ -71,6 +71,7 @@ from agent_core import (
     first_known,
     gpu_metrics_snapshot,
     is_loopback,
+    is_placeholder_model_name,
     listener_pid,
     listener_pid_from_inventory,
     load_agent_config,
@@ -105,7 +106,7 @@ from discovery import (  # noqa: E402
     status_dict_from_discovery,
 )
 
-AGENT_VERSION = "1.1.3"
+AGENT_VERSION = "1.1.4"
 
 MINIMUM_TOKEN_BYTES = 16
 
@@ -1414,6 +1415,21 @@ class AgentService:
         listeners: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         ready, server_ids = self._probe_health(profile)
+        # A claim with no model-name hint invents "port-N" as its identity; the
+        # id the endpoint actually serves (while it is up) is the real name.
+        request_model = profile.request_model
+        server_model_id = profile.server_model_id
+        display_name = profile.display_name
+        if server_ids:
+            if is_placeholder_model_name(request_model):
+                request_model = server_ids[0]
+            if is_placeholder_model_name(server_model_id):
+                server_model_id = server_ids[0]
+            if (
+                display_name.lower() == f"port {profile.endpoint_port}"
+                or is_placeholder_model_name(display_name)
+            ):
+                display_name = Path(request_model).name
         pid = self._read_pid(profile.name)
         zombie = bool(pid and process_is_zombie(pid))
         if pid is not None and not process_is_alive(pid):
@@ -1463,7 +1479,7 @@ class AgentService:
         # runtime inferred once at the discovery boundary instead.
         return {
             "profile": profile.name,
-            "display_name": profile.display_name,
+            "display_name": display_name,
             "runtime": runtime,
             "runtime_label": label,
             "runtime_tags": tags if isinstance(tags, list) else profile.runtime_tags,
@@ -1471,8 +1487,8 @@ class AgentService:
             "host": profile.endpoint_host,
             "port": profile.endpoint_port,
             "base_url": profile.base_url,
-            "request_model": profile.request_model,
-            "server_model_id": profile.server_model_id,
+            "request_model": request_model,
+            "server_model_id": server_model_id,
             "pid": pid if (alive or zombie) else None,
             "running": alive,
             # Health alone when the port answers (Swift-like). Unowned ready
@@ -1876,6 +1892,11 @@ class AgentService:
             for entry in entries
             if isinstance(entry, dict) and isinstance(entry.get("id"), str) and entry["id"]
         ]
+        # A claim with no model-name hint carries the synthetic port-N identity:
+        # there is nothing to verify against, so a non-empty served id list is
+        # the proof of readiness (the endpoint proves itself).
+        if profile.get("HEALTHCHECK_ANY_ID") == "1":
+            return bool(ids), ids
         expected = profile.get("HEALTHCHECK_EXPECT_ID") or profile.server_model_id
         matched = openai_model_id_matches(
             expected,

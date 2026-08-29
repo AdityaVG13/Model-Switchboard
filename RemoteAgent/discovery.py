@@ -19,6 +19,7 @@ from typing import Any
 from agent_core import (
     DEFAULT_PORT,
     InvalidProfileError,
+    is_placeholder_model_name,
     PROFILE_KEY_RE,
     PROFILE_SCAN_SKIP_DIRS,
     Profile,
@@ -749,6 +750,9 @@ def scan_port_claim_directories(
             runtime_hint = "llama.cpp"
         elif flags.get("VLLM_BIN") or "vllm" in (flags.get("BACKEND") or "").lower():
             runtime_hint = "vllm"
+        elif str(flags.get("MODEL_FILE") or "").strip().lower().endswith(".gguf"):
+            # A GGUF weight file is llama.cpp-shaped even without LLAMA_BIN.
+            runtime_hint = "llama.cpp"
         display = flags.get("DISPLAY_NAME") or ""
         if not display and model_hint:
             display = Path(model_hint).name
@@ -784,6 +788,7 @@ def scan_port_claim_directories(
                     "BACKEND",
                     "VLLM_BIN",
                     "REQUEST_MODEL",
+                    "SERVER_MODEL_ID",
                     "DISPLAY_NAME",
                     "PORT",
                     "HOST",
@@ -1009,7 +1014,7 @@ def profile_from_claim(claim: dict[str, Any]) -> Profile:
         model_file = model_file_flag
     elif any(model_raw.lower().endswith(suffix) for suffix in _WEIGHT_SUFFIXES):
         model_file = model_raw
-    elif request_s.endswith(".gguf"):
+    elif request_s.endswith(".gguf") and not is_placeholder_model_name(request_s):
         model_file = request_s
     else:
         model_file = ""
@@ -1028,7 +1033,7 @@ def profile_from_claim(claim: dict[str, Any]) -> Profile:
         # No interior re-derivation from START_COMMAND later.
         "RUNTIME": first_known(claim.get("runtime_hint")),
         "REQUEST_MODEL": request_s,
-        "SERVER_MODEL_ID": Path(request_s).name if ("/" in request_s or request_s.endswith(".gguf")) else request_s,
+        "SERVER_MODEL_ID": str(flags_safe.get("SERVER_MODEL_ID") or (Path(request_s).name if ("/" in request_s or request_s.endswith(".gguf")) else request_s)),
         "PORT": port,
         "HOST": str(claim.get("host") or "127.0.0.1"),
         "START_COMMAND": start,
@@ -1043,6 +1048,15 @@ def profile_from_claim(claim: dict[str, Any]) -> Profile:
         values["STOP_COMMAND"] = stop
     if not start:
         values["LAUNCH_MODE"] = "external"
+    # No model-name hint anywhere in the claim ⇒ the port-N identity is a
+    # placeholder, not something the operator asserted. Flag the profile so
+    # the health probe accepts whatever OpenAI id the endpoint serves and
+    # status can adopt the served id as the visible name while it is up.
+    # SERVER_MODEL_ID derived from the request (or the placeholder itself)
+    # counts as "no hint" — only an explicit SERVER_MODEL_ID/REQUEST_MODEL/
+    # MODEL* name does.
+    if is_placeholder_model_name(request_s) and values.get("SERVER_MODEL_ID") in (None, "", request_s):
+        values["HEALTHCHECK_ANY_ID"] = "1"
     # L24: tags pass as a parsed list (no comma-string re-encoding); the
     # env-file comma format is only for real files on disk.
     return Profile(name=name, values=values, tags=["claimed", "launch-folder"])
