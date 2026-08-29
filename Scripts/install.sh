@@ -355,7 +355,7 @@ verify_install() {
 install_app_bundle() {
   cd "$ROOT_DIR"
   run_with_spinner "Stopping running Model Switchboard apps" \
-    pkill -f 'ModelSwitchboard(Plus)?(\.app/Contents/MacOS/ModelSwitchboard(Plus)?|App)' || true
+    pkill -f 'Model ?Switchboard( Plus)?\.app/Contents' || true
   sleep 1 || true
   run_with_spinner "Building $APP_NAME" \
     env APP_VARIANT="$APP_VARIANT" CONFIGURATION="$CONFIGURATION" "$ROOT_DIR/Scripts/build-app.sh"
