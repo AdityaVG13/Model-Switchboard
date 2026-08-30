@@ -12,13 +12,16 @@ public struct ControllerConfiguration: Sendable, Equatable {
   public let port: UInt16
   public let authToken: String?
   public let unsafeBind: Bool
+  /// When set, profiles are read from this folder instead of `<root>/model-profiles`.
+  public let profilesDirectoryOverride: URL?
 
   public init(
     root: URL,
     host: String = Self.defaultHost,
     port: UInt16 = ControllerEndpointDefaults.port,
     authToken: String? = nil,
-    unsafeBind: Bool = false
+    unsafeBind: Bool = false,
+    profilesDirectory: URL? = nil
   ) throws {
     let token = authToken?.trimmingCharacters(in: .whitespacesAndNewlines)
     if let token, !token.isEmpty, token.utf8.count < Self.minimumTokenBytes {
@@ -40,10 +43,12 @@ public struct ControllerConfiguration: Sendable, Equatable {
     self.port = port
     self.authToken = token.flatMap { $0.isEmpty ? nil : $0 }
     self.unsafeBind = unsafeBind
+    self.profilesDirectoryOverride = profilesDirectory?.standardizedFileURL
   }
 
   public var profilesDirectory: URL {
-    root.appendingPathComponent("model-profiles", isDirectory: true)
+    profilesDirectoryOverride
+      ?? root.appendingPathComponent("model-profiles", isDirectory: true)
   }
   public var runDirectory: URL { root.appendingPathComponent("run", isDirectory: true) }
   public var benchmarkResultsDirectory: URL {
@@ -73,6 +78,7 @@ public struct ControllerConfiguration: Sendable, Equatable {
     var port = UInt16(defaultPort)
     var unsafeBind = false
     var token: String?
+    var profilesDirectory: URL?
     var iterator = arguments.makeIterator()
     while let argument = iterator.next() {
       switch argument {
@@ -81,6 +87,12 @@ public struct ControllerConfiguration: Sendable, Equatable {
           throw ControllerError.usage("missing value for --root")
         }
         root = URL(fileURLWithPath: NSString(string: value).expandingTildeInPath)
+      case "--profiles-dir":
+        guard let value = iterator.next() else {
+          throw ControllerError.usage("missing value for --profiles-dir")
+        }
+        profilesDirectory = URL(
+          fileURLWithPath: NSString(string: value).expandingTildeInPath, isDirectory: true)
       case "--host":
         guard let value = iterator.next() else {
           throw ControllerError.usage("missing value for --host")
@@ -114,8 +126,49 @@ public struct ControllerConfiguration: Sendable, Equatable {
         continue
       }
     }
+    if profilesDirectory == nil {
+      profilesDirectory = Self.loadConfiguredProfilesDirectory(root: root)
+    } else if let profilesDirectory {
+      try Self.saveConfiguredProfilesDirectory(root: root, profilesDirectory: profilesDirectory)
+    }
     return try ControllerConfiguration(
-      root: root, host: host, port: port, authToken: token, unsafeBind: unsafeBind)
+      root: root,
+      host: host,
+      port: port,
+      authToken: token,
+      unsafeBind: unsafeBind,
+      profilesDirectory: profilesDirectory
+    )
+  }
+
+  /// Optional `config.json` next to the controller root: `{ "profiles_dir": "…" }`.
+  public static func loadConfiguredProfilesDirectory(root: URL) -> URL? {
+    let configURL = root.appendingPathComponent("config.json")
+    guard
+      let data = try? Data(contentsOf: configURL),
+      let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+      let path = object["profiles_dir"] as? String,
+      !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    else { return nil }
+    return URL(
+      fileURLWithPath: NSString(string: path).expandingTildeInPath, isDirectory: true)
+  }
+
+  public static func saveConfiguredProfilesDirectory(root: URL, profilesDirectory: URL) throws {
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    let configURL = root.appendingPathComponent("config.json")
+    var payload: [String: Any] = [:]
+    if FileManager.default.fileExists(atPath: configURL.path) {
+      let data = try Data(contentsOf: configURL)
+      guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        throw ControllerError.operationFailed(
+          "refusing to rewrite corrupt config.json: root value is not an object")
+      }
+      payload = object
+    }
+    payload["profiles_dir"] = profilesDirectory.path
+    let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
+    try data.write(to: configURL, options: .atomic)
   }
 }
 

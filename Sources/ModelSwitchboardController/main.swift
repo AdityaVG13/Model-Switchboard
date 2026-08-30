@@ -1,4 +1,5 @@
 import Foundation
+import ModelSwitchboardCore
 import ModelSwitchboardControllerCore
 
 @main
@@ -14,6 +15,18 @@ enum ModelSwitchboardControllerMain {
 
   private static func run() throws {
     let arguments = Array(CommandLine.arguments.dropFirst())
+    if arguments.first == "json-strings" {
+      try runJSONStrings()
+      return
+    }
+    if arguments.first == "openai-models-contains" {
+      let expected = option("--id", in: arguments)
+      guard let expected, !expected.isEmpty else {
+        throw ControllerError.usage("missing --id")
+      }
+      let data = FileHandle.standardInput.readDataToEndOfFile()
+      exit(JSONSupport.openaiModelsContains(id: expected, json: data) ? 0 : 1)
+    }
     let knownCommands = Set([
       "serve", "serve-web", "status", "list", "start", "stop", "restart", "switch", "activate",
       "stop-all", "integrations", "run-integration", "doctor", "diagnose", "health", "triage",
@@ -181,6 +194,13 @@ enum ModelSwitchboardControllerMain {
     }
   }
 
+  private static func runJSONStrings() throws {
+    let data = FileHandle.standardInput.readDataToEndOfFile()
+    for item in try JSONSupport.stringArray(fromJSON: data) {
+      print(item)
+    }
+  }
+
   private static func positionalValues(_ arguments: [String], after command: String) -> [String] {
     guard let commandIndex = arguments.firstIndex(of: command) else { return [] }
     let optionsWithValues = Set([
@@ -241,13 +261,12 @@ enum ModelSwitchboardControllerMain {
 
   private static func printSwiftBar(service: ControllerService) throws {
     let payload = try service.statusPayload()
-    let ready = payload.statuses.filter(\.ready).count
-    let running = payload.statuses.filter(\.running).count
+    let counts = ProfileRuntimeCounts(statuses: payload.statuses)
     let executable = CommandLine.arguments[0]
-    print("LLMs \(ready)/\(payload.statuses.count)")
+    print("LLMs \(counts.ready)/\(counts.total)")
     print("---")
-    print("Ready endpoints: \(ready)/\(payload.statuses.count)")
-    print("Running processes: \(running)")
+    print("Ready endpoints: \(counts.ready)/\(counts.total)")
+    print("Running processes: \(counts.running)")
     print(
       "Stop all | bash=\(executable) param1=stop-all param2=--root param3=\(service.configuration.root.path) terminal=false refresh=true color=red"
     )

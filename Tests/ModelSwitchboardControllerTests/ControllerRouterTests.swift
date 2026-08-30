@@ -35,7 +35,8 @@ import Testing
     #expect(payload?["profiles_dir"] as? String == fixture.configuration.profilesDirectory.path)
     let cached = ControllerStatusCache.load(
       from: fixture.temporary.appendingPathComponent("controller-status.json"))
-    #expect(cached?.statuses.count == 1)
+    // L13: the cache is an envelope — statuses live under `payload`.
+    #expect(cached?.payload.statuses.count == 1)
 
     let integrations = router.handle(.init(method: "GET", target: "/api/integrations"))
     #expect(integrations.status == 200)
@@ -67,7 +68,7 @@ import Testing
     let router = ControllerRouter(service: fixture.service, authToken: nil)
     let missingField = router.handle(jsonRequest(path: "/api/start", object: [:]))
     #expect(missingField.status == 400)
-    #expect(errorCode(missingField) == "invalid_request")
+    #expect(errorCode(missingField) == "usage_error")
 
     let malformed = router.handle(
       .init(method: "POST", target: "/api/stop-all", body: Data("{".utf8)))
@@ -82,7 +83,7 @@ import Testing
     let started = router.handle(jsonRequest(path: "/api/start", object: ["profile": "test"]))
     #expect(started.status == 200)
     let startedPayload = try JSONSerialization.jsonObject(with: started.body) as? [String: Any]
-    #expect(startedPayload?["ok"] as? Bool == true)
+    #expect(startedPayload?["error"] as? String == nil)
   }
 }
 
@@ -125,7 +126,7 @@ import Testing
       ))
     #expect(benchmark.status == 200)
     let payload = try JSONSerialization.jsonObject(with: benchmark.body) as? [String: Any]
-    #expect(payload?["ok"] as? Bool == true)
+    #expect(payload?["error"] as? String == nil)
     let benchmarkStatus = payload?["benchmark"] as? [String: Any]
     #expect((benchmarkStatus?["log_path"] as? String)?.hasSuffix("benchmark.log") == true)
   }
@@ -159,3 +160,22 @@ private func jsonRequest(path: String, object: [String: Any]) -> ControllerHTTPR
 private func errorCode(_ response: ControllerHTTPResponse) -> String? {
   ((try? JSONSerialization.jsonObject(with: response.body)) as? [String: Any])?["error"] as? String
 }
+
+@Test func routerSetsProfilesDirectory() throws {
+  try withFixtureRoot { fixture in
+    let router = ControllerRouter(service: fixture.service, authToken: nil)
+    let next = fixture.temporary.appendingPathComponent("router-profiles", isDirectory: true)
+    let response = router.handle(
+      jsonRequest(path: "/api/config/profiles-dir", object: ["profiles_dir": next.path]))
+    #expect(response.status == 200)
+    let payload = try JSONSerialization.jsonObject(with: response.body) as? [String: Any]
+    #expect(payload?["error"] as? String == nil)
+    #expect(payload?["profiles_dir"] as? String == next.path)
+    #expect(fixture.service.configuration.profilesDirectory.path == next.path)
+
+    let missing = router.handle(jsonRequest(path: "/api/config/profiles-dir", object: [:]))
+    #expect(missing.status == 400)
+  }
+}
+
+

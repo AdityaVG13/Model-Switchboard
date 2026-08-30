@@ -12,6 +12,10 @@ fi
 
 CONTROLLER_BIN="$APP_PATH/Contents/Resources/ModelSwitchboardController"
 CONTROLLER_PLIST="$APP_PATH/Contents/Library/LaunchAgents/io.modelswitchboard.controller.plist"
+REMOTE_AGENT_PY="$APP_PATH/Contents/Resources/RemoteAgent/model_switchboard_agent.py"
+REMOTE_AGENT_CORE="$APP_PATH/Contents/Resources/RemoteAgent/agent_core.py"
+REMOTE_AGENT_DISCOVERY="$APP_PATH/Contents/Resources/RemoteAgent/discovery.py"
+REMOTE_AGENT_INSTALLER="$APP_PATH/Contents/Resources/RemoteAgent/install-remote-agent.sh"
 
 [ -x "$CONTROLLER_BIN" ] || {
   echo "embedded controller missing: $CONTROLLER_BIN" >&2
@@ -19,6 +23,22 @@ CONTROLLER_PLIST="$APP_PATH/Contents/Library/LaunchAgents/io.modelswitchboard.co
 }
 [ -f "$CONTROLLER_PLIST" ] || {
   echo "controller LaunchAgent missing: $CONTROLLER_PLIST" >&2
+  exit 1
+}
+[ -f "$REMOTE_AGENT_PY" ] || {
+  echo "embedded remote agent missing: $REMOTE_AGENT_PY" >&2
+  exit 1
+}
+[ -f "$REMOTE_AGENT_CORE" ] || {
+  echo "embedded remote agent core module missing: $REMOTE_AGENT_CORE" >&2
+  exit 1
+}
+[ -f "$REMOTE_AGENT_DISCOVERY" ] || {
+  echo "embedded remote agent discovery module missing: $REMOTE_AGENT_DISCOVERY" >&2
+  exit 1
+}
+[ -x "$REMOTE_AGENT_INSTALLER" ] || {
+  echo "embedded remote agent installer missing or not executable: $REMOTE_AGENT_INSTALLER" >&2
   exit 1
 }
 

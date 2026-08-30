@@ -5,7 +5,7 @@ public final class StressController: @unchecked Sendable {
     public static let integration = ControllerIntegration(
         id: "droid",
         displayName: "Factory Droid",
-        kind: "model_registry",
+        kind: .modelRegistry,
         capabilities: ["sync"],
         syncLabel: "Sync Droid",
         description: "Mocked sync target"
@@ -122,7 +122,6 @@ public final class StressController: @unchecked Sendable {
         benchmark: BenchmarkStatus? = idleBenchmark
     ) -> ControllerActionResponse {
         ControllerActionResponse(
-            ok: true,
             statuses: [status(running: running, ready: ready)],
             benchmark: benchmark,
             integrations: [integration],
@@ -149,20 +148,8 @@ public final class StressController: @unchecked Sendable {
             profilesDirectory: "/tmp/model-switchboard-stress/model-profiles",
             controllerRoot: "/tmp/model-switchboard-stress",
             profiles: [
-                ProfileDiagnostic(
-                    profile: StressTestConfig.profile,
-                    displayName: "Stress Profile",
-                    runtime: "mock",
-                    runtimeLabel: "Mock",
-                    runtimeTags: ["mock", "non-destructive"],
-                    launchMode: "external",
-                    errors: [],
-                    warnings: [],
-                    running: false,
-                    ready: false,
-                    pid: nil,
-                    baseURL: "http://127.0.0.1:8999/v1"
-                )
+                // L12: role-flagged view over the shared snapshot.
+                ProfileDiagnostic(status: status(running: false, ready: false), errors: [], warnings: [])
             ]
         )
     }

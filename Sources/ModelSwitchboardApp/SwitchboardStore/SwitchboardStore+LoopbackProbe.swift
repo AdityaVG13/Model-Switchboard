@@ -27,8 +27,12 @@ extension SwitchboardStore {
         loopbackEndpointProbeSuppressedUntil = now.addingTimeInterval(Constants.loopbackEndpointProbeSuppressionSeconds)
     }
 
-    func probeLoopbackEndpointsIfNeeded(relativeTo now: Date = .now) async {
-        guard !isRefreshing else { return }
+    func probeLoopbackEndpointsIfNeeded(
+        relativeTo now: Date = .now,
+        allowDuringRefresh: Bool = false
+    ) async {
+        guard gateway.isLocal else { return }
+        guard allowDuringRefresh || !isRefreshing else { return }
         guard shouldProbeLoopbackEndpoints(relativeTo: now) else { return }
 
         let candidates = loopbackEndpointProbeCandidates
@@ -54,6 +58,9 @@ extension SwitchboardStore {
     }
 
     func startLoopbackEndpointProbe() {
+        // Remote profiles report URLs that are loopback on the *remote* host;
+        // probing 127.0.0.1 here would mark healthy remote servers dead.
+        guard gateway.isLocal else { return }
         loopbackEndpointProbeTask?.cancel()
         loopbackEndpointProbeSession = loopbackEndpointProbeSession ?? Self.makeLoopbackEndpointProbeSession()
         loopbackEndpointProbeTask = Task { [weak self] in
@@ -88,6 +95,8 @@ extension SwitchboardStore {
         configuration.timeoutIntervalForResource = Constants.loopbackEndpointProbeTimeoutSeconds
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.waitsForConnectivity = false
+        // Match remote client / curl --noproxy: never send loopback probes via a proxy.
+        configuration.connectionProxyDictionary = [:]
         return URLSession(configuration: configuration)
     }
 

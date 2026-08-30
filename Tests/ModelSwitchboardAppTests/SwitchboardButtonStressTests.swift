@@ -141,22 +141,31 @@ import ModelSwitchboardTestSupport
         actionName: "Start",
         status: StressController.status(running: true, ready: false),
         diagnostic: ProfileDiagnostic(
-            profile: StressTestConfig.profile,
-            displayName: "Stress Profile",
-            runtime: "llama.cpp",
-            runtimeLabel: "llama.cpp",
-            runtimeTags: ["llama.cpp"],
-            launchMode: "adapter",
+            status: StressController.status(running: false, ready: false),
             errors: ["llama-server not found in controller PATH; set SERVER_BIN to an absolute executable path"],
-            warnings: [],
-            running: false,
-            ready: false,
-            pid: nil,
-            baseURL: "http://127.0.0.1:8999/v1"
+            warnings: []
         )
     )
 
     #expect(message == "Start timed out for Stress Profile. Profile issue: llama-server not found in controller PATH; set SERVER_BIN to an absolute executable path")
+}
+
+@MainActor
+@Test func appTransportSecurityErrorIsMappedToShortCopy() {
+    let error = NSError(
+        domain: NSURLErrorDomain,
+        code: -1022,
+        userInfo: [NSLocalizedDescriptionKey: "The resource could not be loaded because the App Transport Security policy requires the use of a secure connection."]
+    )
+    let message = SwitchboardStore.userFacingErrorDescription(for: error)
+    #expect(message.contains("App Transport Security") || message.contains("plain HTTP"))
+    #expect(!message.contains("could not be loaded because"))
+}
+
+@MainActor
+@Test func gatewayHostUnreachableIsMapped() {
+    let message = SwitchboardStore.userFacingErrorDescription(for: URLError(.cannotConnectToHost))
+    #expect(message.contains("refused") || message.contains("agent"))
 }
 
 @MainActor

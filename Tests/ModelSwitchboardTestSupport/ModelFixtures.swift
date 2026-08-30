@@ -16,8 +16,11 @@ public enum ModelFixtures {
         running: Bool = true,
         ready: Bool = true,
         rssMB: Double? = 4096,
+        vramMB: Double? = nil,
         command: String? = nil,
-        logPath: String = "/tmp/qwen.log"
+        logPath: String? = "/tmp/qwen.log",
+        origin: ModelProfileStatus.Origin = .unknown,
+        missingArtifacts: [String]? = nil
     ) -> ModelProfileStatus {
         ModelProfileStatus(
             profile: profile,
@@ -36,8 +39,11 @@ public enum ModelFixtures {
             ready: ready,
             serverIDs: running ? [profile] : [],
             rssMB: running ? rssMB : nil,
+            vramMB: running ? vramMB : nil,
             command: command,
-            logPath: logPath
+            logPath: logPath,
+            origin: origin,
+            missingArtifacts: missingArtifacts
         )
     }
 
@@ -124,7 +130,6 @@ public enum ModelFixtures {
       "doctor_contract_version": "1.0",
       "tool_version": "1.2.0",
       "generated_at": "2026-07-09T20:00:00Z",
-      "healthy": false,
       "findings": [
         {
           "id": "fm-profile-example-mlx-missing-model",
@@ -132,8 +137,7 @@ public enum ModelFixtures {
           "subsystem": "profiles",
           "message": "missing MODEL_DIR or MODEL_REPO",
           "evidence": "example-mlx",
-          "remediation": "Set MODEL_DIR or MODEL_REPO in the profile",
-          "auto_fixable": false
+          "remediation": "Set MODEL_DIR or MODEL_REPO in the profile"
         }
       ],
       "next_steps": [
@@ -155,18 +159,25 @@ public enum ModelFixtures {
       "controller_root": "/Users/example/.model-switchboard",
       "profiles": [
         {
-          "profile": "example-mlx",
-          "display_name": "Example MLX Model",
-          "runtime": "mlx",
-          "runtime_label": "MLX",
-          "runtime_tags": ["mlx", "managed", "openai-compatible", "apple-silicon"],
-          "launch_mode": "adapter",
+          "status": {
+            "profile": "example-mlx",
+            "display_name": "Example MLX Model",
+            "runtime": "mlx",
+            "runtime_label": "MLX",
+            "runtime_tags": ["mlx", "managed", "openai-compatible", "apple-silicon"],
+            "launch_mode": "adapter",
+            "host": "127.0.0.1",
+            "port": "8080",
+            "base_url": "",
+            "request_model": "example-mlx",
+            "server_model_id": "example-mlx",
+            "pid": null,
+            "running": false,
+            "ready": false,
+            "server_ids": []
+          },
           "errors": ["missing MODEL_DIR or MODEL_REPO"],
-          "warnings": ["base_url is empty; endpoint health checks may fail"],
-          "running": false,
-          "ready": false,
-          "pid": null,
-          "base_url": ""
+          "warnings": ["base_url is empty; endpoint health checks may fail"]
         }
       ]
     }

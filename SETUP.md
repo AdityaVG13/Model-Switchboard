@@ -1,4 +1,4 @@
-# Model Switchboard — Setup & Reference
+# Model Switchboard (Setup & Reference)
 
 Everything you need beyond the README's quickstart. This is also what the app's **Help** button opens.
 
@@ -13,6 +13,7 @@ Everything you need beyond the README's quickstart. This is also what the app's 
 - [Why JSON is the right next step](#why-json-is-the-right-next-step)
 - [Resource profile](#resource-profile)
 - [Controller API contract](#controller-api-contract)
+- [Remote gateways](#remote-gateways)
 - [Benchmark artifacts](#benchmark-artifacts)
 - [Build from source](#build-from-source)
 - [Release pipeline](#release-pipeline)
@@ -24,7 +25,7 @@ Everything you need beyond the README's quickstart. This is also what the app's 
 
 ## The operating model
 
-`ModelSwitchboard` is the control surface, not the runtime.
+`ModelSwitchboard` is the control surface; model processes live in the runtimes.
 
 There are three layers:
 
@@ -45,11 +46,11 @@ There are three layers:
 
 The app only needs a controller URL. The controller discovers profiles, launches runtimes, and reports health.
 
-This repo includes one generic reference implementation under `Controller/`. You can use it directly or replace it with your own backend that exposes the same HTTP contract.
+This repo includes one generic reference implementation under `Controller/`. Use it directly, or replace it with your own backend that exposes the same HTTP contract.
 
 ## One central folder
 
-A practical adapter layout is:
+Adapter layout:
 
 - `<adapter-root>/model-profiles`
 
@@ -66,7 +67,7 @@ Use `.env` for shell-style configuration. Use `.json` for structured, tool-agnos
 
 Strict example manifests live under `Controller/model-profiles/examples/`.
 
-Every profile must resolve to a unique endpoint. If two profiles share the same `HOST:PORT` or `BASE_URL`, activation and status attribution become ambiguous, so the controller doctor treats that as a profile error.
+Every profile must resolve to a unique endpoint. If two profiles share the same `HOST:PORT` or `BASE_URL`, activation and status attribution become ambiguous. The controller doctor treats that as a profile error.
 
 ## Supported runtime styles
 
@@ -83,7 +84,7 @@ Typical fields:
 - `SERVER_MODEL_ID`
 
 ### `mlx`
-Best when you have an MLX-native converted model and want very strong Apple-local throughput.
+Best for MLX-native converted models on Apple Silicon.
 
 Typical fields:
 
@@ -106,7 +107,7 @@ Typical fields:
 - `SERVER_MODEL_ID`
 
 ### `vllm-mlx`
-Best current speed lane for MLX model directories on Apple Silicon.
+Best for high-throughput MLX model directories on Apple Silicon.
 
 Typical fields:
 
@@ -121,15 +122,15 @@ Typical fields:
 ### Universal launchers
 Best when the model is owned by another runtime, desktop app, daemon, or wrapper.
 
-Model Switchboard now uses three launch modes:
+Model Switchboard uses three launch modes:
 
 - `adapter`: known runtimes where the controller builds the command (`llama.cpp`, `mlx`, `rvllm-mlx`, `vllm-mlx`, `ollama`, `vllm`, `sglang`, `tgi`, `llama-cpp-python`).
 - `command`: profile-owned `START_COMMAND`, optional `STOP_COMMAND`, and readiness.
 - `external`: an already-running OpenAI-compatible endpoint such as LM Studio, Jan, LocalAI, or a manually launched server.
 
-Named command and generic-binary profiles can still use runtime ids such as `ddtree-mlx`, `turboquant`, `mlx-vlm`, `mlx-omni-server`, `mistral.rs`, `mlc-llm`, `lightllm`, `fastchat`, `openllm`, `nexa`, `exllamav2`, `aphrodite`, and `lmdeploy`; they retain their real runtime label instead of displaying as custom. Use `LAUNCH_MODE=external` when a named runtime is already running outside Model Switchboard. Every profile status includes `runtime_label`, `runtime_tags`, and `launch_mode`. Add custom tags with `RUNTIME_TAGS="coding q8 long-context"`.
+Named command and generic-binary profiles can still use runtime ids such as `ddtree-mlx`, `turboquant`, `mlx-vlm`, `mlx-omni-server`, `mistral.rs`, `mlc-llm`, `lightllm`, `fastchat`, `openllm`, `nexa`, `exllamav2`, `aphrodite`, and `lmdeploy`. They retain their real runtime label instead of displaying as custom. Use `LAUNCH_MODE=external` when a named runtime is already running outside Model Switchboard. Every profile status includes `runtime_label`, `runtime_tags`, and `launch_mode`. Add custom tags with `RUNTIME_TAGS="coding q8 long-context"`.
 
-Profiles can be JSON or declarative `.env` files. `.env` files are parsed as key/value data, not shell scripts; use quoted `START_COMMAND` or `STOP_COMMAND` values for commands that intentionally run through the launcher.
+Profiles can be JSON or declarative `.env` files. `.env` files are parsed as key/value data, not shell scripts. Use quoted `START_COMMAND` or `STOP_COMMAND` values for commands that intentionally run through the launcher.
 
 Generic JSON example:
 
@@ -190,7 +191,7 @@ Supported health-check modes:
   - generic HTTP readiness
   - considers the profile ready when the configured URL returns success
 - `disabled`
-  - only use this when you truly cannot probe readiness
+  - only use this when you cannot probe readiness
   - process state may still be visible, but endpoint health is not verified
 
 The UI is launcher-agnostic as long as each profile defines startup and readiness checks.
@@ -203,7 +204,7 @@ For Apple Silicon local inference, common stacks are:
 - `MLX` / `mlx_lm.server`
 - `rvllm-mlx`
 
-Other tools usually fit into one of these buckets:
+Other tools fit into one of these buckets:
 
 - `Ollama`
   - convenience packaging and model management around a local runtime
@@ -212,9 +213,9 @@ Other tools usually fit into one of these buckets:
 - `Jan`, `Open WebUI`, `SoulForge`, `vLLM Studio`
   - client UX, orchestration, or alternate serving layers
 - `vLLM`
-  - strong on CUDA/Linux, not the default serious choice on Apple Silicon laptops
+  - strong on CUDA/Linux; a secondary option on Apple Silicon laptops
 
-A high-performance macOS stack is usually:
+A high-performance macOS stack:
 
 - `llama.cpp` for GGUF
 - `MLX` for MLX-native models
@@ -222,7 +223,7 @@ A high-performance macOS stack is usually:
 
 ## Why JSON is the right next step
 
-JSON is usually easier to operate than raw env files for shared setups.
+JSON is easier to operate than raw env files for shared setups.
 
 Reasons:
 
@@ -252,7 +253,7 @@ Design choices that keep the app light:
 - the menu bar hover text is derived from the same lightweight controller snapshot the shell uses
 - the widget refreshes on a simple timeline instead of running its own always-on helper
 
-Most memory/thermal load should remain in runtimes, not the operator UI.
+Most memory/thermal load stays in runtimes, not the operator UI.
 
 ---
 
@@ -273,7 +274,26 @@ The app expects a controller base URL, defaulting to `http://127.0.0.1:8877`.
 | `POST` | `/api/integrations/run` | Trigger an optional integration (Plus) |
 | `POST` | `/api/benchmark/start` | Run benchmark(s) (Plus) |
 
-Any backend that returns the same profile-status JSON shape and supports these lifecycle actions is compatible. See `Sources/ModelSwitchboardCore/Models/` and `Sources/ModelSwitchboardControllerCore/ControllerRouter.swift` for the exact contracts.
+Any backend that returns the same profile-status JSON shape and supports these lifecycle actions is compatible. Exact contracts live in `Sources/ModelSwitchboardCore/Models/` and `Sources/ModelSwitchboardControllerCore/ControllerRouter.swift`.
+
+## Remote gateways
+
+Each remote gateway is a Linux/Unix stdlib-only Python agent speaking the
+[controller contract](#controller-api-contract). Full commands and routes:
+[RemoteAgent/README.md](RemoteAgent/README.md).
+
+| Step/mode | Facts |
+|---|---|
+| Install/update | **Install Agent on Host** pushes bundled files over SSH and creates a systemd user service under `~/.local/share/model-switchboard-agent/`; the host downloads nothing. Alternatives: documented `curl \| bash` or repo checkout. Re-run the same method to update. |
+| Profiles | Same `.env` / `.json` format; default `~/model-profiles/`. `link` scans `$HOME`, confirms/pastes and persists a folder, then prints pairing. Overrides: `--profiles-dir` / `MODEL_SWITCHBOARD_PROFILES_DIR`; Mac `--profiles-dir` persists in `config.json`. Templates: `vllm`, `llama.cpp` (`llama-server`), `sglang`, `tgi`; otherwise `START_COMMAND`. |
+| Pair | Paste the installer's or `link`'s `modelswitchboard-gateway://…` code into **Settings → Remote Gateways** (the empty-state field, or **Add Remote Gateway**). It locally prefills editable user/host/port fields; no pairing service is involved. Click **Update** on that gateway anytime to push a newer bundled agent and refresh models. |
+| SSH (recommended) | Loopback-only agent; app maintains `ssh -N -L` via your config/keys/agent (`BatchMode=yes`; no passwords). Trust the host once in Terminal. ControlMaster forwards running models to the same local ports. Reconnect uses backoff; the panel reports missing keys, changed host keys, and unreachable hosts. SSH over Tailscale also works, including Tailscale SSH. |
+| Tailscale direct | `--tailscale` or `serve --tailscale --auth-token-file …` binds only the WireGuard tailnet address, not open LAN. Token is required/generated by default; paste it into the Mac form. `mode=direct` + MagicDNS uses no tunnel. Only on a personal tailnet, `--allow-unauthenticated` opts out (**any tailnet member can control models**). Reachable model profiles need `HOST=0.0.0.0` or the Tailscale IP because remote loopback is not forwarded. |
+| Trusted plain LAN | Direct `http://host:8877` requires `--unsafe-bind` **and** a ≥16-byte bearer token for non-loopback binds. Per-gateway token is stored in macOS Keychain. |
+
+Benchmarks/integrations and the desktop widget remain local-only. Menu-bar
+count and **Stop Everything** span all gateways. Remote state is excluded from
+the local cache, so tunnel failure cannot appear as local model state.
 
 ## Benchmark artifacts
 
@@ -301,11 +321,11 @@ swift test
 # Iterative dev (launches a debug build)
 ./Scripts/run-dev.sh
 
-# Release build — produces dist/Model Switchboard.app
+# Release build (produces dist/Model Switchboard.app)
 ./Scripts/build-app.sh
 APP_VARIANT=plus ./Scripts/build-app.sh   # Plus edition
 
-# DMG — produces dist/Model-Switchboard-<version>.dmg
+# DMG (produces dist/Model-Switchboard-<version>.dmg)
 ./Scripts/build-dmg.sh
 APP_VARIANT=plus ./Scripts/build-dmg.sh   # Plus DMG
 
@@ -313,7 +333,7 @@ APP_VARIANT=plus ./Scripts/build-dmg.sh   # Plus DMG
 ./Scripts/verify-installed-app.sh
 ```
 
-Source installs use the workmanship-hardened installer:
+Source installs use the hardened installer:
 
 ```bash
 ./Scripts/install.sh --variant base
@@ -356,7 +376,7 @@ This repo builds DMGs locally; public releases should be signed and notarized.
 Included:
 
 - `Scripts/release-preflight.sh`
-- `Scripts/bump-version.py`
+- `Scripts/bump-version`
 - `Scripts/sign-and-notarize-dmg.sh`
 - `.github/workflows/release.yml`
 
@@ -365,10 +385,10 @@ The release workflow signs, notarizes, verifies, and uploads both editions when 
 - a `v*` tag is pushed
 - a commit on `main` changes `VERSION`
 
-That means the normal maintainer flow can be:
+Normal maintainer flow:
 
 ```bash
-python3 Scripts/bump-version.py patch   # or minor / major / x.y.z
+./Scripts/bump-version patch   # or minor / major / x.y.z
 git push origin main
 ```
 
@@ -406,8 +426,8 @@ Raycast users have two paths:
 This repo supports both:
 
 - `Scripts/install.sh` explicitly registers the app with Launch Services and forces a Spotlight import so Raycast can discover it faster.
-- `Scripts/model-switchboardctl` provides a tiny controller CLI, selectable per edition via `MODEL_SWITCHBOARD_VARIANT=base|plus`. Agents can start with `model-switchboardctl capabilities`, `model-switchboardctl robot-docs guide`, `model-switchboardctl triage`, or `model-switchboardctl doctor --json`; mutating commands support `--dry-run`/`--plan` and structured `--json` envelopes.
-- `Integrations/Raycast/Script Commands/` contains Script Commands for status, opening the profiles folder, stopping all models, and running quick benchmarks.
+- `Scripts/model-switchboardctl` is a tiny controller CLI. Pick an edition with `MODEL_SWITCHBOARD_VARIANT=base|plus`. Agents can start with `model-switchboardctl capabilities`, `model-switchboardctl robot-docs guide`, `model-switchboardctl triage`, or `model-switchboardctl doctor --json`. Mutating commands support `--dry-run`/`--plan` and structured `--json` envelopes.
+- `Integrations/Raycast/Script Commands/` has Script Commands for status, opening the profiles folder, stopping all models, and running quick benchmarks.
 
 If Finder shows `.app` extensions, that is the macOS `AppleShowAllExtensions` Finder preference, not a bundle naming issue.
 
@@ -416,16 +436,16 @@ If Finder shows `.app` extensions, that is the macOS `AppleShowAllExtensions` Fi
 ## Troubleshooting
 
 **The app doesn't appear in Spotlight or Raycast.**
-Run `./Scripts/install.sh` — it registers the bundle with Launch Services and forces a Spotlight import. If the old `ModelSwitchboard.app` name is still cached, the installer removes it automatically.
+Run `./Scripts/install.sh`. It registers the bundle with Launch Services and forces a Spotlight import. If the old `ModelSwitchboard.app` name is still cached, the installer removes it automatically.
 
 **A profile shows "Not Running" even though I can `curl` the endpoint.**
-The default health check for `llama.cpp` and `mlx` profiles probes `/v1/models` and verifies the expected model ID is present. If your server returns a different id, set `SERVER_MODEL_ID` in the profile to match, or switch the profile to `HEALTHCHECK_MODE=http-200` for a looser check.
+The default health check for `llama.cpp` and `mlx` profiles probes `/v1/models` and verifies the expected model ID is present. If your server returns a different id, set `SERVER_MODEL_ID` in the profile to match. For a looser check, switch the profile to `HEALTHCHECK_MODE=http-200`.
 
 **`Activate` doesn't kill the previously running model.**
 Each runtime is tracked by a managed PID file. If you started the process outside Model Switchboard (e.g. a terminal `llama-server` invocation), the controller doesn't own that PID. Stop the outside process manually, then use `Activate`.
 
 **The widget doesn't show up in the widget gallery.**
-See [Known limitations](#known-limitations) — the widget extension is bundled correctly but only registers reliably with a Developer-ID-signed build.
+See [Known limitations](#known-limitations); the widget extension is bundled correctly but only registers reliably with a Developer-ID-signed build.
 
 **Benchmarks panel is empty or cooldown won't clear.**
 The Plus panel reads `Controller/benchmark-results/latest.json`. Delete it to reset the panel, or run `Benchmark All` once to regenerate.
@@ -441,7 +461,7 @@ Run `MSW_VERIFY_UI=0 ./Scripts/verify-installed-app.sh` to execute lifecycle/API
 ## Known limitations
 
 **Desktop / Notification Center widget requires a Developer-ID-signed build.**
-The widget target (`ModelSwitchboardWidget`) is real, embedded into the app bundle at `Contents/PlugIns/ModelSwitchboardWidget.appex`, and wired through `project.yml`. However, local installs from `./Scripts/install.sh` ad-hoc sign the bundle (`codesign --sign -`), and ad-hoc-signed widget extensions are not reliably registered by WidgetKit's gallery. The widget begins to register once the app is installed from a Developer ID-signed, notarized DMG (i.e. the GitHub Release build). If you want to verify on a local build, try:
+The widget target (`ModelSwitchboardWidget`) is real. It is embedded at `Contents/PlugIns/ModelSwitchboardWidget.appex` and wired through `project.yml`. Local installs from `./Scripts/install.sh` ad-hoc sign the bundle (`codesign --sign -`). Ad-hoc-signed widget extensions are not reliably registered by WidgetKit's gallery. The widget begins to register once the app is installed from a Developer ID-signed, notarized DMG (the GitHub Release build). To verify on a local build:
 
 ```bash
 pluginkit -a "$HOME/Applications/Model Switchboard.app/Contents/PlugIns/ModelSwitchboardWidget.appex"
@@ -451,7 +471,7 @@ open -a "Model Switchboard"
 
 Then wait ~60 seconds and check the Widget gallery. Results vary across macOS versions.
 
-**Widget note.** WidgetKit distribution follows the host app: users install and launch the containing app once before the widget appears in the gallery — once registration actually succeeds.
+**Widget note.** WidgetKit distribution follows the host app: users install and launch the containing app once before the widget appears in the gallery, once registration succeeds.
 
 ---
 

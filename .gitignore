@@ -39,8 +39,16 @@ venv/
 
 # Local agent/run artifacts
 .code-upgrade/
-.doctor/runs/
-.doctor/latest
+.doctor/
+
+# ZeroStack / CodeMode local engine state (machine-local caches, never ship)
+.fszero/
+.graphzero/
+.tokenzero/
+**/.tokenzero/
+codedb.snapshot
+*.sqlite3
+*.sqlite3-*
 agent_ergonomics_audit/
 refactor/artifacts/
 .skill-loop-progress.md
@@ -76,3 +84,12 @@ refactor/artifacts/
 # macOS noise
 .DS_Store
 **/.DS_Store
+
+# Local profiling artifacts (profiling-software-performance skill)
+tests/artifacts/
+
+# Local session state for Mac↔spark ModelSwitchboard coordination (never commit)
+.ms-session/
+
+# state-space-collapse campaign artifacts (machine-local, never ship)
+.state-space-collapse/

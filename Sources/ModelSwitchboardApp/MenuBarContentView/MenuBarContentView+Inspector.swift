@@ -7,12 +7,13 @@ extension MenuBarContentView {
             ZStack {
                 Text(panel.title)
                     .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(theme.label)
                 HStack {
                     Button {
                         inspectorCoordinator.requestDeferredClose(of: panel)
                         DispatchQueue.main.async {
                             let nextPanel = inspectorCoordinator.commitDeferredClose(of: panel)
-                            synchronizeInspectorWindow(panel: nextPanel, refocusHostWindowOnHide: nextPanel == nil)
+                            synchronizeInspectorWindow(panel: nextPanel)
                         }
                     } label: {
                         HStack(spacing: 3) {
@@ -23,13 +24,13 @@ extension MenuBarContentView {
                         }
                         .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(QuietCraftPressStyle())
                     .foregroundStyle(accent)
                     .accessibilityLabel("Close \(panel.title)")
                     Spacer()
                 }
             }
-            .padding(EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14))
+            .padding(EdgeInsets(top: 12, leading: DashboardChromeMetrics.inspectorChromeInset(), bottom: 12, trailing: DashboardChromeMetrics.inspectorChromeInset()))
             panelDivider
 
             inspectorView(panel)
@@ -37,12 +38,12 @@ extension MenuBarContentView {
         }
         .frame(width: inspectorPanelWidth, height: panelHeight, alignment: .topLeading)
         .background(theme.panelBg)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: DashboardChromeMetrics.continuousCornerRadius, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: DashboardChromeMetrics.continuousCornerRadius, style: .continuous)
                 .stroke(theme.panelBorder, lineWidth: 1)
         }
-        .preferredColorScheme(themePreference.colorScheme)
+        .preferredColorScheme(resolvedColorScheme)
     }
 
     @ViewBuilder
@@ -50,6 +51,7 @@ extension MenuBarContentView {
         switch panel {
         case .settings:
             SettingsView(
+                hub: hub,
                 controllerBaseURL: $controllerBaseURL,
                 controllerAuthToken: $controllerAuthToken,
                 profilesDirectory: store.profilesDirectory,
@@ -62,6 +64,9 @@ extension MenuBarContentView {
                 accent: accent,
                 appVersion: Self.appVersion,
                 openProfilesDirectory: store.openProfilesDirectory,
+                setProfilesDirectory: { path in
+                    await store.setProfilesDirectory(path)
+                },
                 openControllerRoot: store.openControllerRoot,
                 runControllerDoctor: {
                     Task { await store.refreshDoctorReport() }
@@ -73,18 +78,38 @@ extension MenuBarContentView {
                 benchmark: store.benchmark,
                 activeBenchmarkProfiles: store.activeBenchmarkProfiles,
                 cooldownEndsAt: store.benchmarkCooldownEndsAt,
+                remoteSections: hub.enabledRemoteRuntimes.map { runtime in
+                    GatewayBenchmarkSection(
+                        id: runtime.id,
+                        name: runtime.name,
+                        benchmark: runtime.store.benchmark,
+                        activeBenchmarkProfiles: runtime.store.activeBenchmarkProfiles,
+                        cooldownEndsAt: runtime.store.benchmarkCooldownEndsAt
+                    )
+                },
                 theme: theme,
                 accent: accent,
                 runBenchmark: {
+                    // Footer CTA is scoped to This Mac — remote suites are started
+                    // from each gateway's row/hero actions, not this inspector button.
                     Task { await store.quickBenchmark() }
                 }
             )
         case .help:
             HelpView(
                 exampleProfilesDirectory: store.resolvedExampleProfilesDirectory,
-                openExampleProfilesDirectory: store.openExampleProfilesDirectory
+                openExampleProfilesDirectory: store.openExampleProfilesDirectory,
+                theme: theme,
+                accent: accent
             )
             .padding(EdgeInsets(top: 10, leading: 14, bottom: 10, trailing: 14))
+        case .remoteHosts:
+            RemoteHostsPanelView(
+                hub: hub,
+                metricsMonitor: hostMetricsMonitor,
+                theme: theme,
+                accent: accent
+            )
         }
     }
 
@@ -100,17 +125,14 @@ extension MenuBarContentView {
     }
 
     func synchronizeInspectorWindow(
-        panel: InspectorPanel? = nil,
-        refocusHostWindowOnHide: Bool = false
+        panel: InspectorPanel? = nil
     ) {
         guard let hostWindow else { return }
         let currentPanel = panel ?? inspectorCoordinator.openPanel
         guard let currentPanel else {
-            inspectorController.hide {
-                if refocusHostWindowOnHide {
-                    hostWindow.makeKeyAndOrderFront(nil)
-                }
-            }
+            // Never re-key the host window on hide — that re-opens/focuses the
+            // menu bar dashboard when the user already clicked away.
+            inspectorController.hide()
             return
         }
 
@@ -120,7 +142,12 @@ extension MenuBarContentView {
             width: inspectorPanelWidth,
             height: panelHeight,
             gap: panelGap,
-            side: sidePreference.inspectorSide,
+            // Menu bar sits on the right; always open the inspector to the left
+            // of the dashboard (flips only if the left edge of the screen blocks it).
+            side: .leading,
+            // Settings needs SecureField key focus; other panels must not steal
+            // activation or the MenuBarExtra stays stuck when clicking outside.
+            allowsKeyFocus: currentPanel == .settings,
             content: AnyView(inspectorCard(currentPanel))
         )
     }

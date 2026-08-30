@@ -55,7 +55,6 @@ public struct ControllerStatusPayload: Codable, Equatable, Sendable {
 }
 
 public struct ControllerActionResponse: Codable, Equatable, Sendable {
-    public let ok: Bool?
     public let statuses: [ModelProfileStatus]?
     public let benchmark: BenchmarkStatus?
     public let integrations: [ControllerIntegration]?
@@ -64,7 +63,6 @@ public struct ControllerActionResponse: Codable, Equatable, Sendable {
     public let error: String?
 
     public init(
-        ok: Bool?,
         statuses: [ModelProfileStatus]?,
         benchmark: BenchmarkStatus?,
         integrations: [ControllerIntegration]?,
@@ -72,7 +70,6 @@ public struct ControllerActionResponse: Codable, Equatable, Sendable {
         controllerRoot: String?,
         error: String?
     ) {
-        self.ok = ok
         self.statuses = statuses
         self.benchmark = benchmark
         self.integrations = integrations
@@ -82,7 +79,6 @@ public struct ControllerActionResponse: Codable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case ok
         case statuses
         case benchmark
         case integrations
@@ -103,7 +99,12 @@ public struct DashboardSummary: Equatable, Sendable {
     public let benchmarkSuite: String?
 
     public init(payload: ControllerStatusPayload) {
-        self.init(counts: ProfileRuntimeCounts(statuses: payload.statuses), benchmark: payload.benchmark)
+        // Always derive Ready N/M from board-visible statuses. Agent
+        // profile_*_count fields are informational and must not diverge the UI.
+        self.init(
+            counts: ProfileRuntimeCounts(statuses: payload.statuses),
+            benchmark: payload.benchmark
+        )
     }
 
     public init(counts: ProfileRuntimeCounts, benchmark: BenchmarkStatus?) {

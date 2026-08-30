@@ -22,26 +22,20 @@ extension SwitchboardStore {
             if let controllerRoot = response.controllerRoot { self.controllerRoot = controllerRoot }
             try await verify?(client)
             cacheCurrentState()
-            lastError = nil
-            bootstrapDiagnostic = nil
+            refreshState = .refreshed
             lastUpdated = Date()
             await syncAuxiliaryStateAfterMutation()
             return true
         } catch {
             if isBenignCancellation(error) { return false }
-            lastError = bootstrapDiagnostic ?? Self.userFacingErrorDescription(
-                for: error,
-                actionName: actionName,
-                status: profile.flatMap(statusForProfile),
-                diagnostic: profile.flatMap(diagnosticForProfile)
-            )
+            recordRefreshFailure(error, actionName: actionName, profile: profile)
             return false
         }
     }
 
     func runProfileAction(
         _ profile: String,
-        label: String,
+        label: ProfileAction,
         optimisticUpdate: () -> Void,
         action: @escaping (ControllerClient) async throws -> ControllerActionResponse,
         verify: ((ControllerClient) async throws -> Void)? = nil
@@ -55,11 +49,11 @@ extension SwitchboardStore {
         let succeeded = await run(
             action,
             verify: verify,
-            actionName: Self.actionName(forPendingLabel: label),
+            actionName: label.displayName,
             profile: profile
         )
-        if !succeeded, lastError != nil {
-            // Roll back optimistic running/ready flips when the controller call fails.
+        if !succeeded {
+            // Roll back optimistic running/ready flips on failure *or* cancel.
             statuses = previousStatuses
         }
     }
@@ -107,7 +101,7 @@ extension SwitchboardStore {
         statuses = updated
     }
 
-    func apply(payload: ControllerStatusPayload) {
+    func apply(payload: ControllerStatusPayload, considerAutoBenchmark: Bool = true) {
         statuses = payload.statuses
         rememberLastActiveProfiles(from: payload.statuses)
         benchmark = features.supportsBenchmarks ? payload.benchmark : nil
@@ -117,6 +111,20 @@ extension SwitchboardStore {
         integrations = features.supportsIntegrations ? payload.integrations : []
         profilesDirectory = payload.profilesDirectory
         controllerRoot = payload.controllerRoot
+        if considerAutoBenchmark {
+            considerAutoBenchmarks()
+        }
+    }
+
+    /// One-shot quick bench the first time each profile reports ready.
+    func considerAutoBenchmarks() {
+        guard features.supportsBenchmarks else { return }
+        guard canStartBenchmarkNow else { return }
+        guard let profile = statuses.first(where: { $0.ready && !autoBenchmarkedProfiles.contains($0.profile) })?.profile else {
+            return
+        }
+        markAutoBenchmarked(profile)
+        Task { await self.quickBenchmark([profile]) }
     }
 
     func apply(doctorReport: DoctorReport) {

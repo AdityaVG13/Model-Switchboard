@@ -17,44 +17,32 @@ public final class DoctorService: @unchecked Sendable {
     for profile in loaded.values.sorted(by: { $0.name < $1.name }) {
       let current = service.status(for: profile, allowPortFallback: conflicts[profile.name] == nil)
       let result = diagnose(profile, conflict: conflicts[profile.name])
+      // L12: the diagnostic is a role-flagged view over the shared
+      // ModelProfileStatus snapshot (same type the status endpoint serves);
+      // doctor adds only errors/warnings. The 10-field twin is deleted.
       diagnostics.append(
-        ProfileDiagnostic(
-          profile: profile.name,
-          displayName: profile.displayName,
-          runtime: profile.runtime,
-          runtimeLabel: profile.runtimeSpec.label,
-          runtimeTags: profile.runtimeTags,
-          launchMode: profile.runtimeSpec.launchMode,
-          errors: result.errors,
-          warnings: result.warnings,
-          running: current.running,
-          ready: current.ready,
-          pid: current.pid,
-          baseURL: profile.baseURL
-        ))
+        ProfileDiagnostic(status: current, errors: result.errors, warnings: result.warnings))
       findings += result.errors.enumerated().map { index, message in
         DoctorFinding(
-          id: "profile-\(profile.name)-error-\(index + 1)", severity: "P1", subsystem: "profiles",
-          message: message, evidence: profile.name, remediation: remediation(for: message),
-          autoFixable: false
+          id: "profile-\\(profile.name)-error-\\(index + 1)", severity: .p1, subsystem: "profiles",
+          message: message, evidence: profile.name, remediation: remediation(for: message)
         )
       }
       findings += result.warnings.enumerated().map { index, message in
         DoctorFinding(
-          id: "profile-\(profile.name)-warning-\(index + 1)", severity: "P2", subsystem: "profiles",
-          message: message, evidence: profile.name, remediation: remediation(for: message),
-          autoFixable: false
+          id: "profile-\\(profile.name)-warning-\\(index + 1)", severity: .p2, subsystem: "profiles",
+          message: message, evidence: profile.name, remediation: remediation(for: message)
         )
       }
     }
     if !fileManager.fileExists(atPath: service.configuration.profilesDirectory.path) {
       findings.append(
         DoctorFinding(
-          id: "profiles-directory-missing", severity: "P1", subsystem: "profiles",
+          id: "profiles-directory-missing", severity: .p1, subsystem: "profiles",
           message: "profile directory is missing",
           evidence: service.configuration.profilesDirectory.path,
           remediation: "Create the profile directory and add at least one profile.",
-          autoFixable: true, fixer: "create_profiles_directory"
+          fixer: "create_profiles_directory"
         ))
     }
     let integrations = service.integrationStatus()
@@ -62,9 +50,8 @@ public final class DoctorService: @unchecked Sendable {
       .appendingPathComponent("Library/LaunchAgents/io.modelswitchboard.controller.plist")
     let launchAgentRunning =
       (try? ProcessRunner.run(
-        "/bin/launchctl", ["print", "gui/\(getuid())/io.modelswitchboard.controller"], check: false
+        "/bin/launchctl", ["print", "gui/\\(getuid())/io.modelswitchboard.controller"], check: false
       ).status) == 0
-    let healthy = findings.allSatisfy { $0.severity != "P0" && $0.severity != "P1" }
     let steps = findings.prefix(5).compactMap(\.remediation)
     return DoctorReport(
       controller: ControllerHeartbeat(
@@ -86,7 +73,6 @@ public final class DoctorService: @unchecked Sendable {
       doctorContractVersion: "1.0",
       toolVersion: toolVersion(),
       generatedAt: ISO8601DateFormatter().string(from: Date()),
-      healthy: healthy,
       findings: findings,
       nextSteps: steps
     )
@@ -98,9 +84,9 @@ public final class DoctorService: @unchecked Sendable {
       "schema_version": report.schemaVersion ?? "1",
       "tool_version": report.toolVersion ?? toolVersion(),
       "generated_at": report.generatedAt ?? ISO8601DateFormatter().string(from: Date()),
-      "healthy": report.healthy ?? false,
+      "healthy": report.healthy,
       "finding_count": report.findings?.count ?? 0,
-      "auto_fixable_count": report.findings?.filter { $0.autoFixable == true }.count ?? 0,
+      "auto_fixable_count": report.findings?.filter(\.autoFixable).count ?? 0,
     ]
   }
 
@@ -116,10 +102,9 @@ public final class DoctorService: @unchecked Sendable {
 
   public func explain(_ id: String) throws -> [String: Any] {
     guard let finding = try report().findings?.first(where: { $0.id == id }) else {
-      return ["ok": false, "error": "finding_not_present", "finding_id": id]
+      return ["error": "finding_not_present", "finding_id": id]
     }
     return [
-      "ok": true,
       "finding": try JSONSerialization.jsonObject(with: JSONSupport.data(finding)),
     ]
   }
@@ -147,7 +132,6 @@ public final class DoctorService: @unchecked Sendable {
         to: directory.appendingPathComponent("actions.json"), options: .atomic)
     }
     return [
-      "ok": true,
       "dry_run": dryRun,
       "actions_taken": missing ? 1 : 0,
       "run_id": identifier,
@@ -163,7 +147,7 @@ public final class DoctorService: @unchecked Sendable {
       let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
       let actions = payload["actions"] as? [[String: Any]]
     else {
-      return ["ok": false, "error": "run_not_found", "run_id": identifier]
+      return ["error": "run_not_found", "run_id": identifier]
     }
     var undone: [[String: Any]] = []
     for action in actions.reversed()
@@ -178,7 +162,7 @@ public final class DoctorService: @unchecked Sendable {
         undone.append(action)
       }
     }
-    return ["ok": true, "run_id": identifier, "undone": undone]
+    return ["run_id": identifier, "undone": undone]
   }
 
   private func diagnose(_ profile: ControllerProfile, conflict: (String, [String])?) -> (

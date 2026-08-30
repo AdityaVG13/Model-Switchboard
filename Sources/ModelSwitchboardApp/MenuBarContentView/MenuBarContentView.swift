@@ -3,17 +3,14 @@ import SwiftUI
 import ModelSwitchboardCore
 
 struct MenuBarContentView: View {
-    enum ProfileFilter: String, CaseIterable {
-        case all = "All"
-        case running = "Running"
-        case mlx = "MLX"
-        case llamaCpp = "llama.cpp"
-    }
+    /// Selection id for the dashboard filter strip (`all` / `running` / `runtime:…`).
+    typealias ProfileFilter = String
 
     enum InspectorPanel: String, Identifiable {
         case settings
         case help
         case benchmarks
+        case remoteHosts
 
         var id: String { rawValue }
 
@@ -22,40 +19,49 @@ struct MenuBarContentView: View {
             case .settings: "Settings"
             case .help: "Help"
             case .benchmarks: "Benchmarks"
+            case .remoteHosts: "Remote Hosts"
             }
         }
     }
 
     @Bindable var store: SwitchboardStore
+    @Bindable var hub: GatewayHub
     let features: AppFeatures
     @ObservedObject var launchAtLoginManager: LaunchAtLoginManager
     @Binding var controllerBaseURL: String
     @Binding var controllerAuthToken: String
     let reconnect: () -> Void
     let updateMenuBarHelp: (String) -> Void
+    /// When false, deferred teardown may run after hide debounce.
+    /// Binding so onDisappear / onChange always see live presentation state.
+    @Binding var isMenuPresented: Bool
 
     init(
         store: SwitchboardStore,
+        hub: GatewayHub? = nil,
         features: AppFeatures,
         launchAtLoginManager: LaunchAtLoginManager,
         controllerBaseURL: Binding<String>,
         controllerAuthToken: Binding<String>,
         reconnect: @escaping () -> Void,
         updateMenuBarHelp: @escaping (String) -> Void,
+        isMenuPresented: Binding<Bool> = .constant(true),
         systemMetrics: SystemMetricsMonitor? = nil
     ) {
         self.store = store
+        self.hub = hub ?? GatewayHub(localStore: store)
         self.features = features
         self.launchAtLoginManager = launchAtLoginManager
         self._controllerBaseURL = controllerBaseURL
         self._controllerAuthToken = controllerAuthToken
         self.reconnect = reconnect
         self.updateMenuBarHelp = updateMenuBarHelp
+        self._isMenuPresented = isMenuPresented
         self._systemMetrics = StateObject(wrappedValue: systemMetrics ?? SystemMetricsMonitor())
     }
 
     @AppStorage("menuPanelWidth")
-    var storedMainPanelWidth: Double = 372
+    var storedMainPanelWidth: Double = 400
 
     @AppStorage(DashboardAppearanceKeys.theme)
     var themePreferenceRaw: String = DashboardThemePreference.system.rawValue
@@ -63,24 +69,31 @@ struct MenuBarContentView: View {
     @AppStorage(DashboardAppearanceKeys.accent)
     var accentRaw: String = DashboardAccent.orange.rawValue
 
-    @AppStorage(DashboardAppearanceKeys.sidePanel)
-    var sidePreferenceRaw: String = DashboardSidePreference.right.rawValue
-
     @Environment(\.colorScheme) var systemColorScheme
 
-    let minMainPanelWidth: Double = 372
-    let maxMainPanelWidth: Double = 620
-    let inspectorPanelWidth: CGFloat = 372
-    let panelHeight: CGFloat = 620
+    var minMainPanelWidth: Double { Double(DashboardChromeMetrics.minMainPanelWidth) }
+    var maxMainPanelWidth: Double { Double(DashboardChromeMetrics.maxMainPanelWidth) }
+    var inspectorPanelWidth: CGFloat { DashboardChromeMetrics.inspectorPanelWidth }
+    var panelHeight: CGFloat { DashboardChromeMetrics.panelHeight }
     let panelGap: CGFloat = 10
     let inspectorAnimation = Animation.easeInOut(duration: 0.2)
 
-    @State var profileFilter: ProfileFilter = .all
+    @State var profileFilter: ProfileFilter = DashboardFilterChip.all.id
+
+    @AppStorage(DashboardAppearanceKeys.filterChips)
+    var filterChipsRaw: String = DashboardFilterPreferences.encodeChipIDs(
+        DashboardFilterPreferences.defaultChipIDs
+    )
+
+    var visibleFilterChips: [DashboardFilterChip] {
+        DashboardFilterPreferences.chips(fromIDs: DashboardFilterPreferences.decodeChipIDs(filterChipsRaw))
+    }
 
     @State var inspectorCoordinator = InspectorPanelCoordinator<InspectorPanel>()
     @State var hostWindow: NSWindow?
     @State var inspectorController = InspectorPanelController()
     @StateObject var systemMetrics: SystemMetricsMonitor
+    @State var hostMetricsMonitor = RemoteHostMetricsMonitor()
     @State var activeResizeStartFrame: NSRect?
 
     static let appVersion: String = {
@@ -103,17 +116,23 @@ struct MenuBarContentView: View {
         (DashboardAccent(rawValue: accentRaw) ?? .orange).color
     }
 
-    var sidePreference: DashboardSidePreference {
-        DashboardSidePreference(rawValue: sidePreferenceRaw) ?? .right
+    /// Always light or dark — never nil — so MenuBarExtra semantic colors match tokens.
+    var resolvedColorScheme: ColorScheme {
+        themePreference.colorScheme ?? systemColorScheme
     }
 
     var theme: DashboardTheme {
-        DashboardTheme.resolve(themePreference.colorScheme ?? systemColorScheme)
+        DashboardTheme.resolve(resolvedColorScheme)
     }
 
     var body: some View {
         mainPanelCard
             .frame(width: mainPanelWidth, height: panelHeight)
+            .introspectMenuBarExtraWindow { window in
+                MenuBarExtraWindowBackdrop.apply(to: window)
+                if hostWindow !== window { hostWindow = window }
+                configureHostWindow(window)
+            }
             .background(
                 WindowAccessor { window in
                     guard let window else { return }
@@ -138,15 +157,36 @@ struct MenuBarContentView: View {
             } else {
                 systemMetrics.stop()
             }
-            updateMenuBarHelp(store.menuBarHelp)
+            hostMetricsMonitor.attach(hub: hub)
+            if hub.hasRemoteGateways {
+                hostMetricsMonitor.start()
+            } else {
+                hostMetricsMonitor.stop()
+            }
+            updateMenuBarHelp(hub.menuBarHelp)
             synchronizeInspectorWindow()
         }
+        .onChange(of: isMenuPresented) { _, presented in
+            // Dismiss inspector as soon as the menu closes so a floating side
+            // panel cannot keep focus and pin the dashboard open.
+            if !presented {
+                inspectorController.hide()
+                inspectorCoordinator.reset()
+            }
+        }
         .onDisappear {
-            systemMetrics.stop()
+            // Spam-toggling the status item can fire disappear/appear within a
+            // few hundred ms. Tear down monitors only if we stay closed.
             inspectorController.hide()
             inspectorCoordinator.reset()
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(400))
+                guard !isMenuPresented else { return }
+                systemMetrics.stop()
+                hostMetricsMonitor.stop()
+            }
         }
-        .onChange(of: store.menuBarHelp) { _, newValue in
+        .onChange(of: hub.menuBarHelp) { _, newValue in
             updateMenuBarHelp(newValue)
         }
         .onChange(of: storedMainPanelWidth) { _, newValue in
@@ -167,11 +207,34 @@ struct MenuBarContentView: View {
             synchronizeInspectorWindow()
         }
         .animation(inspectorAnimation, value: inspectorCoordinator.openPanel)
+        // Scope snappy animations to pending action chrome only — do not animate
+        // full status list replacements (causes black flicker in MenuBarExtra).
         .animation(.snappy(duration: 0.18), value: store.pendingProfileActions)
         .animation(.snappy(duration: 0.18), value: store.pendingGlobalActions)
-        .preferredColorScheme(themePreference.colorScheme)
-        .onChange(of: sidePreferenceRaw) { _, _ in
+        .transaction(value: store.statuses.count) { transaction in
+            // Status payload apply should be instant; never crossfade the panel.
+            if transaction.animation != nil {
+                transaction.animation = nil
+            }
+        }
+        .preferredColorScheme(resolvedColorScheme)
+        .onChange(of: themePreferenceRaw) { _, _ in
+            if let hostWindow { configureHostWindow(hostWindow) }
             synchronizeInspectorWindow()
+        }
+        .onChange(of: systemColorScheme) { _, _ in
+            if themePreference.colorScheme == nil, let hostWindow {
+                configureHostWindow(hostWindow)
+            }
+            synchronizeInspectorWindow()
+        }
+        .onChange(of: hub.hasRemoteGateways) { _, hasRemotes in
+            hostMetricsMonitor.attach(hub: hub)
+            if hasRemotes {
+                hostMetricsMonitor.start()
+            } else {
+                hostMetricsMonitor.stop()
+            }
         }
     }
 }

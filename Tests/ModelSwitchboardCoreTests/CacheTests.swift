@@ -40,7 +40,6 @@ import ModelSwitchboardTestSupport
     )
 
     let actionPayload = ControllerActionResponse(
-        ok: true,
         statuses: [],
         benchmark: nil,
         integrations: [],

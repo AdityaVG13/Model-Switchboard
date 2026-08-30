@@ -4,54 +4,55 @@ import ModelSwitchboardCore
 
 extension MenuBarContentView {
     var footer: some View {
-        HStack(spacing: 14) {
-            if features.supportsBenchmarks {
-                footerTextButton("Benchmarks") {
-                    let nextPanel = inspectorCoordinator.toggle(.benchmarks)
-                    synchronizeInspectorWindow(panel: nextPanel)
-                }
-            }
-
-            if features.supportsIntegrations {
-                ForEach(syncableIntegrations) { integration in
-                    footerTextButton(
-                        integration.syncLabel ?? "Sync \(integration.displayName)",
-                        isBusy: store.pendingIntegrationActions.contains(integration.id)
-                    ) {
-                        Task { await store.runIntegration(integration) }
+        HStack(alignment: .center, spacing: 0) {
+            // Left actions compress first when space is tight.
+            HStack(spacing: 10) {
+                if features.supportsBenchmarks {
+                    footerTextButton("Benchmarks") {
+                        let nextPanel = inspectorCoordinator.toggle(.benchmarks)
+                        synchronizeInspectorWindow(panel: nextPanel)
                     }
-                    .help(integration.description ?? "")
+                }
+
+                if features.supportsIntegrations {
+                    ForEach(syncableIntegrations) { integration in
+                        footerTextButton(
+                            integration.syncLabel ?? "Sync \(integration.displayName)",
+                            isBusy: store.pendingIntegrationActions.contains(integration.id)
+                        ) {
+                            Task { await store.runIntegration(integration) }
+                        }
+                        .help(integration.description ?? "")
+                    }
+                }
+
+                footerTextButton(
+                    stopButtonTitle,
+                    color: hasAnythingToStop ? DashboardTheme.stopRed : theme.faint,
+                    isBusy: hub.isStopEverythingBusy,
+                    disabled: !hasAnythingToStop,
+                    holdToConfirm: true,
+                    holdHelpDetail: stopButtonHelp
+                ) {
+                    Task { await hub.stopEverything() }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .layoutPriority(0)
 
-            footerTextButton(
-                "Stop All",
-                color: DashboardTheme.stopRed,
-                isBusy: store.pendingGlobalActions.contains("stop-all")
-            ) {
-                Task { await store.stopAll() }
-            }
-
-            Spacer()
-
-            TimelineView(.periodic(from: .now, by: 1)) { context in
-                if let footerState = footerState(relativeTo: context.date) {
-                    Text(footerState.label)
-                        .font(.system(size: 9, weight: .bold))
-                        .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(footerState.color.opacity(0.16), in: Capsule())
-                        .foregroundStyle(footerState.color)
-                        .help(store.menuBarHelp)
-                }
-            }
-
-            HStack(spacing: 12) {
+            footerFreshnessChip
+            // Trailing icon rail: fixed size, always fully inside the panel
+            // corner radius (continuous clip eats ~12pt at the bottom-right).
+            HStack(spacing: 2) {
                 footerIconButton("questionmark.circle", label: "Help") {
                     let nextPanel = inspectorCoordinator.toggle(.help)
                     synchronizeInspectorWindow(panel: nextPanel)
+                }
+                if hub.hasRemoteGateways {
+                    footerIconButton("server.rack", label: "Remote Hosts") {
+                        let nextPanel = inspectorCoordinator.toggle(.remoteHosts)
+                        synchronizeInspectorWindow(panel: nextPanel)
+                    }
                 }
                 footerIconButton("gearshape", label: "Settings") {
                     let nextPanel = inspectorCoordinator.toggle(.settings)
@@ -61,61 +62,157 @@ extension MenuBarContentView {
                     NSApplication.shared.terminate(nil)
                 }
             }
+            .layoutPriority(1)
         }
-        .padding(EdgeInsets(top: 9, leading: 14, bottom: 9, trailing: 14))
+        .padding(.top, 8)
+        .padding(.bottom, 10)
+        .padding(.leading, DashboardChromeMetrics.continuousCornerSafeInset)
+        .padding(.trailing, DashboardChromeMetrics.footerTrailingInset())
+    }
+
+    private var stopButtonTitle: String {
+        hub.hasRemoteGateways ? "Stop Everything" : "Stop All"
+    }
+
+    private var stopButtonHelp: String {
+        if !hasAnythingToStop {
+            return "Nothing is running"
+        }
+        if hub.hasRemoteGateways {
+            return "Stop every running model on this Mac and all remotes"
+        }
+        return "Stop every running local model"
+    }
+
+    /// True when any gateway (local or remote) still has a running process.
+    var hasAnythingToStop: Bool {
+        DashboardChromeMetrics.canStopAnything(
+            isBusy: hub.isStopEverythingBusy,
+            storesHaveRunning: hub.allStores.contains { $0.statuses.contains(where: \.running) },
+            storesHavePending: hub.allStores.contains { !$0.pendingProfileActions.isEmpty }
+        )
     }
 
     var syncableIntegrations: [ControllerIntegration] {
         store.integrations.filter { $0.capabilities.contains("sync") }
     }
 
+    @ViewBuilder
+    private var footerFreshnessChip: some View {
+        // Only tick when something is non-fresh — avoid a forever 1 Hz timer
+        // while the board is healthy.
+        let needsWatch = hub.allStores.contains { store in
+            switch store.statusFreshness(relativeTo: .now) {
+            case .fresh: false
+            case .cached, .stale, .error: true
+            }
+        }
+        if needsWatch {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                if let state = footerState(relativeTo: context.date) {
+                    freshnessLabel(state)
+                }
+            }
+        }
+    }
+
+    private func freshnessLabel(_ state: (label: String, color: Color)) -> some View {
+        Text(state.label)
+            .font(.system(size: 9, weight: .bold))
+            .kerning(0.6)
+            .lineLimit(1)
+            .padding(.leading, 6)
+            .overlay(alignment: .leading) {
+                Rectangle()
+                    .fill(state.color)
+                    .frame(width: 2)
+            }
+            .foregroundStyle(state.color)
+            .help(hub.menuBarHelp)
+            .padding(.horizontal, 6)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(state.label == "ERROR" ? "Status error" : "Status stale")
+            .accessibilityValue(hub.menuBarHelp)
+    }
+
+    @ViewBuilder
     func footerTextButton(
         _ title: String,
         color: Color? = nil,
         isBusy: Bool = false,
+        disabled: Bool = false,
+        holdToConfirm: Bool = false,
+        holdHelpDetail: String? = nil,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 4) {
-                if isBusy {
-                    ProgressView()
-                        .controlSize(.mini)
+        let resolved = color ?? theme.btnFg
+        if holdToConfirm {
+            HoldToConfirmTextButton(
+                title: title,
+                color: resolved,
+                isBusy: isBusy,
+                disabled: disabled,
+                helpDetail: holdHelpDetail,
+                action: action
+            )
+        } else {
+            Button(action: action) {
+                HStack(spacing: 4) {
+                    if isBusy {
+                        ProgressView()
+                            .controlSize(.mini)
+                    }
+                    Text(title)
+                        .font(.system(size: 11.5))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .allowsTightening(true)
                 }
-                Text(title)
-                    .font(.system(size: 11.5))
-                    .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
+                .contentShape(Rectangle())
             }
-            .contentShape(Rectangle())
+            .buttonStyle(QuietCraftPressStyle())
+            .foregroundStyle(resolved)
+            .disabled(isBusy || disabled)
+            .opacity(disabled && !isBusy ? 0.4 : 1)
+            .accessibilityLabel(title)
+            .accessibilityHint(disabled ? "Nothing is running" : "")
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(color ?? theme.btnFg)
-        .disabled(isBusy)
-        .accessibilityLabel(title)
     }
 
     func footerIconButton(_ systemName: String, label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .font(.system(size: 11.5))
+                .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(theme.faint)
+                // Square hit target keeps the glyph centered away from the
+                // continuous corner clip at the panel's bottom-right.
+                .frame(
+                    width: DashboardChromeMetrics.footerIconHitSize,
+                    height: DashboardChromeMetrics.footerIconHitSize,
+                    alignment: .center
+                )
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(QuietCraftPressStyle())
         .accessibilityLabel(label)
         .help(label)
     }
 
     func footerState(relativeTo now: Date) -> (label: String, color: Color)? {
-        switch store.statusFreshness(relativeTo: now) {
-        case .cached:
-            return ("CACHED", .orange)
-        case .stale:
-            return ("STALE", .orange)
-        case .error:
-            return ("ERROR", .red)
-        case .fresh:
+        // With remote gateways, a dead local controller must not paint the whole
+        // panel STALE while Spark (or another remote) is live.
+        let states = hub.allStores.map { $0.statusFreshness(relativeTo: now) }
+        if states.contains(.fresh) {
             return nil
         }
+        if states.contains(.error) {
+            return ("ERROR", DashboardTheme.stopRed)
+        }
+        // Collapse cached + stale into one quiet "STALE" signal — same urgency
+        // for the operator, less chrome to parse.
+        if states.contains(.cached) || states.contains(.stale) {
+            return ("STALE", DashboardTheme.pendingOrange)
+        }
+        return nil
     }
 }

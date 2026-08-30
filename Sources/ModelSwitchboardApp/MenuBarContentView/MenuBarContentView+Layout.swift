@@ -4,11 +4,13 @@ import SwiftUI
 extension MenuBarContentView {
     var mainPanelCard: some View {
         mainPanel
-            .frame(width: mainPanelWidth, height: panelHeight)
+            .frame(width: mainPanelWidth, height: panelHeight, alignment: .topLeading)
             .background(theme.panelBg)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            // continuous clip can nibble monospaced header digits on the leading edge
+            // if subviews draw flush against x=0; keep a hair of internal inset.
+            .clipShape(RoundedRectangle(cornerRadius: DashboardChromeMetrics.continuousCornerRadius, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                RoundedRectangle(cornerRadius: DashboardChromeMetrics.continuousCornerRadius, style: .continuous)
                     .stroke(theme.panelBorder, lineWidth: 1)
             }
             .overlay {
@@ -24,14 +26,16 @@ extension MenuBarContentView {
         VStack(alignment: .leading, spacing: 0) {
             header
             panelDivider
-            if let error = store.lastError {
+            if let error = localPanelError {
                 errorBanner(error)
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     heroSection
                     modelListSection
+                    remoteGatewaySections
                 }
+                .padding(.bottom, 8)
             }
             .frame(maxHeight: .infinity)
             panelDivider
@@ -41,6 +45,16 @@ extension MenuBarContentView {
 
     var panelDivider: some View {
         theme.line.frame(height: 1)
+    }
+
+    /// Local-only banner. Remote gateway errors render in their section so a
+    /// downed Mac controller does not paint the whole multi-gateway panel red.
+    var localPanelError: String? {
+        guard let error = store.lastError, !error.isEmpty else { return nil }
+        if hub.hasRemoteGateways, store.sortedStatuses.isEmpty {
+            return nil
+        }
+        return error
     }
 
     func errorBanner(_ error: String) -> some View {
@@ -101,7 +115,7 @@ extension MenuBarContentView {
     }
 
     func clampPanelWidth(_ value: Double) -> Double {
-        min(max(value, minMainPanelWidth), maxMainPanelWidth)
+        DashboardChromeMetrics.clampPanelWidth(value)
     }
 
     func configureHostWindow(_ window: NSWindow) {
@@ -110,5 +124,9 @@ extension MenuBarContentView {
         window.showsResizeIndicator = false
         window.minSize = NSSize(width: minMainPanelWidth, height: panelHeight)
         window.maxSize = NSSize(width: maxMainPanelWidth, height: panelHeight)
+        // Solid backdrop so open/close thrash never shows clear/black chrome.
+        let scheme: MenuBarExtraWindowBackdrop.ColorSchemeHint =
+            resolvedColorScheme == .light ? .light : .dark
+        MenuBarExtraWindowBackdrop.apply(to: window, scheme: scheme)
     }
 }

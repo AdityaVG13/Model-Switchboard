@@ -99,9 +99,14 @@ public final class ProfileRepository: @unchecked Sendable {
     var profiles: [String: ControllerProfile] = [:]
     for file in files {
       let name = file.deletingPathExtension().lastPathComponent
-      let values =
-        try file.pathExtension.lowercased() == "json" ? parseJSON(file) : parseEnvironment(file)
-      profiles[name] = try ControllerProfile(name: name, values: values)
+      do {
+        let values =
+          try file.pathExtension.lowercased() == "json" ? parseJSON(file) : parseEnvironment(file)
+        profiles[name] = try ControllerProfile(name: name, values: values)
+      } catch {
+        // One bad file must not take down GET /api/status for every profile.
+        fputs("[profiles] skipping \(file.lastPathComponent): \(error)\n", stderr)
+      }
     }
     return profiles
   }
@@ -335,6 +340,8 @@ public enum RuntimeCatalog {
       ("jan", "Jan", ["external", "openai-compatible", "desktop"], "external"),
       ("external", "OpenAI-compatible endpoint", ["external", "openai-compatible"], "external"),
       ("command", "Custom command", ["managed", "custom", "openai-compatible"], "command"),
+      // L07-part: the unknown runtime is first-class, not a special-cased string.
+      ("unknown", "Unknown", ["discovered", "external"], "external"),
     ]
     return Dictionary(
       uniqueKeysWithValues: entries.map {
@@ -343,7 +350,8 @@ public enum RuntimeCatalog {
   }()
 
   public static func canonical(_ value: String?) -> String {
-    let normalized = (value ?? "llama.cpp").trimmingCharacters(in: .whitespacesAndNewlines)
+    // L06: an absent runtime stays unknown — never silently "llama.cpp".
+    let normalized = (value ?? "unknown").trimmingCharacters(in: .whitespacesAndNewlines)
       .lowercased().replacingOccurrences(of: "_", with: "-")
     return aliases[normalized] ?? normalized
   }

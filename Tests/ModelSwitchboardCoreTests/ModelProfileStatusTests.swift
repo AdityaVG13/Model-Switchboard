@@ -114,3 +114,76 @@ import ModelSwitchboardTestSupport
     #expect(ModelFixtures.profileStatus(host: "127.0.0.1").usesLoopbackEndpoint)
     #expect(!ModelFixtures.profileStatus(host: "10.0.0.8", baseURL: "http://10.0.0.8:8081/v1").usesLoopbackEndpoint)
 }
+
+
+
+@Test func boardShowsUnlaunchableLaunchFolderClaimsByOriginOnly() {
+    let claim = ModelFixtures.profileStatus(
+        profile: "port-8027",
+        pid: nil,
+        running: false,
+        ready: false,
+        rssMB: nil,
+        origin: .claim,
+        missingArtifacts: ["/data/models/missing.gguf"]
+    )
+    #expect(claim.isBoardVisible)
+    #expect(claim.isLaunchFolderClaim)
+
+    // L04/L05: origin is the single owner of claim-ness. Tags and name
+    // prefixes are descriptive data — a profile row with claimed tags is a
+    // flat config and hides when stale, exactly like any other.
+    let tagged = ModelFixtures.profileStatus(
+        profile: "port-8081",
+        runtimeTags: ["claimed", "launch-folder"],
+        pid: nil,
+        running: false,
+        ready: false,
+        rssMB: nil,
+        origin: .profile,
+        missingArtifacts: ["/data/models/missing"]
+    )
+    #expect(!tagged.isBoardVisible)
+    #expect(!tagged.isLaunchFolderClaim)
+}
+
+@Test func boardHidesUnlaunchableStoppedProfiles() {
+    let hidden = ModelFixtures.profileStatus(
+        profile: "gone",
+        pid: nil,
+        running: false,
+        ready: false,
+        rssMB: nil,
+        missingArtifacts: ["/tmp/msw-does-not-exist.gguf"]
+    )
+    #expect(!hidden.isBoardVisible)
+
+    let live = ModelFixtures.profileStatus(
+        profile: "gone-but-running",
+        pid: 7,
+        running: true,
+        ready: false,
+        rssMB: nil,
+        missingArtifacts: ["/tmp/msw-does-not-exist.gguf"]
+    )
+    #expect(live.isBoardVisible)
+
+    let ready = ModelFixtures.profileStatus(
+        profile: "gone-but-ready",
+        pid: nil,
+        running: false,
+        ready: true,
+        rssMB: nil,
+        missingArtifacts: ["/tmp/msw-does-not-exist.gguf"]
+    )
+    #expect(ready.isBoardVisible)
+
+    let unspecified = ModelFixtures.profileStatus(
+        profile: "legacy",
+        pid: nil,
+        running: false,
+        ready: false,
+        rssMB: nil
+    )
+    #expect(unspecified.isBoardVisible)
+}

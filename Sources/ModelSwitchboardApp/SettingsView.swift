@@ -2,6 +2,7 @@ import SwiftUI
 import ModelSwitchboardCore
 
 struct SettingsView: View {
+    var hub: GatewayHub?
     @Binding var controllerBaseURL: String
     @Binding var controllerAuthToken: String
     let profilesDirectory: String?
@@ -14,6 +15,7 @@ struct SettingsView: View {
     let accent: Color
     let appVersion: String
     let openProfilesDirectory: () -> Void
+    let setProfilesDirectory: (String) async -> Void
     let openControllerRoot: () -> Void
     let runControllerDoctor: () -> Void
     let reconnect: () -> Void
@@ -24,13 +26,17 @@ struct SettingsView: View {
     @AppStorage(DashboardAppearanceKeys.accent)
     private var accentRaw: String = DashboardAccent.orange.rawValue
 
-    @AppStorage(DashboardAppearanceKeys.sidePanel)
-    private var sidePreferenceRaw: String = DashboardSidePreference.right.rawValue
-
     @AppStorage(DashboardAppearanceKeys.menuBarShowsReadyCount)
     private var menuBarShowsReadyCount = true
 
+    @AppStorage(DashboardAppearanceKeys.filterChips)
+    private var filterChipsRaw: String = DashboardFilterPreferences.encodeChipIDs(
+        DashboardFilterPreferences.defaultChipIDs
+    )
+
     private let defaultControllerBaseURL = ControllerEndpointDefaults.baseURLString
+
+    @State private var profilesDirectoryDraft = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -38,6 +44,9 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     appearanceGroup
                     connectionGroup
+                    if let hub {
+                        GatewaySettingsSection(hub: hub, theme: theme, accent: accent)
+                    }
                     behaviorGroup
                     controllerGroup
                 }
@@ -56,6 +65,10 @@ struct SettingsView: View {
         }
         .onAppear {
             launchAtLoginManager.refresh()
+            profilesDirectoryDraft = profilesDirectory ?? ""
+        }
+        .onChange(of: profilesDirectory) { _, newValue in
+            profilesDirectoryDraft = newValue ?? ""
         }
     }
 
@@ -74,27 +87,28 @@ struct SettingsView: View {
             settingsRow("Accent color") {
                 HStack(spacing: 6) {
                     ForEach(DashboardAccent.allCases, id: \.rawValue) { choice in
-                        Circle()
-                            .fill(choice.color)
-                            .frame(width: 20, height: 20)
-                            .overlay {
-                                Circle()
-                                    .stroke(choice.rawValue == accentRaw ? Color.primary : .clear, lineWidth: 2)
-                            }
-                            .contentShape(Circle())
-                            .onTapGesture { accentRaw = choice.rawValue }
-                            .accessibilityLabel("\(choice.rawValue) accent")
-                            .accessibilityAddTraits(choice.rawValue == accentRaw ? [.isButton, .isSelected] : .isButton)
+                        Button {
+                            accentRaw = choice.rawValue
+                        } label: {
+                            Circle()
+                                .fill(choice.color)
+                                .frame(width: 18, height: 18)
+                                .frame(width: 26, height: 26)
+                                .overlay {
+                                    Circle()
+                                        .stroke(
+                                            choice.rawValue == accentRaw ? theme.label : .clear,
+                                            lineWidth: 2
+                                        )
+                                        .frame(width: 24, height: 24)
+                                }
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(QuietCraftPressStyle())
+                        .accessibilityLabel("\(choice.rawValue) accent")
+                        .accessibilityAddTraits(choice.rawValue == accentRaw ? [.isButton, .isSelected] : .isButton)
                     }
                 }
-            }
-            groupDivider
-            settingsRow("Side panel opens") {
-                segmented(
-                    options: DashboardSidePreference.allCases.map(\.rawValue),
-                    labels: DashboardSidePreference.allCases.map(\.label),
-                    selection: $sidePreferenceRaw
-                )
             }
             groupDivider
             settingsRow("Menu bar shows") {
@@ -107,7 +121,105 @@ struct SettingsView: View {
                     )
                 )
             }
+            groupDivider
+            filterChipsEditor
         }
+    }
+
+    private var selectedFilterChipIDs: [String] {
+        DashboardFilterPreferences.decodeChipIDs(filterChipsRaw)
+    }
+
+    private var availableRuntimeFilterChips: [DashboardFilterChip] {
+        let statuses = hub?.allStores.flatMap(\.sortedStatuses) ?? []
+        return DashboardFilterPreferences.availableRuntimeChips(fromStatuses: statuses)
+    }
+
+    private var filterChipsEditor: some View {
+        let selectedCount = selectedFilterChipIDs.count
+        let atCap = selectedCount >= DashboardFilterPreferences.maxChips
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("Dashboard filters")
+                .font(.system(size: 12.5))
+                .foregroundStyle(theme.label)
+            Text("Pick up to \(DashboardFilterPreferences.maxChips) chips for the dashboard strip (\(selectedCount)/\(DashboardFilterPreferences.maxChips)). All stays pinned.")
+                .font(.system(size: 10.5))
+                .foregroundStyle(theme.sub)
+                .fixedSize(horizontal: false, vertical: true)
+
+            filterChipToggle(
+                chip: .all,
+                selected: true,
+                locked: true,
+                blockAdd: false
+            )
+            filterChipToggle(
+                chip: .running,
+                selected: selectedFilterChipIDs.contains(DashboardFilterChip.running.id),
+                locked: false,
+                blockAdd: atCap
+            )
+
+            ForEach(availableRuntimeFilterChips) { chip in
+                filterChipToggle(
+                    chip: chip,
+                    selected: selectedFilterChipIDs.contains(chip.id),
+                    locked: false,
+                    blockAdd: atCap
+                )
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func filterChipToggle(
+        chip: DashboardFilterChip,
+        selected: Bool,
+        locked: Bool,
+        blockAdd: Bool
+    ) -> some View {
+        let cannotAdd = !selected && blockAdd
+        return Button {
+            guard !locked, !cannotAdd else { return }
+            toggleFilterChip(chip)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 14))
+                    .foregroundStyle(selected ? accent : theme.faint)
+                Text(chip.label)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(theme.label)
+                Spacer(minLength: 0)
+                if locked {
+                    Text("Required")
+                        .font(.system(size: 10))
+                        .foregroundStyle(theme.faint)
+                } else if cannotAdd {
+                    Text("Max \(DashboardFilterPreferences.maxChips)")
+                        .font(.system(size: 10))
+                        .foregroundStyle(theme.faint)
+                }
+            }
+            .contentShape(Rectangle())
+            .opacity(cannotAdd ? 0.55 : 1)
+        }
+        .buttonStyle(QuietCraftPressStyle())
+        .disabled(locked || cannotAdd)
+        .accessibilityLabel("\(chip.label) filter")
+        .accessibilityHint(cannotAdd ? "Remove another filter first" : "")
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+    }
+
+    private func toggleFilterChip(_ chip: DashboardFilterChip) {
+        var ids = selectedFilterChipIDs
+        if ids.contains(chip.id) {
+            ids.removeAll { $0 == chip.id }
+        } else {
+            guard ids.count < DashboardFilterPreferences.maxChips else { return }
+            ids.append(chip.id)
+        }
+        filterChipsRaw = DashboardFilterPreferences.encodeChipIDs(ids)
     }
 
     // MARK: - Connection
@@ -117,14 +229,18 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Controller base URL")
                     .font(.system(size: 12.5))
+                    .foregroundStyle(theme.label)
                 TextField(defaultControllerBaseURL, text: $controllerBaseURL)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(size: 11.5, design: .monospaced))
+                    .foregroundStyle(theme.fieldFg)
                 Text("Bearer token (optional)")
                     .font(.system(size: 12.5))
+                    .foregroundStyle(theme.label)
                 SecureField("Required for --unsafe-bind controllers", text: $controllerAuthToken)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(size: 11.5, design: .monospaced))
+                    .foregroundStyle(theme.fieldFg)
                 HStack(spacing: 10) {
                     settingsLinkButton("Use Default") {
                         controllerBaseURL = defaultControllerBaseURL
@@ -164,7 +280,7 @@ struct SettingsView: View {
                 if let error = launchAtLoginManager.lastError {
                     settingsFootnote(error, color: DashboardTheme.stopRed)
                 }
-                settingsFootnote("The app is idle when closed in the menu bar. Open, it refreshes every 10 minutes while idle and every 30 seconds while a model is live.", color: theme.sub)
+                settingsFootnote("The app is idle when closed in the menu bar. Open, it refreshes every 10 minutes while idle and every 10 seconds while a model is live.", color: theme.sub)
             }
             .padding(EdgeInsets(top: 9, leading: 12, bottom: 9, trailing: 12))
         }
@@ -175,21 +291,31 @@ struct SettingsView: View {
     private var controllerGroup: some View {
         settingsGroup("CONTROLLER") {
             VStack(alignment: .leading, spacing: 8) {
-                if let profilesDirectory, !profilesDirectory.isEmpty {
-                    Text(profilesDirectory)
-                        .font(.system(size: 10.5, design: .monospaced))
-                        .foregroundStyle(theme.sub)
-                        .lineLimit(2)
-                        .truncationMode(.middle)
-                        .textSelection(.enabled)
-                    HStack(spacing: 10) {
-                        settingsLinkButton("Open Profiles Folder", action: openProfilesDirectory)
-                        if let controllerRoot, !controllerRoot.isEmpty {
-                            settingsLinkButton("Open Controller Root", action: openControllerRoot)
-                        }
+                Text("Profiles folder")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(theme.label)
+                TextField("~/model-profiles", text: $profilesDirectoryDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 11.5, design: .monospaced))
+                    .foregroundStyle(theme.fieldFg)
+                HStack(spacing: 10) {
+                    settingsLinkButton("Save Profiles Folder", emphasized: true) {
+                        Task { await setProfilesDirectory(profilesDirectoryDraft) }
                     }
-                } else {
-                    settingsFootnote("No profile folder reported yet. Start the controller and reconnect to load its configured model-profiles path.", color: DashboardTheme.pendingOrange)
+                    settingsLinkButton("Open Profiles Folder", action: openProfilesDirectory)
+                    if let controllerRoot, !controllerRoot.isEmpty {
+                        settingsLinkButton("Open Controller Root", action: openControllerRoot)
+                    }
+                }
+                settingsFootnote(
+                    "Editable here; persisted in the controller config.json. The controller hot-reloads the folder without a restart.",
+                    color: theme.sub
+                )
+                if profilesDirectory == nil || profilesDirectory?.isEmpty == true {
+                    settingsFootnote(
+                        "No profile folder reported yet. Start the controller and reconnect, or save a path above.",
+                        color: DashboardTheme.pendingOrange
+                    )
                 }
 
                 groupDivider
@@ -244,6 +370,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(diagnostic.displayName)
                 .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(theme.label)
             ForEach(diagnostic.errors, id: \.self) { error in
                 Label(error, systemImage: "xmark.octagon.fill")
                     .font(.system(size: 10.5))
@@ -283,6 +410,7 @@ struct SettingsView: View {
         HStack {
             Text(label)
                 .font(.system(size: 12.5))
+                .foregroundStyle(theme.label)
             Spacer()
             trailing()
         }
@@ -299,22 +427,29 @@ struct SettingsView: View {
         HStack(spacing: 2) {
             ForEach(Array(zip(options, labels)), id: \.0) { option, label in
                 let isOn = selection.wrappedValue == option
-                Text(label)
-                    .font(.system(size: 11, weight: isOn ? .semibold : .regular))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 3)
-                    .background(
-                        isOn ? theme.tabOnBg : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    )
-                    .foregroundStyle(isOn ? theme.tabOnFg : theme.tabOffFg)
-                    .contentShape(Rectangle())
-                    .onTapGesture { selection.wrappedValue = option }
-                    .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
+                Button {
+                    selection.wrappedValue = option
+                } label: {
+                    Text(label)
+                        .font(.system(size: 11, weight: isOn ? .semibold : .regular))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 5)
+                        .frame(minHeight: 24)
+                        .background(
+                            isOn ? theme.tabOnBg : Color.clear,
+                            in: RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        )
+                        .foregroundStyle(isOn ? theme.tabOnFg : theme.tabOffFg)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(QuietCraftPressStyle())
+                .accessibilityLabel(label)
+                .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
             }
         }
         .padding(2)
         .background(theme.btnBg, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .accessibilityElement(children: .contain)
     }
 
     private func toggleRow(_ label: String, subtitle: String, isOn: Binding<Bool>, disabled: Bool = false) -> some View {
@@ -322,6 +457,7 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(label)
                     .font(.system(size: 12.5))
+                    .foregroundStyle(theme.label)
                 Text(subtitle)
                     .font(.system(size: 10.5))
                     .foregroundStyle(theme.sub)
@@ -348,7 +484,7 @@ struct SettingsView: View {
                 .font(.system(size: 11.5, weight: emphasized ? .semibold : .regular))
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(QuietCraftPressStyle())
         .foregroundStyle(disabled ? theme.faint : (emphasized ? accent : theme.btnFg))
         .disabled(disabled)
     }

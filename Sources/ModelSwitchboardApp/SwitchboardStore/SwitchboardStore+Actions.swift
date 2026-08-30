@@ -3,7 +3,7 @@ import ModelSwitchboardCore
 
 extension SwitchboardStore {
     func activate(_ profile: String) async {
-        await runProfileAction(profile, label: "ACTIVATING") {
+        await runProfileAction(profile, label: .activating) {
             markProfile(profile, running: true, ready: false)
         } action: {
             try await $0.activate(profile: profile)
@@ -11,7 +11,7 @@ extension SwitchboardStore {
     }
 
     func start(_ profile: String) async {
-        await runProfileAction(profile, label: "STARTING") {
+        await runProfileAction(profile, label: .starting) {
             markProfile(profile, running: true, ready: false)
         } action: {
             try await $0.start(profile: profile)
@@ -19,7 +19,7 @@ extension SwitchboardStore {
     }
 
     func stop(_ profile: String) async {
-        await runProfileAction(profile, label: "STOPPING") {
+        await runProfileAction(profile, label: .stopping) {
             markProfile(profile, running: false, ready: false)
         } action: {
             try await $0.stop(profile: profile)
@@ -29,7 +29,7 @@ extension SwitchboardStore {
     }
 
     func restart(_ profile: String) async {
-        await runProfileAction(profile, label: "RESTARTING") {
+        await runProfileAction(profile, label: .restarting) {
             markProfile(profile, running: true, ready: false)
         } action: {
             try await $0.restart(profile: profile)
@@ -43,17 +43,28 @@ extension SwitchboardStore {
         await run { try await $0.runIntegration(id: integration.id, action: action) }
     }
 
+    func setProfilesDirectory(_ path: String) async {
+        _ = await run(
+            { try await $0.setProfilesDirectory(path) },
+            actionName: "Save profiles folder"
+        )
+    }
+
     func stopAll() async {
-        guard pendingGlobalActions.insert("stop-all").inserted else { return }
-        defer { pendingGlobalActions.remove("stop-all") }
+        guard pendingGlobalActions.insert(.stopAll).inserted else { return }
+        defer { pendingGlobalActions.remove(.stopAll) }
         noteManagedLoopbackTransition()
         rememberLastActiveProfiles(from: statuses)
+        let previousStatuses = statuses
         let stoppingProfiles = Set(statuses.filter { $0.running || $0.ready }.map(\.profile))
         statuses = statuses.map { $0.updating(running: false, ready: false) }
-        await run(
+        let succeeded = await run(
             { try await $0.stopAll() },
             verify: { try await self.verifyProfilesStopped(stoppingProfiles, using: $0) }
         )
+        if !succeeded {
+            statuses = previousStatuses
+        }
     }
 
     func quickBenchmark(_ profiles: [String]? = nil) async {
@@ -64,18 +75,18 @@ extension SwitchboardStore {
         if benchmarkCooldownRemaining > 0 {
             return
         }
-        let key: String
+        let action: GlobalAction
         if let profiles, profiles.count == 1, let profile = profiles.first {
-            key = "bench-\(profile)"
+            action = .benchmark(profile: profile)
         } else if profiles == nil {
-            key = "bench-all"
+            action = .benchmarkAll
         } else {
-            key = "bench-selected"
+            action = .benchmarkSelected
         }
-        guard pendingGlobalActions.insert(key).inserted else { return }
+        guard pendingGlobalActions.insert(action).inserted else { return }
         activeBenchmarkProfiles = profiles ?? []
         defer {
-            pendingGlobalActions.remove(key)
+            pendingGlobalActions.remove(action)
         }
         if await run({ try await $0.quickBenchmark(profiles: profiles) }) {
             markBenchmarkStarted()
@@ -87,12 +98,13 @@ extension SwitchboardStore {
     func reopenLastActive() async {
         guard canReopenLastActive else { return }
         let profiles = lastActiveProfiles
-        guard pendingGlobalActions.insert("reopen-last").inserted else { return }
-        defer { pendingGlobalActions.remove("reopen-last") }
+        guard pendingGlobalActions.insert(.reopenLastActive).inserted else { return }
+        defer { pendingGlobalActions.remove(.reopenLastActive) }
         noteManagedLoopbackTransition()
+        let previousStatuses = statuses
 
         for profile in profiles {
-            pendingProfileActions[profile] = "STARTING"
+            pendingProfileActions[profile] = .starting
             markProfile(profile, running: true, ready: false)
         }
 
@@ -109,8 +121,12 @@ extension SwitchboardStore {
             }
             await refresh()
         } catch {
-            if isBenignCancellation(error) { return }
-            lastError = bootstrapDiagnostic ?? error.localizedDescription
+            if isBenignCancellation(error) {
+                statuses = previousStatuses
+                return
+            }
+            statuses = previousStatuses
+            recordRefreshFailure(error)
         }
     }
 }

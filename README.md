@@ -7,7 +7,7 @@
 
 <p>
   <em><strong>Flip between local LLM runtimes from your menu bar.</strong></em><br/>
-  <strong>One click to activate. One click to stop everything.</strong>
+  <strong>Activate one runtime, or stop everything.</strong>
 </p>
 
 <p>
@@ -42,24 +42,24 @@
 
 ---
 
-Running local models on an Apple Silicon Mac usually means a sprawl of terminal windows, half-remembered launch scripts, and no clean way to see **what's actually running.** Model Switchboard puts `llama.cpp`, MLX, Ollama, vLLM, SGLang, TGI, MLC-LLM, Mistral.rs, oMLX, vLLM-MLX, rVLLM MLX, LM Studio, Jan, and named command launchers behind **one menu bar panel.** Click **Activate**, every other model stops, and the one you picked comes up at an OpenAI-compatible endpoint.
+Running local models on an Apple Silicon Mac often means juggling terminal windows and ad-hoc launch scripts, with no single view of **what's actually running.** Model Switchboard puts common local runtimes -- `llama.cpp`, MLX, Ollama, vLLM, SGLang, TGI, MLC-LLM, Mistral.rs, oMLX, vLLM-MLX, rVLLM MLX, LM Studio, Jan, and named command launchers -- behind **one menu bar panel.**
 
-*No terminals. No orphan processes. No "green dot" lies.*
+Click **Activate**. Every other model stops. The one you picked comes up at an OpenAI-compatible endpoint. Readiness comes from health probes, not process presence alone.
 
 ---
 
 <table>
 <tr>
 <td align="center" width="33%" valign="top">
-<h3>One-click activate</h3>
+<h3>Activate</h3>
 <p>Pick a profile. Click <strong>Activate</strong>. Every other model stops. The chosen runtime comes up at an OpenAI-compatible endpoint, and the menu bar reflects the state in real time.</p>
 </td>
 <td align="center" width="33%" valign="top">
-<h3>Health checks, not vibes</h3>
-<p>Profiles go green <strong>only</strong> after a real <code>/v1/models</code> probe (or your custom HTTP check) passes. If a managed runtime crashes overnight, the controller restarts it automatically.</p>
+<h3>Probe-based readiness</h3>
+<p>A profile is marked ready when a real <code>/v1/models</code> probe (or your custom HTTP check) succeeds. If a managed runtime crashes overnight, the controller restarts it automatically.</p>
 </td>
 <td align="center" width="33%" valign="top">
-<h3>35+ runtimes, one contract</h3>
+<h3>35+ runtimes under one contract</h3>
 <p>Native adapters for <code>llama.cpp</code>, MLX, vLLM-MLX, rVLLM MLX, Ollama, vLLM, SGLang, TGI. Named launchers and external endpoints round out the rest. See <a href="Controller/RUNTIME_SUPPORT.md">RUNTIME_SUPPORT</a>.</p>
 </td>
 </tr>
@@ -69,7 +69,7 @@ Running local models on an Apple Silicon Mac usually means a sprawl of terminal 
 
 ## What's in the panel
 
-**`Activate` stops every other profile and brings the chosen one up.** No more forgetting to `kill -9` a 24 GB process before starting the next one. Profiles are marked **ready** *only* after a real `/v1/models` probe (or your custom HTTP check) passes — *if it says green, it means green.* Built with **SwiftUI** and `MenuBarExtra`: no Electron, no bundled inference engine, no resident background worker pegging your CPU.
+**`Activate` stops every other profile and brings the chosen one up.** The previous process is stopped on switch, not left loaded. Profiles are marked **ready** after a successful `/v1/models` probe (or your custom HTTP check). The UI is **SwiftUI** with `MenuBarExtra`. The app does not ship Electron, a bundled inference engine, or a resident background worker that keeps the CPU busy when idle.
 
 <table>
 <tr>
@@ -92,7 +92,7 @@ Running local models on an Apple Silicon Mac usually means a sprawl of terminal 
 
 ## Runtimes supported
 
-Model Switchboard is runtime-oriented, not model-family-oriented: if your runtime can expose an OpenAI-compatible endpoint, the app can track it, health-check it, switch it, and tag it. That means Qwen, Gemma, Llama, Mistral, GLM, DeepSeek, and other local models are supported through whichever backend serves them.
+Model Switchboard keys off the runtime. Any backend that exposes an OpenAI-compatible endpoint can be health-checked, switched, and tagged. Qwen, Gemma, Llama, Mistral, GLM, DeepSeek, and other local models work through whichever backend serves them.
 
 | Support level | Runtimes and providers |
 |---|---|
@@ -104,11 +104,28 @@ Use `RUNTIME_TAGS` for model-level traits such as `coding`, `q8`, `long-context`
 
 ---
 
+## Remote gateways
+
+Remote Linux/Unix hosts appear as named panel sections; ready-count and `Stop
+Everything` span all gateways.
+
+| Item | Summary |
+|---|---|
+| Install/pair/update | In *Settings → Remote Gateways*, paste a `modelswitchboard-gateway://` pairing code, or enter `user` + `host` and click **Install Agent on Host**. **Update** on the dashboard, Remote Hosts, or Settings pushes the bundled agent over SSH and refreshes models. `curl \| bash` is the no-app fallback. |
+| SSH (recommended) | Loopback-only agent; app-managed `BatchMode` tunnel uses your SSH config/keys/agent, never passwords, and forwards model ports for Mac-reachable copied URLs. |
+| Tailscale/direct | `--tailscale` binds only the WireGuard tailnet address and uses MagicDNS without a tunnel. Plain-LAN non-loopback binds require `--unsafe-bind` plus a ≥16-byte bearer token stored in Keychain. |
+| Profiles/runtimes | Remote default: `~/model-profiles/`; Mac controller also supports `--profiles-dir`. `link` scans existing `.env` / `.json`. Templates: vLLM, llama.cpp, SGLang, TGI; use `START_COMMAND` otherwise. |
+
+See [RemoteAgent/README.md](RemoteAgent/README.md) for commands, auth/security,
+discovery/API routes, and troubleshooting; also see [SETUP.md](SETUP.md#remote-gateways).
+
+---
+
 ## Base or Plus
 
 *Same codebase, two apps.* Pick at install time. They live side by side as **Model Switchboard.app** and **Model Switchboard Plus.app** under `~/Applications/`.
 
-The controller contract, profile discovery, runtime tags, and launcher support are shared by both editions. Plus adds the extra operator UI: live utilization badges, benchmarks, reopen-last, and integrations.
+Both editions share the controller contract, profile discovery, runtime tags, and launcher support. Plus adds operator UI on top: live utilization badges, benchmarks, reopen-last, and integrations.
 
 <div align="center">
 
@@ -154,9 +171,9 @@ cd Model-Switchboard
 ./Scripts/install.sh --variant plus    # Plus
 ```
 
-The installer places a fresh build under `~/Applications/`, installs `model-switchboardctl` to `~/.local/bin`, writes bash/zsh/fish completions, registers the app with Launch Services, and forces a Spotlight import so Raycast and Alfred pick it up immediately. Use `./Scripts/install.sh --help` for quiet mode, custom install paths, `--verify`, and `--skip-open`.
+The installer places a fresh build under `~/Applications/` and installs `model-switchboardctl` to `~/.local/bin`. It writes bash/zsh/fish completions and registers the app with Launch Services. It also forces a Spotlight import so Raycast and Alfred pick it up. Use `./Scripts/install.sh --help` for quiet mode, custom install paths, `--verify`, and `--skip-open`.
 
-Agent-facing CLI entrypoints are built in: `model-switchboardctl capabilities`, `model-switchboardctl robot-docs guide`, `model-switchboardctl triage`, and `model-switchboardctl doctor --json` expose machine-readable contracts, paste-ready guidance, one-call health triage, and structured diagnostics. Mutating commands such as `start`, `stop`, `restart`, `switch`/`activate`, and `stop-all` accept `--dry-run`/`--plan`; add `--json` for a structured result envelope.
+Agent-facing CLI entrypoints: `model-switchboardctl capabilities`, `robot-docs guide`, `triage`, and `doctor --json` for machine-readable contracts, paste-ready guidance, one-call health triage, and structured diagnostics. Mutating commands (`start`, `stop`, `restart`, `switch`/`activate`, `stop-all`) accept `--dry-run`/`--plan`. Add `--json` for a structured result envelope.
 
 ---
 
@@ -172,7 +189,7 @@ Agent-facing CLI entrypoints are built in: `model-switchboardctl capabilities`, 
 
 The controller exposes its API at `http://127.0.0.1:8877` under a per-user LaunchAgent. Use `--root`, `--host`, `--port`, `--no-start`, or `--verify` when installing a dedicated controller checkout.
 
-**2. Drop a profile manifest** into the controller's `model-profiles/` folder *(the exact path is shown in `Settings`).* If you run the reference controller in this repo, that is `Controller/model-profiles/`; if you keep a dedicated controller root, it is `<controller-root>/model-profiles/`. A minimal `llama.cpp` example:
+**2. Drop a profile manifest** into the controller's `model-profiles/` folder *(the exact path is shown in `Settings`).* With the reference controller in this repo, that is `Controller/model-profiles/`. With a dedicated controller root, it is `<controller-root>/model-profiles/`. A minimal `llama.cpp` example:
 
 ```env
 DISPLAY_NAME=Qwen 3.5 35B Local
@@ -185,12 +202,12 @@ SERVER_MODEL_ID=qwen35-local
 
 **3. Open the menu bar icon.** Your profile appears. Click **`Activate`**.
 
-Every profile must resolve to a unique endpoint. Reusing the same `HOST:PORT` or `BASE_URL` across two profiles is a configuration error, and the controller doctor will flag it.
+Every profile must resolve to a unique endpoint. Reusing the same `HOST:PORT` or `BASE_URL` across two profiles is a configuration error. The controller doctor will flag it.
 
 > Using your own runtime or launcher? Any OpenAI-compatible endpoint works. The controller has adapters and tags for MLX, Ollama, vLLM, SGLang, TGI, llama-cpp-python, rVLLM MLX, vLLM-MLX, DDTree MLX, TurboQuant, Mistral.rs, MLC-LLM, LightLLM, FastChat, OpenLLM, Nexa, ExLlamaV2, Aphrodite, LMDeploy, LiteLLM, external endpoints, and generic binaries. See [runtime support](Controller/RUNTIME_SUPPORT.md).
 
 <details>
-<summary><strong>I already downloaded the app — set up the controller for me</strong></summary>
+<summary><strong>I already downloaded the app; set up the controller for me</strong></summary>
 
 <br/>
 
@@ -215,7 +232,7 @@ Rules:
 End state:
 - Model Switchboard opens with valid profiles visible
 - `Activate` works
-- health checks go green only when the endpoint is actually ready
+- health checks report ready when the endpoint responds successfully
 - nothing is tied to one specific Mac beyond what is truly installed here
 ```
 
@@ -247,19 +264,19 @@ See **[CHANGELOG.md](CHANGELOG.md)** for release-by-release detail and **[Releas
 
 ## Integrations
 
-- **Raycast** — extension scripts under [`Integrations/Raycast/`](Integrations/Raycast/) call the same controller API the menu bar uses.
-- **SwiftBar** — drop-in plugin at [`Controller/swiftbar/local-models.15s.sh`](Controller/swiftbar/local-models.15s.sh) renders the same status, start, stop, and restart actions in any SwiftBar-friendly menu.
-- **Factory Droid** — `Sync Droid` (Plus only) pushes managed profiles into Droid's custom-model settings. First of several planned sync adapters.
+- **Raycast**: extension scripts under [`Integrations/Raycast/`](Integrations/Raycast/) call the same controller API the menu bar uses.
+- **SwiftBar**: drop-in plugin at [`Controller/swiftbar/local-models.15s.sh`](Controller/swiftbar/local-models.15s.sh). It renders the same status, start, stop, and restart actions in any SwiftBar-friendly menu.
+- **Factory Droid**: `Sync Droid` (Plus only) pushes managed profiles into Droid's custom-model settings. First of several planned sync adapters.
 
 ---
 
 ## Deep docs
 
-All the deeper material lives in one place so this README stays skimmable:
+Deeper material:
 
-> **[SETUP.md](SETUP.md)** — profile formats, supported runtimes, health checks, controller API contract, build-from-source flow, release pipeline, Raycast power-user notes, troubleshooting, and known limitations.
-> **[Controller/RUNTIME_SUPPORT.md](Controller/RUNTIME_SUPPORT.md)** — canonical runtime table, launch modes, profile templates, readiness modes.
-> **[CHANGELOG.md](CHANGELOG.md)** — release-by-release changes and distribution hardening notes.
+> **[SETUP.md](SETUP.md)**: profile formats, supported runtimes, health checks, controller API contract, build-from-source flow, release pipeline, Raycast power-user notes, troubleshooting, and known limitations.
+> **[Controller/RUNTIME_SUPPORT.md](Controller/RUNTIME_SUPPORT.md)**: canonical runtime table, launch modes, profile templates, readiness modes.
+> **[CHANGELOG.md](CHANGELOG.md)**: release-by-release changes and distribution hardening notes.
 
 *The app's **Help** button opens the same doc.*
 
@@ -274,20 +291,20 @@ PRs, issues, and profile recipes are welcome. A few ground rules that keep the p
 - External tools stay **optional integrations**, never required features.
 - Ship a runnable example with any new adapter.
 
-**`Sync Droid` is currently Factory-Droid-specific** because that's the agent I run. The integration slot is generic, but the adapter is not. **PRs that add sync adapters for other local-model terminals or agentic tools are very welcome**, including but not limited to **Cursor**, **Windsurf**, **OpenAI Codex CLI**, **Zed**, **Continue**, **Aider**, **LM Studio**, **Ollama chat frontends**, or any **OpenAI-compatible consumer**.
+**`Sync Droid` is currently Factory-Droid-specific** because that's the agent I run. The integration slot is generic; the adapter is not. **PRs that add sync adapters for other local-model terminals or agentic tools are welcome** -- for example **Cursor**, **Windsurf**, **OpenAI Codex CLI**, **Zed**, **Continue**, **Aider**, **LM Studio**, **Ollama chat frontends**, or any **OpenAI-compatible consumer**.
 
-If you build one, implement the adapter in `ModelSwitchboardControllerCore` and register it with the native integration service so it appears in the Plus menu automatically. Full contributor guidance lives in [SETUP.md](SETUP.md).
+If you build one, implement the adapter in `ModelSwitchboardControllerCore` and register it with the native integration service. It then appears in the Plus menu automatically. Full contributor guidance lives in [SETUP.md](SETUP.md).
 
 Before opening a PR:
 
 ```bash
-swift test && ./Scripts/check-cycles.py && ./Scripts/build-app.sh
+swift test && ./Scripts/check-cycles && ./Scripts/build-app.sh
 ```
 
 For maintainers, release prep is scriptable instead of hand-editing version files:
 
 ```bash
-python3 Scripts/bump-version.py patch   # or minor / major / x.y.z
+./Scripts/bump-version patch   # or minor / major / x.y.z
 ./Scripts/release-preflight.sh
 ```
 

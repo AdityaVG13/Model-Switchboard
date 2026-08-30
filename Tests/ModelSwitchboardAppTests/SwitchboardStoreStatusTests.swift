@@ -31,7 +31,7 @@ private func makeStore(
     store.applyBootstrapDiagnostic("missing the embedded controller")
     await store.refresh()
 
-    #expect(store.bootstrapDiagnostic == "missing the embedded controller")
+    #expect(store.refreshState == .blocked(message: "missing the embedded controller"))
     #expect(store.lastError == "missing the embedded controller")
 }
 
@@ -39,7 +39,7 @@ private func makeStore(
 @Test func staleRunningStateIsHiddenFromLiveCounts() {
     let store = makeStore()
     let now = Date(timeIntervalSince1970: 200)
-    let staleDate = now.addingTimeInterval(-60)
+    let staleDate = now.addingTimeInterval(-901)
     let status = ModelFixtures.profileStatus()
 
     store.statuses = [status]
@@ -60,7 +60,7 @@ private func makeStore(
 
     store.statuses = [status]
     store.lastUpdated = now
-    store.lastError = "Controller unavailable. Showing cached state."
+    store.refreshState = .failedShowingCached(message: "Controller unavailable. Showing cached state.")
 
     #expect(store.statusFreshness(relativeTo: now) == .cached)
     #expect(store.profileBadgeState(for: status, relativeTo: now) == .stale)
@@ -75,6 +75,7 @@ private func makeStore(
 
     store.statuses = [status]
     store.lastUpdated = now
+    store.refreshState = .refreshed
 
     #expect(store.statusFreshness(relativeTo: now) == .fresh)
     #expect(store.displayedRunningProfiles(relativeTo: now) == 1)
@@ -124,7 +125,7 @@ private func makeStore(
             baseURL: "http://10.0.0.8:8081/v1"
         ),
     ]
-    store.pendingProfileActions["pending"] = "STARTING"
+    store.pendingProfileActions["pending"] = .starting
 
     await store.probeLoopbackEndpointsIfNeeded()
 

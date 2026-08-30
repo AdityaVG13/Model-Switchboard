@@ -11,9 +11,12 @@ struct ModelSwitchboardApp: App {
     @State private var controllerAuthToken: String = ""
     @AppStorage(DashboardAppearanceKeys.menuBarShowsReadyCount) private var menuBarShowsReadyCount = true
     @State private var store: SwitchboardStore
+    @State private var hub: GatewayHub
+    @State private var tokenSaveTask: Task<Void, Never>?
     @StateObject private var launchAtLoginManager = LaunchAtLoginManager.shared
     @State private var isMenuPresented = false
     @State private var statusItem: NSStatusItem?
+    @State private var statusItemClickGate = StatusItemClickGate()
     private let features = AppFeatures.current
 
     init() {
@@ -22,13 +25,13 @@ struct ModelSwitchboardApp: App {
             UserDefaults.standard.string(forKey: ControllerEndpointDefaults.baseURLUserDefaultsKey)
             ?? ControllerEndpointDefaults.baseURLString
         _controllerAuthToken = State(initialValue: token)
-        _store = State(
-            initialValue: SwitchboardStore(
-                controllerBaseURL: baseURL,
-                controllerAuthToken: token,
-                features: AppFeatures.current
-            )
+        let store = SwitchboardStore(
+            controllerBaseURL: baseURL,
+            controllerAuthToken: token,
+            features: AppFeatures.current
         )
+        _store = State(initialValue: store)
+        _hub = State(initialValue: GatewayHub(localStore: store))
     }
 
     private static func loadAndMigrateAuthToken() -> String {
@@ -46,6 +49,7 @@ struct ModelSwitchboardApp: App {
         MenuBarExtra {
             MenuBarContentView(
                 store: store,
+                hub: hub,
                 features: features,
                 launchAtLoginManager: launchAtLoginManager,
                 controllerBaseURL: $controllerBaseURL,
@@ -53,11 +57,12 @@ struct ModelSwitchboardApp: App {
                 reconnect: {
                     store.controllerBaseURL = controllerBaseURL
                     store.controllerAuthToken = controllerAuthToken
-                    Task { await store.refresh() }
+                    hub.refreshAll()
                 },
                 updateMenuBarHelp: { helpText in
                     statusItem?.button?.toolTip = helpText
-                }
+                },
+                isMenuPresented: $isMenuPresented
             )
                 .onAppear {
                     if store.controllerBaseURL != controllerBaseURL {
@@ -72,29 +77,40 @@ struct ModelSwitchboardApp: App {
                     Task { await store.refresh() }
                 }
                 .onChange(of: controllerAuthToken) { _, newValue in
-                    KeychainTokenStorage.shared.save(newValue)
-                    store.controllerAuthToken = newValue
-                    Task { await store.refresh() }
+                    // Debounced: this fires per keystroke while typing a token.
+                    tokenSaveTask?.cancel()
+                    tokenSaveTask = Task {
+                        try? await Task.sleep(for: .milliseconds(400))
+                        guard !Task.isCancelled else { return }
+                        let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                        // Debounced empty save clears the keychain so an intentional
+                        // clear/rotate-to-no-auth sticks across relaunch.
+                        KeychainTokenStorage.shared.save(trimmed)
+                        store.controllerAuthToken = newValue
+                        await store.refresh()
+                    }
                 }
         } label: {
             HStack(spacing: 3) {
                 LeverSwitchIcon(
-                    hasReadyModels: store.displayedReadyProfiles > 0,
-                    hasRunningModels: store.displayedRunningProfiles > 0,
+                    hasReadyModels: hub.displayedReadyProfiles > 0,
+                    hasRunningModels: hub.displayedRunningProfiles > 0,
                     size: 18
                 )
                 if menuBarShowsReadyCount {
-                    Text("\(store.displayedReadyProfiles)/\(store.summary.totalProfiles)")
+                    Text("\(hub.displayedReadyProfiles)/\(hub.totalProfiles)")
                         .font(.system(size: 12, weight: .semibold).monospacedDigit())
                 }
             }
             .task {
-                statusItem?.button?.toolTip = store.menuBarHelp
+                statusItem?.button?.toolTip = hub.menuBarHelp
+                // Bootstrap diagnostics concern the local LaunchAgent only;
+                // remote gateway stores must never inherit them.
                 store.applyBootstrapDiagnostic(
                     await ControllerServiceManager.shared.ensureRegistered()
                 )
             }
-            .onChange(of: store.menuBarHelp) { _, newValue in
+            .onChange(of: hub.menuBarHelp) { _, newValue in
                 statusItem?.button?.toolTip = newValue
             }
             .onChange(of: menuBarShowsReadyCount) { _, newValue in
@@ -104,10 +120,18 @@ struct ModelSwitchboardApp: App {
         .menuBarExtraAccess(isPresented: $isMenuPresented) { item in
             statusItem = item
             item.length = menuBarShowsReadyCount ? NSStatusItem.variableLength : NSStatusItem.squareLength
-            item.button?.toolTip = store.menuBarHelp
+            item.button?.toolTip = hub.menuBarHelp
             // Let SwiftUI own button contents; clearing title / forcing imageOnly
             // clips the ready-count onto neighboring menu bar items.
             item.button?.setAccessibilityLabel(features.appDisplayName)
+            // Rate-limit spam clicks on the menu bar icon (black-flash thrash).
+            statusItemClickGate.attach(to: item)
+        }
+        .onChange(of: isMenuPresented) { _, presented in
+            // Paint host window as soon as presentation flips on — before content settles.
+            if presented, let window = MenuBarExtraWindowBackdrop.menuBarExtraWindow(for: statusItem) {
+                MenuBarExtraWindowBackdrop.apply(to: window)
+            }
         }
         .menuBarExtraStyle(.window)
     }

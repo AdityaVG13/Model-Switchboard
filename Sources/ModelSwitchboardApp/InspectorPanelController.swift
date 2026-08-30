@@ -8,7 +8,11 @@ enum InspectorPanelSide {
 
 @MainActor
 final class InspectorPanelWindow: NSPanel {
-    override var canBecomeKey: Bool { true }
+    /// Settings needs typing; display panels stay non-activating so click-out
+    /// of the menu bar dashboard can dismiss without focus thrash.
+    var allowsKeyFocus = false
+
+    override var canBecomeKey: Bool { allowsKeyFocus }
     override var canBecomeMain: Bool { false }
 }
 
@@ -29,6 +33,9 @@ final class InspectorPanelController {
         self.hideAnimationDuration = hideAnimationDuration
     }
 
+    /// - Parameter allowsKeyFocus: true for Settings (SecureField); false for
+    ///   Remote Hosts / Benchmarks / Help so the panel does not steal key focus
+    ///   and pin the MenuBarExtra open when the user clicks elsewhere.
     func show(
         title: String,
         parent: NSWindow,
@@ -36,6 +43,7 @@ final class InspectorPanelController {
         height: CGFloat,
         gap: CGFloat,
         side: InspectorPanelSide = .leading,
+        allowsKeyFocus: Bool = false,
         content: AnyView
     ) {
         visibilityGeneration += 1
@@ -52,7 +60,7 @@ final class InspectorPanelController {
 
             window = InspectorPanelWindow(
                 contentRect: NSRect(x: 0, y: 0, width: width, height: height),
-                styleMask: [.borderless],
+                styleMask: [.borderless, .nonactivatingPanel],
                 backing: .buffered,
                 defer: false
             )
@@ -62,14 +70,16 @@ final class InspectorPanelController {
             window.hasShadow = true
             window.isMovable = false
             window.isMovableByWindowBackground = false
-            window.hidesOnDeactivate = false
+            window.hidesOnDeactivate = true
             window.level = .floating
-            window.collectionBehavior = [.transient, .moveToActiveSpace]
+            window.collectionBehavior = [.transient, .moveToActiveSpace, .fullScreenAuxiliary]
+            window.becomesKeyOnlyIfNeeded = true
 
             panelWindow = window
             hostingView = host
         }
 
+        window.allowsKeyFocus = allowsKeyFocus
         host.rootView = content
         window.title = title
         window.setContentSize(NSSize(width: width, height: height))
@@ -82,14 +92,15 @@ final class InspectorPanelController {
             parentWindow = parent
         }
 
+        let originX = Self.panelOriginX(
+            parentFrame: parent.frame,
+            screenVisibleFrame: parent.screen?.visibleFrame,
+            width: width,
+            gap: gap,
+            side: side
+        )
         let frame = NSRect(
-            x: Self.panelOriginX(
-                parentFrame: parent.frame,
-                screenVisibleFrame: parent.screen?.visibleFrame,
-                width: width,
-                gap: gap,
-                side: side
-            ),
+            x: originX,
             y: parent.frame.minY,
             width: width,
             height: height
@@ -110,10 +121,12 @@ final class InspectorPanelController {
 
     /// Resolves the panel's x origin for the requested side, flipping to the
     /// opposite side when the preferred placement would leave the visible screen.
+    /// Does not move the parent — keeps a true side-by-side child panel.
     nonisolated static func panelOriginX(
         parentFrame: NSRect,
         screenVisibleFrame: NSRect?,
         width: CGFloat,
+        height: CGFloat = 0,
         gap: CGFloat,
         side: InspectorPanelSide
     ) -> CGFloat {

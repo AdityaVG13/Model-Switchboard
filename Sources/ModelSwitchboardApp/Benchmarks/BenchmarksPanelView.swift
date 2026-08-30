@@ -1,10 +1,20 @@
 import SwiftUI
 import ModelSwitchboardCore
 
+struct GatewayBenchmarkSection: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let benchmark: BenchmarkStatus?
+    let activeBenchmarkProfiles: [String]
+    let cooldownEndsAt: Date?
+}
+
 struct BenchmarksPanelView: View {
     let benchmark: BenchmarkStatus?
     let activeBenchmarkProfiles: [String]
     let cooldownEndsAt: Date?
+    /// Latest results from remote gateway stores, labeled by gateway name.
+    var remoteSections: [GatewayBenchmarkSection] = []
     let theme: DashboardTheme
     let accent: Color
     let runBenchmark: () -> Void
@@ -27,17 +37,32 @@ struct BenchmarksPanelView: View {
                     }
 
                     if let latest = benchmark?.latest, !latest.rows.isEmpty {
+                        sectionHeader("THIS MAC")
                         let best = BenchmarkMetricFormatting.sortedRowsForDisplay(latest.rows).first
-                        summaryCard(latest)
+                        summaryCard(latest, gatewayLabel: nil)
                         if let cases = best?.prefillCases, !cases.isEmpty {
                             prefillSection(cases)
                             theme.line.frame(height: 1)
                                 .padding(.bottom, 4)
                         }
-                        rankedRows(latest)
-                    } else {
+                        rankedRows(latest, gatewayLabel: nil)
+                    } else if remoteSections.allSatisfy({ ($0.benchmark?.latest?.rows.isEmpty ?? true) }) {
                         noticeText("No benchmark recorded yet. Run a benchmark to populate this panel.", color: theme.sub)
                             .padding(.top, 8)
+                    }
+
+                    ForEach(remoteSections) { section in
+                        if let latest = section.benchmark?.latest, !latest.rows.isEmpty {
+                            sectionHeader(section.name.uppercased())
+                            if section.benchmark?.running == true {
+                                noticeText("Benchmark running on " + section.name + "…", color: DashboardTheme.pendingOrange)
+                            }
+                            summaryCard(latest, gatewayLabel: section.name)
+                            rankedRows(latest, gatewayLabel: section.name)
+                        } else if section.benchmark?.running == true {
+                            sectionHeader(section.name.uppercased())
+                            noticeText("Benchmark running on " + section.name + "…", color: DashboardTheme.pendingOrange)
+                        }
                     }
                 }
                 .padding(.bottom, 8)
@@ -47,14 +72,21 @@ struct BenchmarksPanelView: View {
             theme.line.frame(height: 1)
             panelFooter
         }
-        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { tick in
-            now = tick
-        }
+        .modifier(BenchmarkTickModifier(
+            needsTick: needsCountdownTick,
+            now: $now
+        ))
+    }
+
+    private var needsCountdownTick: Bool {
+        if cooldownEndsAt != nil { return true }
+        if benchmark?.running == true { return true }
+        return remoteSections.contains { $0.benchmark?.running == true || $0.cooldownEndsAt != nil }
     }
 
     // MARK: - Summary card
 
-    private func summaryCard(_ latest: BenchmarkLatestReport) -> some View {
+    private func summaryCard(_ latest: BenchmarkLatestReport, gatewayLabel: String?) -> some View {
         let best = BenchmarkMetricFormatting.sortedRowsForDisplay(latest.rows).first
 
         return VStack(alignment: .leading, spacing: 10) {
@@ -65,9 +97,10 @@ struct BenchmarksPanelView: View {
                     .foregroundStyle(theme.faint)
                 Text(BenchmarkMetricFormatting.benchmarkName(best))
                     .font(.system(size: 13.5, weight: .semibold))
+                    .foregroundStyle(theme.label)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("suite \(BenchmarkMetricFormatting.suiteLabel(latest.suite).lowercased()) \u{00b7} \(best?.runtime ?? "\u{2014}")")
+                Text(suiteLine(latest: latest, best: best, gatewayLabel: gatewayLabel))
                     .font(.system(size: 10.5, design: .monospaced))
                     .foregroundStyle(theme.sub)
                     .lineLimit(1)
@@ -90,7 +123,7 @@ struct BenchmarksPanelView: View {
         VStack(alignment: .leading, spacing: 1) {
             Text(value)
                 .font(.system(size: 14, weight: .bold).monospacedDigit())
-                .foregroundStyle(emphasized ? accent : .primary)
+                .foregroundStyle(emphasized ? accent : theme.label)
             Text(unit)
                 .font(.system(size: 9))
                 .foregroundStyle(theme.sub)
@@ -140,6 +173,7 @@ struct BenchmarksPanelView: View {
 
             Text("\(BenchmarkMetricFormatting.milliseconds(benchCase.ttftMS)) ms")
                 .font(.system(size: 11, design: .monospaced).monospacedDigit())
+                .foregroundStyle(theme.label)
                 .frame(width: 62, alignment: .trailing)
 
             Text("\(BenchmarkMetricFormatting.tokensPerSecond(benchCase.decodeTokensPerSec)) t/s")
@@ -156,7 +190,7 @@ struct BenchmarksPanelView: View {
 
     // MARK: - Ranked rows
 
-    private func rankedRows(_ latest: BenchmarkLatestReport) -> some View {
+    private func rankedRows(_ latest: BenchmarkLatestReport, gatewayLabel: String?) -> some View {
         let rows = BenchmarkMetricFormatting.sortedRowsForDisplay(latest.rows)
         let maxDecode = max(rows.compactMap(\.decodeTokensPerSec).max() ?? 1, 1)
 
@@ -168,26 +202,35 @@ struct BenchmarksPanelView: View {
                 .padding(EdgeInsets(top: 0, leading: 4, bottom: 4, trailing: 4))
 
             ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
-                rankedRow(row, isTop: index == 0, maxDecode: maxDecode)
+                rankedRow(row, isTop: index == 0, maxDecode: maxDecode, gatewayLabel: gatewayLabel)
             }
         }
         .padding(.horizontal, 10)
     }
 
-    private func rankedRow(_ row: BenchmarkLatestRow, isTop: Bool, maxDecode: Double) -> some View {
+    private func rankedRow(_ row: BenchmarkLatestRow, isTop: Bool, maxDecode: Double, gatewayLabel: String?) -> some View {
         let fraction = max(0, min(1, (row.decodeTokensPerSec ?? 0) / maxDecode))
 
         return HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(BenchmarkMetricFormatting.benchmarkName(row))
                     .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(theme.label)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                if let runtime = row.runtime {
-                    Text(runtime)
-                        .font(.system(size: 10))
-                        .foregroundStyle(theme.sub)
-                        .lineLimit(1)
+                HStack(spacing: 4) {
+                    if let gatewayLabel {
+                        Text(gatewayLabel)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(accent.opacity(0.85))
+                            .lineLimit(1)
+                    }
+                    if let runtime = row.runtime {
+                        Text(gatewayLabel == nil ? runtime : ("· " + runtime))
+                            .font(.system(size: 10))
+                            .foregroundStyle(theme.sub)
+                            .lineLimit(1)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -205,6 +248,7 @@ struct BenchmarksPanelView: View {
 
             Text("\(BenchmarkMetricFormatting.tokensPerSecond(row.decodeTokensPerSec)) t/s")
                 .font(.system(size: 11, design: .monospaced).monospacedDigit())
+                .foregroundStyle(theme.label)
                 .frame(width: 62, alignment: .trailing)
         }
         .padding(EdgeInsets(top: 7, leading: 6, bottom: 7, trailing: 6))
@@ -221,7 +265,7 @@ struct BenchmarksPanelView: View {
                     .font(.system(size: 11.5))
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(QuietCraftPressStyle())
             .foregroundStyle(canTriggerBenchmark ? theme.btnFg : theme.faint)
             .disabled(!canTriggerBenchmark)
 
@@ -233,13 +277,14 @@ struct BenchmarksPanelView: View {
                     exportNotice = notice
                 }
             } label: {
-                Text("Export CSV")
+                Text("Export This Mac CSV")
                     .font(.system(size: 11.5))
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(QuietCraftPressStyle())
             .foregroundStyle(canExport ? theme.btnFg : theme.faint)
             .disabled(!canExport)
+            .help("Exports the latest This Mac benchmark run. Remote results stay on their gateway sections.")
         }
         .padding(EdgeInsets(top: 9, leading: 14, bottom: 9, trailing: 14))
     }
@@ -257,9 +302,9 @@ struct BenchmarksPanelView: View {
     private var runButtonTitle: String {
         if benchmark?.running == true { return "Benchmark Running\u{2026}" }
         if let suite = benchmark?.latest?.suite, !suite.isEmpty {
-            return "Run Suite: \(BenchmarkMetricFormatting.suiteLabel(suite).lowercased())"
+            return "Run Suite on This Mac: \(BenchmarkMetricFormatting.suiteLabel(suite).lowercased())"
         }
-        return "Run Benchmark"
+        return "Run Benchmark on This Mac"
     }
 
     private var benchmarkCooldownLabel: String? {
@@ -275,6 +320,23 @@ struct BenchmarksPanelView: View {
             return "Benchmark is running for profile: \(only)."
         }
         return "Benchmark is running for \(activeBenchmarkProfiles.count) selected profiles."
+    }
+
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 10, weight: .semibold))
+            .kerning(0.8)
+            .foregroundStyle(theme.faint)
+            .padding(EdgeInsets(top: 10, leading: 14, bottom: 0, trailing: 14))
+    }
+
+    private func suiteLine(latest: BenchmarkLatestReport, best: BenchmarkLatestRow?, gatewayLabel: String?) -> String {
+        let suite = BenchmarkMetricFormatting.suiteLabel(latest.suite).lowercased()
+        let runtime = best?.runtime ?? "—"
+        if let gatewayLabel {
+            return "suite " + suite + " · " + runtime + " · " + gatewayLabel
+        }
+        return "suite " + suite + " · " + runtime
     }
 
     private func noticeText(_ text: String, color: Color) -> some View {
@@ -305,5 +367,22 @@ struct BenchmarksPanelView: View {
 
     static func parsedGeneratedAt(_ value: String?) -> Date? {
         BenchmarkTimestampFormatting.parsedGeneratedAt(value)
+    }
+}
+
+/// Only ticks the countdown clock while a run or cooldown is active.
+private struct BenchmarkTickModifier: ViewModifier {
+    let needsTick: Bool
+    @Binding var now: Date
+
+    func body(content: Content) -> some View {
+        if needsTick {
+            content
+                .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { tick in
+                    now = tick
+                }
+        } else {
+            content
+        }
     }
 }

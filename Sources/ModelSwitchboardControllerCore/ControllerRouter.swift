@@ -82,6 +82,10 @@ public final class ControllerRouter: @unchecked Sendable {
         _ = try requestObject(request)
         try service.stopAll()
         return try response(service.actionResponse())
+      case ("POST", "/api/config/profiles-dir"):
+        let payload = try requestObject(request)
+        return try response(
+          service.setProfilesDirectory(try requiredString(payload, key: "profiles_dir")))
       case ("POST", "/api/integrations/run"):
         let payload = try requestObject(request)
         try service.runIntegration(
@@ -95,8 +99,8 @@ public final class ControllerRouter: @unchecked Sendable {
         _ = try service.benchmarks.start(
           profiles: selected,
           suite: payload["suite"] as? String ?? "quick",
-          allowConcurrent: payload["allow_concurrent"] as? Bool ?? false,
-          keepRunning: payload["keep_running"] as? Bool ?? false
+          allowConcurrent: JSONSupport.boolValue(payload["allow_concurrent"]) ?? false,
+          keepRunning: JSONSupport.boolValue(payload["keep_running"]) ?? false
         )
         return try response(service.actionResponse())
       default:
@@ -111,17 +115,26 @@ public final class ControllerRouter: @unchecked Sendable {
           ?? fallback()
       case .profileConflict:
         return
-          (try? error(status: 409, code: "profile_conflict", message: "profile endpoint conflict"))
+          (try? error(status: 409, code: "profile_conflict", message: controllerError.description))
           ?? fallback()
-      case .usage, .invalidConfiguration, .invalidProfile:
-        return (try? error(status: 400, code: "invalid_request", message: "invalid request"))
+      case .usage:
+        return (try? error(status: 400, code: "usage_error", message: "invalid request"))
+          ?? fallback()
+      case .invalidConfiguration:
+        return (try? error(status: 400, code: "invalid_configuration", message: "invalid request"))
+          ?? fallback()
+      case .invalidProfile:
+        return (try? error(status: 400, code: "invalid_profile", message: "invalid request"))
           ?? fallback()
       case .unsupported:
         return
           (try? error(status: 400, code: "unsupported_action", message: controllerError.description))
           ?? fallback()
       case .operationFailed:
-        return (try? error(status: 500, code: "internal_error", message: "internal server error"))
+        return (
+          try? error(
+            status: 500, code: "internal_error", message: controllerError.description)
+        )
           ?? fallback()
       }
     } catch {
@@ -177,7 +190,7 @@ public final class ControllerRouter: @unchecked Sendable {
   }
 
   private func error(status: Int, code: String, message: String) throws -> ControllerHTTPResponse {
-    try json(["ok": false, "error": code, "message": message], status: status)
+    try json(["error": code, "message": message], status: status)
   }
 
   private func jsonObjects<T: Encodable>(_ values: [T]) throws -> [Any] {
@@ -187,7 +200,7 @@ public final class ControllerRouter: @unchecked Sendable {
 
   private func fallback() -> ControllerHTTPResponse {
     ControllerHTTPResponse(
-      status: 500, body: Data("{\"ok\":false,\"error\":\"internal_error\"}".utf8))
+      status: 500, body: Data("{\"error\":\"internal_error\"}".utf8))
   }
 
   private func constantTimeEqual(_ lhs: String, _ rhs: String) -> Bool {

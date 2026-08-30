@@ -73,15 +73,18 @@ if [ -z "$MODEL_PROFILE" ]; then
     MODEL_PROFILE="${MODEL_PROFILE%.*}"
 fi
 
+controller_bin() {
+    local bin="${MODEL_SWITCHBOARD_CONTROLLER_BIN:-$WORK_DIR/bin/ModelSwitchboardController}"
+    if [ ! -x "$bin" ]; then
+        die "Native controller not found: $bin"
+    fi
+    printf '%s\n' "$bin"
+}
+
 load_profile_exports() {
     local path="$1"
-    local controller_bin
     local exports
-    controller_bin="${MODEL_SWITCHBOARD_CONTROLLER_BIN:-$WORK_DIR/bin/ModelSwitchboardController}"
-    if [ ! -x "$controller_bin" ]; then
-        die "Native controller not found: $controller_bin"
-    fi
-    if ! exports="$("$controller_bin" profile-exports --root "$WORK_DIR" --profile-file "$path")"; then
+    if ! exports="$("$(controller_bin)" profile-exports --root "$WORK_DIR" --profile-file "$path")"; then
         die "Failed to load profile: $path"
     fi
     eval "$exports"
@@ -328,25 +331,17 @@ resolve_first_executable() {
 
 append_json_args() {
     local raw_json="${1:-}"
-    [ -n "$raw_json" ] || return 0
+    local parsed
     local arg
+    [ -n "$raw_json" ] || return 0
+    if ! parsed="$(printf '%s' "$raw_json" | "$(controller_bin)" json-strings)"; then
+        die "SERVER_ARGS_JSON must be a JSON array"
+    fi
     while IFS= read -r arg; do
         cmd+=("$arg")
-    done < <(python3 - "$raw_json" <<'PY'
-import json
-import sys
-
-raw = sys.argv[1]
-try:
-    data = json.loads(raw)
-except json.JSONDecodeError as exc:
-    raise SystemExit(f"SERVER_ARGS_JSON must be a JSON array: {exc}")
-if not isinstance(data, list):
-    raise SystemExit("SERVER_ARGS_JSON must be a JSON array")
-for item in data:
-    print(str(item))
-PY
-)
+    done <<EOF
+$parsed
+EOF
 }
 
 model_source_for_adapter() {
@@ -377,31 +372,21 @@ spawn_detached() {
     local log_path="$1"
     local pid_path="$2"
     shift 2
-    DETACHED_LOG_PATH="$log_path" DETACHED_PID_PATH="$pid_path" python3 - "$@" <<'PY'
-import os
-import pathlib
-import subprocess
-import sys
-
-log_path = os.environ["DETACHED_LOG_PATH"]
-pid_path = os.environ["DETACHED_PID_PATH"]
-env = os.environ.copy()
-working_directory = env.get("WORKING_DIRECTORY") or env.get("WORKDIR") or None
-
-with open(log_path, "ab", buffering=0) as log_fp, open(os.devnull, "rb") as stdin_fp:
-    proc = subprocess.Popen(
-        sys.argv[1:],
-        stdin=stdin_fp,
-        stdout=log_fp,
-        stderr=log_fp,
-        start_new_session=True,
-        close_fds=True,
-        env=env,
-        cwd=working_directory,
-    )
-pathlib.Path(pid_path).write_text(f"{proc.pid}\n")
-print(proc.pid)
-PY
+    local workdir="${WORKING_DIRECTORY:-${WORKDIR:-}}"
+    local pid
+    (
+        if [ -n "$workdir" ]; then
+            cd "$workdir" || exit 1
+        fi
+        if command -v setsid >/dev/null 2>&1; then
+            exec setsid "$@" </dev/null >>"$log_path" 2>&1
+        else
+            exec "$@" </dev/null >>"$log_path" 2>&1
+        fi
+    ) &
+    pid=$!
+    printf '%s\n' "$pid" >"$pid_path"
+    printf '%s\n' "$pid"
 }
 
 wait_for_models_endpoint() {
@@ -411,23 +396,7 @@ wait_for_models_endpoint() {
     local response
     while [ "$retries" -gt 0 ]; do
         if response="$(curl -fsS "$models_url" 2>/dev/null)"; then
-            if [ -n "$expected_id" ] && ! RESPONSE_JSON="$response" python3 - "$expected_id" <<'PY'
-import json
-import os
-import sys
-
-expected = sys.argv[1]
-raw = os.environ.get("RESPONSE_JSON", "")
-
-try:
-    obj = json.loads(raw)
-except json.JSONDecodeError:
-    raise SystemExit(1)
-
-ids = {item.get("id") for item in obj.get("data", [])}
-raise SystemExit(0 if expected in ids else 1)
-PY
-            then
+            if [ -n "$expected_id" ] && ! printf '%s' "$response" | "$(controller_bin)" openai-models-contains --id "$expected_id"; then
                 sleep 2
                 retries=$((retries - 1))
                 continue

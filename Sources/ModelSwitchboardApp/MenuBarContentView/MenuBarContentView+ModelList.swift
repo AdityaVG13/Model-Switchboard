@@ -5,29 +5,31 @@ import ModelSwitchboardCore
 extension MenuBarContentView {
     // MARK: - Selection helpers
 
-    /// The model featured in the hero card: the first running profile in display order.
-    var heroProfile: ModelProfileStatus? {
-        store.sortedStatuses.first { isDisplayedRunning($0) }
+    /// Local models featured as ACTIVE heroes: every running (or busy) profile
+    /// that matches the active filter. Multi-start gateways can show several.
+    var localHeroProfiles: [ModelProfileStatus] {
+        store.sortedStatuses.filter { status in
+            matchesFilter(status)
+                && (isDisplayedRunning(status) || store.isBusy(profile: status.profile))
+        }
+    }
+
+    /// Back-compat alias for call sites that still ask for "the" hero.
+    var heroProfile: ModelProfileStatus? { localHeroProfiles.first }
+
+    var localHeroProfileIDs: Set<String> {
+        Set(localHeroProfiles.map(\.profile))
     }
 
     var standbyProfiles: [ModelProfileStatus] {
-        let hero = heroProfile?.profile
+        let heroes = localHeroProfileIDs
         return store.sortedStatuses.filter { status in
-            status.profile != hero && matchesFilter(status)
+            !heroes.contains(status.profile) && matchesFilter(status)
         }
     }
 
     func matchesFilter(_ status: ModelProfileStatus) -> Bool {
-        switch profileFilter {
-        case .all:
-            true
-        case .running:
-            isDisplayedRunning(status) || store.isBusy(profile: status.profile)
-        case .mlx:
-            Self.runtimeKind(status) == .mlx
-        case .llamaCpp:
-            Self.runtimeKind(status) == .llamaCpp
-        }
+        matchesFilter(status, in: store)
     }
 
     func isDisplayedRunning(_ status: ModelProfileStatus, relativeTo now: Date = .now) -> Bool {
@@ -42,120 +44,137 @@ extension MenuBarContentView {
         store.profileBadgeState(for: status, relativeTo: now) == .running
     }
 
-    static func runtimeKind(_ status: ModelProfileStatus) -> ProfileFilter? {
-        let haystack = ([status.runtime, status.runtimeLabel ?? ""] + (status.runtimeTags ?? []))
-            .joined(separator: " ")
-            .lowercased()
-        if haystack.contains("llama") { return .llamaCpp }
-        if haystack.contains("mlx") { return .mlx }
-        return nil
+    /// Legacy mlx / llama.cpp classification for tests and older call sites.
+    static func runtimeKind(_ status: ModelProfileStatus) -> String? {
+        DashboardFilterPreferences.legacyRuntimeKind(status)
     }
 
-    func decodeTokensPerSecond(for profile: String) -> Double? {
-        store.benchmark?.latest?.rows
+    func decodeTokensPerSecond(for profile: String, in store: SwitchboardStore? = nil) -> Double? {
+        let source = store ?? self.store
+        return source.benchmark?.latest?.rows
             .filter { $0.profile == profile }
             .compactMap(\.decodeTokensPerSec)
             .max()
+    }
+
+    func ttftMilliseconds(for profile: String, in store: SwitchboardStore? = nil) -> Double? {
+        let source = store ?? self.store
+        let rows = source.benchmark?.latest?.rows.filter { $0.profile == profile } ?? []
+        // Prefer the row that produced the best decode rate when both exist.
+        if let best = rows.max(by: { ($0.decodeTokensPerSec ?? -1) < ($1.decodeTokensPerSec ?? -1) }) {
+            return best.ttftMS
+        }
+        return rows.compactMap(\.ttftMS).min()
     }
 
     func runtimeName(_ status: ModelProfileStatus) -> String {
         status.runtimeLabel ?? status.runtime
     }
 
-    func rowSubtitle(_ status: ModelProfileStatus) -> String {
-        var parts = [runtimeName(status), ":\(status.port)"]
-        if let pending = store.pendingLabel(for: status.profile) {
-            parts.append(pending.lowercased() + "…")
-        } else if let tok = decodeTokensPerSecond(for: status.profile) {
-            parts.append(String(format: "%.1f t/s", tok))
-        } else if let rssMB = status.rssMB, isDisplayedRunning(status) {
-            parts.append(String(format: "%.1f GB", rssMB / 1024))
-        }
-        return parts.joined(separator: " · ")
-    }
-
     // MARK: - Hero section
 
     @ViewBuilder
     var heroSection: some View {
-        if let hero = heroProfile {
-            heroCard(hero)
-        } else if store.canReopenLastActive {
+        let localHeroes = localHeroProfiles
+        let remotes = remoteHeroSummaries
+        if !localHeroes.isEmpty || !remotes.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(localHeroes) { hero in
+                    heroCard(hero)
+                }
+                ForEach(remotes, id: \.rowID) { summary in
+                    remoteActiveCard(summary)
+                }
+            }
+        } else if store.canReopenLastActive, hub.displayedRunningProfiles == 0 {
+            // Never claim "nothing running" while a remote gateway has models up.
             reopenCard
         }
     }
 
-    func heroCard(_ profile: ModelProfileStatus) -> some View {
-        let pending = store.pendingLabel(for: profile.profile)
-        let label = pending ?? (profile.ready ? "ACTIVE" : "STARTING")
-        let isBusy = store.isBusy(profile: profile.profile)
+    /// Every remote running/busy profile matching the filter, for ACTIVE ON … cards.
+    /// When This Mac already has local heroes, remotes still get their own cards.
+    struct RemoteHeroSummary: Identifiable {
+        var id: String { rowID }
+        let rowID: String
+        let gatewayID: String
+        let name: String
+        let profile: ModelProfileStatus
+    }
 
-        return VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(DashboardTheme.runningGreen)
-                            .frame(width: 6, height: 6)
-                            .shadow(color: DashboardTheme.runningGreen.opacity(0.6), radius: 3)
-                        Text(label)
-                            .font(.system(size: 10, weight: .semibold))
-                            .kerning(0.8)
-                            .foregroundStyle(accent)
-                    }
-                    Text(profile.displayName)
-                        .font(.system(size: 14, weight: .semibold))
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text("\(runtimeName(profile)) · \(profile.baseURL)")
-                        .font(.system(size: 10.5, design: .monospaced))
-                        .foregroundStyle(theme.sub)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .textSelection(.enabled)
-                }
-                Spacer(minLength: 0)
-                if let tok = decodeTokensPerSecond(for: profile.profile) {
-                    VStack(alignment: .trailing, spacing: 0) {
-                        Text(String(format: "%.1f", tok))
-                            .font(.system(size: 20, weight: .bold).monospacedDigit())
-                            .foregroundStyle(accent)
-                        Text("tok/s")
-                            .font(.system(size: 10))
-                            .foregroundStyle(theme.sub)
-                    }
-                }
-            }
-
-            HStack(spacing: 6) {
-                heroButton("■ Stop", strong: true, disabled: isBusy) {
-                    Task { await store.stop(profile.profile) }
-                }
-                heroButton("↻ Restart", disabled: isBusy) {
-                    Task { await store.restart(profile.profile) }
-                }
-                if features.supportsBenchmarks {
-                    heroButton("Benchmark", disabled: isBusy || store.isBenchmarkInFlight(for: profile.profile)) {
-                        setInspectorPanel(.benchmarks)
-                        Task { await store.quickBenchmark([profile.profile]) }
-                    }
-                }
+    var remoteHeroSummaries: [RemoteHeroSummary] {
+        var out: [RemoteHeroSummary] = []
+        for runtime in hub.enabledRemoteRuntimes {
+            for status in runtime.store.sortedStatuses {
+                let running = MenuBarContentView.isDisplayedRunning(status, in: runtime.store)
+                let busy = runtime.store.isBusy(profile: status.profile)
+                guard running || busy else { continue }
+                guard matchesFilter(status, in: runtime.store) else { continue }
+                out.append(
+                    RemoteHeroSummary(
+                        rowID: "\(runtime.id)::\(status.profile)",
+                        gatewayID: runtime.id,
+                        name: runtime.name,
+                        profile: status
+                    )
+                )
             }
         }
-        .padding(12)
-        .background(
-            LinearGradient(
-                colors: [accent.opacity(0.13), accent.opacity(0.05)],
-                startPoint: .top,
-                endPoint: .bottom
-            ),
-            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+        return out
+    }
+
+    /// First remote hero (compat for older helpers).
+    var remoteActiveSummary: RemoteHeroSummary? {
+        remoteHeroSummaries.first
+    }
+
+    /// Profile ids already featured as remote ACTIVE heroes, keyed by gateway.
+    var remoteHeroProfileIDsByGateway: [String: Set<String>] {
+        var map: [String: Set<String>] = [:]
+        for summary in remoteHeroSummaries {
+            map[summary.gatewayID, default: []].insert(summary.profile.profile)
+        }
+        return map
+    }
+
+    func matchesFilter(_ status: ModelProfileStatus, in store: SwitchboardStore) -> Bool {
+        DashboardFilterPreferences.matches(
+            status,
+            filterID: profileFilter,
+            isDisplayedRunning: MenuBarContentView.isDisplayedRunning(status, in: store),
+            isBusy: store.isBusy(profile: status.profile)
         )
-        .overlay {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(accent.opacity(0.25), lineWidth: 1)
-        }
-        .padding(EdgeInsets(top: 8, leading: 10, bottom: 0, trailing: 10))
+    }
+
+    private func remoteActiveCard(_ summary: RemoteHeroSummary) -> some View {
+        let runtime = hub.enabledRemoteRuntimes.first { $0.id == summary.gatewayID }
+        let remoteStore = runtime?.store ?? store
+        let hostMetrics = runtime.map { hostMetricsMonitor.entry(forGatewayID: $0.id).metrics } ?? nil
+        return ActiveProfileHeroView(
+            profile: summary.profile,
+            store: remoteStore,
+            context: .remote(gatewayName: summary.name),
+            hostMetrics: hostMetrics,
+            decodeTokensPerSecond: decodeTokensPerSecond(for: summary.profile.profile, in: remoteStore),
+            ttftMilliseconds: ttftMilliseconds(for: summary.profile.profile, in: remoteStore),
+            reachableEndpointURL: runtime?.reachableEndpointURL(for: summary.profile),
+            onOpenBenchmarks: { setInspectorPanel(.benchmarks) },
+            theme: theme,
+            accent: accent
+        )
+    }
+
+    func heroCard(_ profile: ModelProfileStatus) -> some View {
+        ActiveProfileHeroView(
+            profile: profile,
+            store: store,
+            context: .local,
+            decodeTokensPerSecond: decodeTokensPerSecond(for: profile.profile),
+            ttftMilliseconds: ttftMilliseconds(for: profile.profile),
+            onOpenBenchmarks: { setInspectorPanel(.benchmarks) },
+            theme: theme,
+            accent: accent
+        )
     }
 
     var reopenCard: some View {
@@ -165,8 +184,8 @@ extension MenuBarContentView {
                 .kerning(0.8)
                 .foregroundStyle(theme.faint)
             heroButton(
-                "↻ Reopen Last Active",
-                disabled: store.pendingGlobalActions.contains("reopen-last") || store.pendingGlobalActions.contains("stop-all")
+                "Reopen Last Active",
+                disabled: store.pendingGlobalActions.contains(.reopenLastActive) || store.pendingGlobalActions.contains(.stopAll)
             ) {
                 Task { await store.reopenLastActive() }
             }
@@ -195,152 +214,121 @@ extension MenuBarContentView {
                 .foregroundStyle(strong ? theme.btnStrongFg : theme.btnFg)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(QuietCraftPressStyle())
         .disabled(disabled)
         .opacity(disabled ? 0.5 : 1)
     }
 
     // MARK: - Model list
 
-    var modelListSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            DashboardSectionLabel(
-                text: heroProfile != nil ? "STANDBY · \(standbyProfiles.count)" : "MODELS · \(standbyProfiles.count)",
-                theme: theme
-            )
-            .padding(EdgeInsets(top: 6, leading: 4, bottom: 4, trailing: 4))
-
-            if standbyProfiles.isEmpty {
-                Text(store.sortedStatuses.isEmpty
-                    ? "No model profiles reported yet. Check the controller connection in Settings."
-                    : "No models match this filter.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(theme.sub)
-                    .padding(EdgeInsets(top: 2, leading: 4, bottom: 8, trailing: 4))
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
-                ForEach(standbyProfiles) { profile in
-                    profileRow(profile)
-                }
-            }
+    /// Local standby/models block actually paints chrome (not EmptyView).
+    var showsLocalModelList: Bool {
+        if store.sortedStatuses.isEmpty && hub.hasRemoteGateways {
+            return store.lastError != nil
         }
-        .padding(EdgeInsets(top: 0, leading: 10, bottom: 6, trailing: 10))
+        let suppressLocalBlock = standbyProfiles.isEmpty && (
+            heroProfile != nil
+                || (hub.hasRemoteGateways && !store.sortedStatuses.isEmpty)
+        )
+        return !suppressLocalBlock
     }
 
-    func profileRow(_ profile: ModelProfileStatus) -> some View {
-        let pending = store.pendingLabel(for: profile.profile)
-        let isBusy = pending != nil
-
-        return HStack(spacing: 9) {
-            Circle()
-                .fill(rowDotColor(profile, pending: pending))
-                .frame(width: 7, height: 7)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(profile.displayName)
-                    .font(.system(size: 12.5, weight: .medium))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Text(rowSubtitle(profile))
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(theme.sub)
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            HStack(spacing: 4) {
-                rowPrimaryButton(profile, pending: pending, isBusy: isBusy)
-                rowMenu(profile, isBusy: isBusy)
+    /// True when hero, standby, or any remote section has a filter match.
+    var boardHasAnyFilterMatch: Bool {
+        if !localHeroProfiles.isEmpty || !standbyProfiles.isEmpty { return true }
+        if !remoteHeroSummaries.isEmpty { return true }
+        let excluded = remoteHeroProfileIDsByGateway
+        for runtime in hub.enabledRemoteRuntimes {
+            let excludeIDs = excluded[runtime.id] ?? []
+            if runtime.store.sortedStatuses.contains(where: { status in
+                if excludeIDs.contains(status.profile) { return false }
+                return matchesFilter(status, in: runtime.store)
+            }) {
+                return true
             }
         }
-        .padding(EdgeInsets(top: 7, leading: 6, bottom: 7, trailing: 6))
-        .contentShape(Rectangle())
-        .background(RowHoverHighlight(color: theme.hoverBg))
-    }
-
-    func rowDotColor(_ profile: ModelProfileStatus, pending: String?) -> Color {
-        switch store.profileBadgeState(for: profile, relativeTo: .now) {
-        case .pending:
-            return DashboardTheme.pendingOrange
-        case .running:
-            return DashboardTheme.runningGreen
-        case .stale, .notRunning:
-            break
-        }
-        return theme.dotOff
+        return false
     }
 
     @ViewBuilder
-    func rowPrimaryButton(_ profile: ModelProfileStatus, pending: String?, isBusy: Bool) -> some View {
-        if isBusy {
-            rowIcon {
-                ProgressView()
-                    .controlSize(.mini)
-            }
-        } else if isDisplayedRunning(profile) {
-            rowActionIcon("stop.fill", color: DashboardTheme.stopRed, label: "Stop \(profile.displayName)") {
-                Task { await store.stop(profile.profile) }
+    var modelListSection: some View {
+        // Multi-gateway: if This Mac has no profiles at all, skip the empty
+        // "MODELS · 0" block — remote sections already carry the list.
+        // Still show a compact offline notice when the local controller failed.
+        if store.sortedStatuses.isEmpty && hub.hasRemoteGateways {
+            if store.lastError != nil {
+                Text(localEmptyMessage)
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.sub)
+                    .padding(EdgeInsets(top: 8, leading: 14, bottom: 4, trailing: 14))
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if profileFilter != DashboardFilterChip.all.id, !boardHasAnyFilterMatch {
+                filterMissMessage
+            } else {
+                EmptyView()
             }
         } else {
-            rowActionIcon("play.fill", color: accent, label: "Activate \(profile.displayName)") {
-                Task { await store.activate(profile.profile) }
-            }
-        }
-    }
+            // Suppress zero-count standby chrome when the hero already owns the
+            // only match, or remotes carry the filtered board.
+            let suppressLocalBlock = !showsLocalModelList
+            if !suppressLocalBlock {
+                VStack(alignment: .leading, spacing: 0) {
+                    DashboardSectionLabel(
+                        text: heroProfile != nil ? "STANDBY · \(standbyProfiles.count)" : "MODELS · \(standbyProfiles.count)",
+                        theme: theme
+                    )
+                    .padding(EdgeInsets(top: 6, leading: 4, bottom: 4, trailing: 4))
 
-    func rowMenu(_ profile: ModelProfileStatus, isBusy: Bool) -> some View {
-        Menu {
-            Button("Start (keep others running)") {
-                Task { await store.start(profile.profile) }
-            }
-            .disabled(isBusy || profile.running)
-            Button("Restart") {
-                Task { await store.restart(profile.profile) }
-            }
-            .disabled(isBusy)
-            if features.supportsBenchmarks {
-                Button("Benchmark") {
-                    setInspectorPanel(.benchmarks)
-                    Task { await store.quickBenchmark([profile.profile]) }
+                    if standbyProfiles.isEmpty {
+                        Text(localEmptyMessage)
+                            .font(.system(size: 11))
+                            .foregroundStyle(theme.sub)
+                            .padding(EdgeInsets(top: 2, leading: 4, bottom: 8, trailing: 4))
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        ForEach(standbyProfiles) { profile in
+                            profileRow(profile)
+                        }
+                    }
                 }
-                .disabled(isBusy || store.isBenchmarkInFlight(for: profile.profile))
-            }
-            Divider()
-            Button("Copy Endpoint URL") {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(profile.baseURL, forType: .string)
-            }
-        } label: {
-            Image(systemName: "ellipsis")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(theme.sub)
-                .frame(width: 26, height: 26)
-                .background(theme.btnBg, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                .contentShape(Rectangle())
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .accessibilityLabel("More actions for \(profile.displayName)")
-    }
-
-    func rowActionIcon(_ systemName: String, color: Color, label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            rowIcon {
-                Image(systemName: systemName)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(color)
+                .padding(EdgeInsets(top: 0, leading: 10, bottom: 6, trailing: 10))
+            } else if profileFilter != DashboardFilterChip.all.id, !boardHasAnyFilterMatch {
+                filterMissMessage
             }
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(label)
     }
 
-    func rowIcon(@ViewBuilder content: () -> some View) -> some View {
-        content()
-            .frame(width: 26, height: 26)
-            .background(theme.btnBg, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-            .contentShape(Rectangle())
+    private var filterMissMessage: some View {
+        Text("No models match this filter.")
+            .font(.system(size: 11))
+            .foregroundStyle(theme.sub)
+            .padding(EdgeInsets(top: 8, leading: 14, bottom: 4, trailing: 14))
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+
+    var localEmptyMessage: String {
+        if !store.sortedStatuses.isEmpty {
+            return "No models match this filter."
+        }
+        if hub.hasRemoteGateways {
+            if store.lastError != nil {
+                return "This Mac controller is offline. Remote gateways below still work."
+            }
+            return "No local model profiles. Remote gateways are listed below."
+        }
+        return "No model profiles reported yet. Check the controller connection in Settings."
+    }
+
+    func profileRow(_ profile: ModelProfileStatus) -> some View {
+        ProfileListRowView(
+            profile: profile,
+            store: store,
+            showReachability: false,
+            onOpenBenchmarks: { setInspectorPanel(.benchmarks) },
+            theme: theme,
+            accent: accent
+        )
     }
 }
 

@@ -3,43 +3,43 @@ import ModelSwitchboardCore
 
 extension SwitchboardStore {
     func menuBarHelp(relativeTo now: Date) -> String {
+        let scope = gateway.isLocal ? "Local" : gateway.name
         switch statusFreshness(relativeTo: now) {
         case .cached:
-            return "Cached local model state may be stale. Refresh to verify live status."
+            return "Cached \(scope) model state may be stale. Refresh to verify live status."
         case .stale:
-            return "Local model status is stale. Refresh to verify live status."
+            return "\(scope) model status is stale. Refresh to verify live status."
         case .error where !statuses.isEmpty:
-            return "Local model status is unavailable. Refresh to verify live status."
+            return "\(scope) model status is unavailable. Refresh to verify live status."
         case .error, .fresh:
             // Display order matters here (matches the menu list); sortedStatuses is cached.
             let running = sortedStatuses.filter(\.running)
             guard !running.isEmpty else {
-                return "No local models running"
+                return gateway.isLocal
+                    ? "No local models running"
+                    : "No models running on \(gateway.name)"
             }
-            return "Running: " + running.map(\.displayName).joined(separator: ", ")
+            let prefix = gateway.isLocal ? "Running" : "\(gateway.name)"
+            return "\(prefix): " + running.map(\.displayName).joined(separator: ", ")
         }
     }
 
     func statusFreshness(relativeTo now: Date) -> StatusFreshness {
-        if let lastError, !lastError.isEmpty {
-            if !statuses.isEmpty {
-                if lastError.localizedCaseInsensitiveContains("cached") {
-                    return .cached
-                }
+        // Freshness is derived from the structured refresh state — never from
+        // error-message text. `.cached` is the failedShowingCached provenance,
+        // not a substring of the message copy.
+        switch refreshState {
+        case .failed, .blocked:
+            return statuses.isEmpty ? .error : .stale
+        case .failedShowingCached:
+            return statuses.isEmpty ? .error : .cached
+        case .idle, .refreshing, .refreshed:
+            guard let lastUpdated else { return .error }
+            if now.timeIntervalSince(lastUpdated) > Constants.statusStaleThresholdSeconds {
                 return .stale
             }
-            return .error
+            return .fresh
         }
-
-        guard let lastUpdated else {
-            return .error
-        }
-
-        if now.timeIntervalSince(lastUpdated) > Constants.statusStaleThresholdSeconds {
-            return .stale
-        }
-
-        return .fresh
     }
 
     func displayedRunningProfiles(relativeTo now: Date) -> Int {
@@ -65,20 +65,17 @@ extension SwitchboardStore {
     }
 
     func pendingLabel(for profile: String) -> String? {
-        pendingProfileActions[profile]
+        pendingProfileActions[profile]?.label
     }
 
     func isBenchmarkInFlight(for profile: String? = nil) -> Bool {
         if benchmark?.running == true { return true }
         if let profile {
-            return pendingGlobalActions.contains("bench-\(profile)") ||
-                pendingGlobalActions.contains("bench-selected") ||
-                pendingGlobalActions.contains("bench-all")
+            return pendingGlobalActions.contains(.benchmark(profile: profile))
+                || pendingGlobalActions.contains(.benchmarkSelected)
+                || pendingGlobalActions.contains(.benchmarkAll)
         }
 
-        if pendingGlobalActions.contains("bench-all") || pendingGlobalActions.contains("bench-selected") {
-            return true
-        }
-        return pendingGlobalActions.contains(where: { $0.hasPrefix("bench-") })
+        return pendingGlobalActions.contains(where: \.isBenchmark)
     }
 }
