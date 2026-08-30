@@ -5,6 +5,8 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 ### Fixed
 
+- Gateway agent updates can no longer hang forever on "Pushing agent…": each deploy step is killed at a 120s deadline with a pointed message, and Tailscale SSH re-auth prompts ("To authenticate, visit https://login.tailscale.com/…") are classified into remediation instead of stalling BatchMode ssh silently.
+- DIRECT gateways accept an explicit **Deploy host** (e.g. an ssh-config alias like `spark`) used by Update to push the agent — the MagicDNS URL host hangs when the remote sshd is Tailscale SSH; a Tailscale install converting an SSH gateway now carries the proven host over.
 - Unnamed port-claim folders (no MODEL*/REQUEST_MODEL/SERVER_MODEL_ID hint) are no longer stuck at "WARMING": their synthetic `port-N` identity is a placeholder, so readiness is proven by the endpoint serving any OpenAI `/v1/models` id, and the row adopts the served id as its visible name (previously "Port 8050" could never count toward the ready tally).
 - A `SERVER_MODEL_ID=` flag in a claim's `flags.env` now reaches the profile (it was silently dropped by the claim scanner's flag whitelist), and a bare `MODEL_FILE=*.gguf` claim reports the `llama.cpp` runtime family instead of Unknown.
 - Local `start-model-mac.sh` health-wait and `SERVER_ARGS_JSON` parse through the bundled Swift controller instead of `jq`, so LaunchAgent PATH (no Homebrew) can still start models.

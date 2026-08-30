@@ -482,6 +482,11 @@ actor SSHTunnelManager {
     static func classifyFailure(stderrLines: [String]) -> String {
         let stderr = stderrLines.joined(separator: "\n")
         let lowered = stderr.lowercased()
+        if lowered.contains("tailscale ssh requires")
+            || lowered.contains("to authenticate, visit https://login.tailscale.com")
+        {
+            return "Tailscale SSH needs re-auth for this host. Run `tailscale up` (or connect once) in Terminal, or set a Deploy host — an ssh-config alias like `spark` — on the gateway in Settings."
+        }
         if lowered.contains("permission denied") {
             return "SSH auth failed. BatchMode needs a passphrase-less key or one loaded in an agent — run ssh-add, or set an identity file/agent for this gateway."
         }

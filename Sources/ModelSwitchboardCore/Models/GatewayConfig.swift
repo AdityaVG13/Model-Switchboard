@@ -45,10 +45,15 @@ public struct GatewayConfig: Codable, Identifiable, Equatable, Sendable {
             /// deploy path pushes the agent with `--port` and must not
             /// re-derive it from the URL text.
             public var remotePort: Int
+            /// SSH destination used only to push agent updates (e.g. an
+            /// ssh-config alias). Defaults to the URL's host, which hangs
+            /// forever when that host requires Tailscale SSH re-auth.
+            public var deployHost: String?
 
-            public init(baseURL: String, remotePort: Int = 8877) {
+            public init(baseURL: String, remotePort: Int = 8877, deployHost: String? = nil) {
                 self.baseURL = baseURL
                 self.remotePort = remotePort
+                self.deployHost = deployHost
             }
         }
 
@@ -207,7 +212,8 @@ public struct GatewayConfig: Codable, Identifiable, Equatable, Sendable {
     /// are ignored at decode (dropped on the next save).
     private enum CodingKeys: String, CodingKey {
         case id, name, kind, enabled
-        case baseURL, sshUser, sshHost, sshPort, remotePort, identityFile, identityAgent
+        case baseURL, deployHost
+        case sshUser, sshHost, sshPort, remotePort, identityFile, identityAgent
     }
 
     public init(from decoder: Decoder) throws {
@@ -220,7 +226,8 @@ public struct GatewayConfig: Codable, Identifiable, Equatable, Sendable {
             // Legacy blobs may carry dead ssh keys; only the direct keys are read.
             connection = .direct(.init(
                 baseURL: try container.decode(String.self, forKey: .baseURL),
-                remotePort: try container.decode(Int.self, forKey: .remotePort)
+                remotePort: try container.decode(Int.self, forKey: .remotePort),
+                deployHost: Self.nonEmpty(try container.decodeIfPresent(String.self, forKey: .deployHost))
             ))
         case .ssh:
             connection = .ssh(.init(
@@ -244,6 +251,9 @@ public struct GatewayConfig: Codable, Identifiable, Equatable, Sendable {
         case .direct(let details):
             try container.encode(details.baseURL, forKey: .baseURL)
             try container.encode(details.remotePort, forKey: .remotePort)
+            if let deployHost = Self.nonEmpty(details.deployHost) {
+                try container.encode(deployHost, forKey: .deployHost)
+            }
         case .ssh(let details):
             try container.encode(details.sshUser, forKey: .sshUser)
             try container.encode(details.sshHost, forKey: .sshHost)

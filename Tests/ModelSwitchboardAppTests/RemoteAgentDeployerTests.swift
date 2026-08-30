@@ -45,7 +45,7 @@ private struct FakeSSHFixture {
     }
 }
 
-private func makeSources() throws -> (
+func makeSources() throws -> (
     agent: URL, core: URL, discovery: URL, installer: URL, base: URL
 ) {
     let base = FileManager.default.temporaryDirectory

@@ -26,19 +26,25 @@ actor RemoteAgentDeployer {
     private let coreSourceURL: URL
     private let discoverySourceURL: URL
     private let installerURL: URL
+    /// Hard cap per ssh invocation. ssh prompts that BatchMode cannot answer
+    /// (Tailscale SSH re-auth, host-key confirm, password) otherwise hang the
+    /// push forever and the UI sticks on "Pushing agent…".
+    nonisolated let sshDeadline: TimeInterval
 
     init(
         executableURL: URL = URL(fileURLWithPath: "/usr/bin/ssh"),
         agentSourceURL: URL? = nil,
         coreSourceURL: URL? = nil,
         discoverySourceURL: URL? = nil,
-        installerURL: URL? = nil
+        installerURL: URL? = nil,
+        sshDeadline: TimeInterval = 120
     ) {
         self.executableURL = executableURL
         self.agentSourceURL = agentSourceURL ?? Self.bundledResource("model_switchboard_agent.py")
         self.coreSourceURL = coreSourceURL ?? Self.bundledResource("agent_core.py")
         self.discoverySourceURL = discoverySourceURL ?? Self.bundledResource("discovery.py")
         self.installerURL = installerURL ?? Self.bundledResource("install-remote-agent.sh")
+        self.sshDeadline = sshDeadline
     }
 
     static func bundledResource(_ name: String) -> URL {
@@ -207,11 +213,28 @@ actor RemoteAgentDeployer {
             )
         }
 
+        // Deadline watchdog: interactive prompts ssh cannot answer in
+        // BatchMode (Tailscale SSH re-auth, host-key confirm) would hang
+        // readDataToEndOfFile forever. SIGTERM the process at the deadline;
+        // the pipes then hit EOF and the failure path reports it.
+        let deadlineProcess = process
+        DispatchQueue.global().asyncAfter(deadline: .now() + sshDeadline) {
+            if deadlineProcess.isRunning {
+                deadlineProcess.terminate()
+            }
+        }
+
         let stdout = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
         let stderr = stderrPipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
 
         guard process.terminationStatus == 0 else {
+            if process.terminationReason == .uncaughtSignal, process.terminationStatus == Self.sigtermStatus {
+                throw DeployError.sshFailed(
+                    step: step,
+                    message: "SSH did not finish within \(Int(sshDeadline))s — the host is waiting on an interactive prompt (e.g. Tailscale SSH re-auth or a password). Connect once from Terminal, or set a Deploy host (ssh alias) in Settings."
+                )
+            }
             let stderrLines = String(decoding: stderr, as: UTF8.self)
                 .split(whereSeparator: \.isNewline)
                 .map(String.init)
@@ -221,4 +244,7 @@ actor RemoteAgentDeployer {
         }
         return String(decoding: stdout, as: UTF8.self)
     }
+
+    /// exit status 128+15 as reported for a SIGTERM-terminated child.
+    private static let sigtermStatus = 15
 }

@@ -257,3 +257,20 @@ import Testing
     #expect(ssh.direct == nil)
     #expect(ssh.ssh != nil)
 }
+
+@Test func directDeployHostRoundTripsAndLegacyDecodes() throws {
+    var config = GatewayConfig.direct(name: "Spark", baseURL: "http://dgx-spark.tail1234.ts.net:8877")
+    if case .direct(var payload) = config.connection {
+        payload.deployHost = "spark"
+        config.connection = .direct(payload)
+    }
+    let data = try JSONEncoder().encode([config])
+    let decoded = try JSONDecoder().decode([GatewayConfig].self, from: data)
+    #expect(decoded.first?.direct?.deployHost == "spark")
+
+    // A blob saved before deployHost existed must still decode (nil).
+    let legacyJSON = #"[{"id":"g1","name":"Spark","kind":"direct","enabled":true,"baseURL":"http://dgx-spark.tail1234.ts.net:8877","remotePort":8877}]"#
+    let legacy = try JSONDecoder().decode([GatewayConfig].self, from: Data(legacyJSON.utf8))
+    #expect(legacy.first?.direct?.deployHost == nil)
+    #expect(legacy.first?.direct?.baseURL == "http://dgx-spark.tail1234.ts.net:8877")
+}

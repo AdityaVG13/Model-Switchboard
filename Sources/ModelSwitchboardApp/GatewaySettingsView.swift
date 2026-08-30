@@ -285,6 +285,11 @@ struct GatewaySettingsSection: View {
                     .font(.system(size: 10))
                     .foregroundStyle(theme.sub)
                     .fixedSize(horizontal: false, vertical: true)
+                field("Deploy host (optional)", text: optionalText(directOptionalTextBinding(binding, \.deployHost)), prompt: "ssh alias, e.g. spark", monospaced: true)
+                Text("Used only by Update to push the agent over SSH. Defaults to the URL host — which hangs when that host needs Tailscale SSH re-auth. An ssh-config alias (like `spark`) avoids it.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(theme.sub)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             deployStatusText
@@ -570,6 +575,26 @@ struct GatewaySettingsSection: View {
         )
     }
 
+    private func directOptionalTextBinding(
+        _ editing: Binding<GatewayConfig>,
+        _ keyPath: WritableKeyPath<GatewayConfig.Connection.Direct, String?>
+    ) -> Binding<String?> {
+        Binding(
+            get: {
+                if case .direct(let direct) = editing.wrappedValue.connection { return direct[keyPath: keyPath] }
+                return nil
+            },
+            set: { newValue in
+                var value = editing.wrappedValue
+                if case .direct(var direct) = value.connection {
+                    direct[keyPath: keyPath] = newValue
+                    value.connection = .direct(direct)
+                    editing.wrappedValue = value
+                }
+            }
+        )
+    }
+
     // MARK: - Agent deployment
 
     @ViewBuilder
@@ -699,6 +724,14 @@ struct GatewaySettingsSection: View {
                     direct.id = config.id
                     if !config.name.trimmingCharacters(in: .whitespaces).isEmpty {
                         direct.name = config.name
+                    }
+                    // An SSH gateway's host is a proven-deployable destination;
+                    // carry it over so Update keeps working after conversion.
+                    if let deployHost = config.ssh?.sshHost.trimmingCharacters(in: .whitespacesAndNewlines),
+                       !deployHost.isEmpty,
+                       case .direct(var payload) = direct.connection {
+                        payload.deployHost = deployHost
+                        direct.connection = .direct(payload)
                     }
                     draft = direct
                     if let token = result.authToken, !token.isEmpty {

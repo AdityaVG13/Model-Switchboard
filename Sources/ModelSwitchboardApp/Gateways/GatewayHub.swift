@@ -490,8 +490,9 @@ final class GatewayHub {
     }
 
     /// SSH target for pushing the bundled agent. SSH gateways deploy as-is;
-    /// for DIRECT gateways the SSH host falls back to the URL hostname so
-    /// operators can force-update without re-entering the MagicDNS name.
+    /// for DIRECT gateways the explicit Deploy host (an ssh-config alias)
+    /// wins, then the URL hostname — which hangs forever on hosts that
+    /// require Tailscale SSH re-auth.
     /// Returns `Connection.SSH` rather than minting a fake SSH-kind gateway.
     static func agentDeployTarget(for config: GatewayConfig) -> GatewayConfig.Connection.SSH? {
         switch config.connection {
@@ -502,10 +503,12 @@ final class GatewayHub {
             guard !ssh.hasUnsafeDestination else { return nil }
             return ssh
         case .direct(let direct):
-            guard let host = URL(string: direct.baseURL)?.host?
-                .trimmingCharacters(in: .whitespacesAndNewlines),
-                !host.isEmpty
-            else { return nil }
+            let explicit = direct.deployHost?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let host = !explicit.isEmpty
+                ? explicit
+                : URL(string: direct.baseURL)?.host?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !host.isEmpty else { return nil }
             let ssh = GatewayConfig.Connection.SSH(
                 sshHost: host,
                 remotePort: direct.remotePort
