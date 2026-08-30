@@ -504,12 +504,27 @@ final class GatewayHub {
             return ssh
         case .direct(let direct):
             let explicit = direct.deployHost?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let host = !explicit.isEmpty
-                ? explicit
-                : URL(string: direct.baseURL)?.host?
+            var user = ""
+            var host = ""
+            if !explicit.isEmpty {
+                // Accept `user@host` as well as a bare ssh-config alias —
+                // away-from-home, the tailnet IP destination is the one that
+                // works, and it is rarely an alias.
+                if let at = explicit.firstIndex(of: "@"), at != explicit.startIndex,
+                   explicit.index(after: at) < explicit.endIndex
+                {
+                    user = String(explicit[..<at])
+                    host = String(explicit[explicit.index(after: at)...])
+                } else {
+                    host = explicit
+                }
+            } else {
+                host = URL(string: direct.baseURL)?.host?
                     .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            }
             guard !host.isEmpty else { return nil }
             let ssh = GatewayConfig.Connection.SSH(
+                sshUser: user,
                 sshHost: host,
                 remotePort: direct.remotePort
             )

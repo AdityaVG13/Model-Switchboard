@@ -286,7 +286,7 @@ struct GatewaySettingsSection: View {
                     .foregroundStyle(theme.sub)
                     .fixedSize(horizontal: false, vertical: true)
                 field("Deploy host (optional)", text: optionalText(directOptionalTextBinding(binding, \.deployHost)), prompt: "ssh alias, e.g. spark", monospaced: true)
-                Text("Used only by Update to push the agent over SSH. Defaults to the URL host — which hangs when that host needs Tailscale SSH re-auth. An ssh-config alias (like `spark`) avoids it.")
+                Text("Used only by Update to push the agent over SSH. Defaults to the URL host — which hangs when that host needs Tailscale SSH re-auth. Use an ssh-config alias (like `spark`) or a destination that works over the tailnet, e.g. `aditya@100.122.96.76`.")
                     .font(.system(size: 10))
                     .foregroundStyle(theme.sub)
                     .fixedSize(horizontal: false, vertical: true)
