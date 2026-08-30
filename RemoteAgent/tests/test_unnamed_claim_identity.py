@@ -2,7 +2,7 @@
 
 A port-claim folder that carries no MODEL*/REQUEST_MODEL/SERVER_MODEL_ID hint
 has no operator-asserted identity. The synthetic "port-N" name is a placeholder,
-not an identity — so the health probe must accept any served OpenAI id (the
+not an identity - so the health probe must accept any served OpenAI id (the
 endpoint proves itself), and status must adopt the live served id as the row's
 name while the server is up. A claim WITH a hint keeps strict identity matching.
 """

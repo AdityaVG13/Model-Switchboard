@@ -69,7 +69,7 @@ MODEL_SERVER_COMMAND_MARKERS = (
 # Subprocess / engine workers that match MODEL_SERVER_COMMAND_MARKERS (e.g. the
 # substring "vllm") but are not user-facing OpenAI HTTP endpoints. Probing them
 # burns the discovery budget on connections that hang until timeout and makes
-# /api/status take tens of seconds — longer than the Mac client's request
+# /api/status take tens of seconds - longer than the Mac client's request
 # timeout, so the panel stuck on DIRECT · ERROR even while the agent was up.
 MODEL_SERVER_INTERNAL_COMMAND_MARKERS = (
     "vllm::enginecore",
@@ -96,7 +96,7 @@ SHELL_DEFAULT_RE = re.compile(
 
 
 def _configured_scan_roots(agent_root: Path | None = None) -> list[Path]:
-    """Env + optional config.json scan_roots — never product-specific defaults."""
+    """Env + optional config.json scan_roots - never product-specific defaults."""
     roots: list[Path] = []
     raw = (os.environ.get(SCAN_ROOTS_ENV) or "").strip()
     if raw:
@@ -116,7 +116,7 @@ def _configured_scan_roots(agent_root: Path | None = None) -> list[Path]:
 
 
 def parse_loose_env_assignments(file: Path) -> dict[str, str]:
-    """Parse KEY=value including bash ${VAR:-default} defaults — no shell exec."""
+    """Parse KEY=value including bash ${VAR:-default} defaults - no shell exec."""
     try:
         content = file.read_text(encoding="utf-8", errors="ignore")
     except OSError:
@@ -147,7 +147,7 @@ def parse_loose_env_assignments(file: Path) -> dict[str, str]:
             # Unescape common shell sequences inside the default.
             rest = rest.replace("\\$", "$").replace("\\\"", '"').replace("\\'", "'")
         elif rest.startswith("$"):
-            # Unresolved reference with no default — skip.
+            # Unresolved reference with no default - skip.
             continue
         values[key] = rest
     return values
@@ -480,7 +480,7 @@ def _shell_tokens(command: str) -> list[str]:
 
 
 def infer_runtime_from_command(command: str | None) -> str:
-    """Best-effort runtime label from a live process — never invent a stack."""
+    """Best-effort runtime label from a live process - never invent a stack."""
     if not command:
         return "unknown"
     lowered = command.lower()
@@ -535,7 +535,7 @@ class ProbeOutcome:
     """Outcome of probing one endpoint (L25).
 
     Make-unrepresentable: `ready` and `openai_models` are DERIVED, never
-    stored — a probe can no longer claim ready while every check failed.
+    stored - a probe can no longer claim ready while every check failed.
     The wire-facing dict shape (port/host/ready/health_ok/openai_models/
     model_ids/base_url) is preserved via as_item_dict().
     """
@@ -652,8 +652,8 @@ def scan_port_claim_directories(
 ) -> list[dict[str, Any]]:
     """Find claimed-port folders under configured / hinted roots.
 
-    Convention only: a directory whose name is a TCP port (2–5 digits) and that
-    contains a launch/flags marker. Parent path is whatever the user chose —
+    Convention only: a directory whose name is a TCP port (2-5 digits) and that
+    contains a launch/flags marker. Parent path is whatever the user chose -
     no product-specific roots are assumed. Roots come from:
       • explicit `roots` argument
       • MODEL_SWITCHBOARD_SCAN_ROOTS / config.json scan_roots
@@ -943,7 +943,7 @@ def status_dict_from_discovery(
     pid = item.get("pid")
     if pid is None and listeners is not None:
         pid = listener_pid_from_inventory(port, listeners)
-    # Ownership only — ready listeners without an attributed pid stay
+    # Ownership only - ready listeners without an attributed pid stay
     # ready=true / running=false (same contract as profile status()).
     alive = bool(pid) and process_is_alive(pid)
 
@@ -952,7 +952,7 @@ def status_dict_from_discovery(
     name = profile_name or f"discovered-{port}"
     # Mirror profile status(): ready can be visible without claiming ownership.
     # Do not force running=True / pid attribution for unmatched ready listeners.
-    # (The stringly lifecycle "state" key was deleted from the wire contract —
+    # (The stringly lifecycle "state" key was deleted from the wire contract -
     # L22: running/ready booleans are the single encoding Swift decodes.)
 
     return {
@@ -976,7 +976,7 @@ def status_dict_from_discovery(
         "rss_mb": process_rss_mb(pid) if alive and pid else None,
         "vram_mb": process_vram_mb(pid) if alive and pid else None,
         "command": item.get("command") if alive else None,
-        # L09: no invented log path — None when the row has no launch claim.
+        # L09: no invented log path - None when the row has no launch claim.
         "log_path": item.get("log_path"),
         "source": source,
     }
@@ -1053,7 +1053,7 @@ def profile_from_claim(claim: dict[str, Any]) -> Profile:
     # the health probe accepts whatever OpenAI id the endpoint serves and
     # status can adopt the served id as the visible name while it is up.
     # SERVER_MODEL_ID derived from the request (or the placeholder itself)
-    # counts as "no hint" — only an explicit SERVER_MODEL_ID/REQUEST_MODEL/
+    # counts as "no hint" - only an explicit SERVER_MODEL_ID/REQUEST_MODEL/
     # MODEL* name does.
     if is_placeholder_model_name(request_s) and values.get("SERVER_MODEL_ID") in (None, "", request_s):
         values["HEALTHCHECK_ANY_ID"] = "1"

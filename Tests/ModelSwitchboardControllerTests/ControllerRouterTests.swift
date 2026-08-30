@@ -35,7 +35,7 @@ import Testing
     #expect(payload?["profiles_dir"] as? String == fixture.configuration.profilesDirectory.path)
     let cached = ControllerStatusCache.load(
       from: fixture.temporary.appendingPathComponent("controller-status.json"))
-    // L13: the cache is an envelope — statuses live under `payload`.
+    // L13: the cache is an envelope - statuses live under `payload`.
     #expect(cached?.payload.statuses.count == 1)
 
     let integrations = router.handle(.init(method: "GET", target: "/api/integrations"))

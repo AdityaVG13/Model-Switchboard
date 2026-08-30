@@ -243,7 +243,7 @@ struct RemoteHostsPanelView: View {
                                 status: status,
                                 metrics: metrics,
                                 isRunning: true
-                            ) ?? "— · :" + status.port)
+                            ) ?? "- · :" + status.port)
                                 .font(.system(size: 10.5, design: .monospaced))
                                 .foregroundStyle(theme.sub)
                         }

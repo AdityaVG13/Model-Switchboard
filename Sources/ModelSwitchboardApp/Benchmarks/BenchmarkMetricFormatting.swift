@@ -15,7 +15,7 @@ enum BenchmarkMetricFormatting {
     }
 
     static func formatted(_ value: Double?, digits: Int) -> String {
-        guard let value else { return "—" }
+        guard let value else { return "-" }
         return String(format: "%.\(digits)f", value)
     }
 

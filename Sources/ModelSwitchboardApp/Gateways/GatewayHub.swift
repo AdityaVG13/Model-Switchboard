@@ -66,7 +66,7 @@ final class GatewayRuntime: Identifiable {
             // is set. Rewriting that to the controller's LAN/tailnet host only
             // works when the model process itself is bound beyond loopback
             // (HOST=0.0.0.0 / a real interface). A default 127.0.0.1 bind stays
-            // remote-only — Copy Endpoint would otherwise hand out a dead URL.
+            // remote-only - Copy Endpoint would otherwise hand out a dead URL.
             guard !LoopbackHost.isLoopback(status.host) else { return nil }
             guard
                 let controllerHost = URL(string: direct.baseURL)?.host,
@@ -133,7 +133,7 @@ final class GatewayHub {
     func upsertGateway(_ config: GatewayConfig, token: String) {
         let storage = tokenStorageFactory(config.id)
         let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Empty field means "leave the keychain token alone" — never wipe a
+        // Empty field means "leave the keychain token alone" - never wipe a
         // saved token just because SecureField was blank on Save.
         if !trimmed.isEmpty {
             storage.save(trimmed)
@@ -189,7 +189,7 @@ final class GatewayHub {
                     syncAuthToken(onto: runtime)
                     kept[runtime.id] = runtime
                 } else if Self.sameConnection(config, runtime.config) {
-                    // Display name (or other non-connection fields) only — keep tunnel/store.
+                    // Display name (or other non-connection fields) only - keep tunnel/store.
                     runtime.applyConfigPreservingConnection(config)
                     syncAuthToken(onto: runtime)
                     kept[runtime.id] = runtime
@@ -491,7 +491,7 @@ final class GatewayHub {
 
     /// SSH target for pushing the bundled agent. SSH gateways deploy as-is;
     /// for DIRECT gateways the explicit Deploy host (an ssh-config alias)
-    /// wins, then the URL hostname — which hangs forever on hosts that
+    /// wins, then the URL hostname - which hangs forever on hosts that
     /// require Tailscale SSH re-auth.
     /// Returns `Connection.SSH` rather than minting a fake SSH-kind gateway.
     static func agentDeployTarget(for config: GatewayConfig) -> GatewayConfig.Connection.SSH? {
@@ -507,7 +507,7 @@ final class GatewayHub {
             var user = ""
             var host = ""
             if !explicit.isEmpty {
-                // Accept `user@host` as well as a bare ssh-config alias —
+                // Accept `user@host` as well as a bare ssh-config alias -
                 // away-from-home, the tailnet IP destination is the one that
                 // works, and it is rarely an alias.
                 if let at = explicit.firstIndex(of: "@"), at != explicit.startIndex,
@@ -551,7 +551,7 @@ final class GatewayHub {
     /// bounds cover a cold `/api/status` while the agent inventories listeners
     /// and probes claimed ports. Values that are too tight (historically 5s/15s)
     /// surface as permanent `DIRECT · ERROR` / "Request timed out" even when the
-    /// agent is healthy — discovery of a busy vLLM host regularly exceeds 5s.
+    /// agent is healthy - discovery of a busy vLLM host regularly exceeds 5s.
     enum RemoteHTTPTimeouts {
         static let request: TimeInterval = 45
         static let resource: TimeInterval = 90

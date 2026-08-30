@@ -44,7 +44,7 @@ public enum DoctorSeverity: String, Equatable, Sendable {
     case unknown = "unknown"
 
     /// P0/P1 findings block health; everything else (including `.unknown`)
-    /// is non-blocking — matches the old string comparison semantics.
+    /// is non-blocking - matches the old string comparison semantics.
     public var isBlocker: Bool { self == .p0 || self == .p1 }
 
     public init(wireValue: String?) {
@@ -121,7 +121,7 @@ public struct DoctorReport: Codable, Equatable, Sendable {
     public let findings: [DoctorFinding]?
     public let nextSteps: [String]?
 
-    /// Derived from `findings` — a P0/P1 finding means unhealthy. This is the
+    /// Derived from `findings` - a P0/P1 finding means unhealthy. This is the
     /// single owner; `healthy` is never carried on the wire (L27), so the
     /// report cannot claim healthy while a blocker finding exists.
     public var healthy: Bool {

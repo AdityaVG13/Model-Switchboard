@@ -46,7 +46,7 @@ final class SwitchboardStore {
         /// hold stale data (freshness falls back to .stale/.error by statuses).
         case failed(message: String)
         /// A refresh failed and the board is showing the cached payload. The
-        /// "cached" provenance is this case — never re-derived from message text.
+        /// "cached" provenance is this case - never re-derived from message text.
         case failedShowingCached(message: String)
         /// Sticky gateway-level diagnostic (e.g. tunnel down). Refresh failures
         /// must not clobber it; only a success (or a discard) clears it.
@@ -239,7 +239,7 @@ final class SwitchboardStore {
     }
 
     /// Derived view convenience: the user-facing error message when the refresh
-    /// state holds one. Read-only projection of `refreshState` — not a slot.
+    /// state holds one. Read-only projection of `refreshState` - not a slot.
     var lastError: String? {
         refreshState.message
     }

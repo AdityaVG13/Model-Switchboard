@@ -66,20 +66,20 @@ import ModelSwitchboardTestSupport
     #expect(report.launchAgent.running)
     #expect(report.profilesDirectory == "/Users/example/.model-switchboard/model-profiles")
     #expect(report.profiles.count == 1)
-    // L12: the diagnostic is a role-flagged view over the shared snapshot —
+    // L12: the diagnostic is a role-flagged view over the shared snapshot -
     // status facts live in `status` exactly once.
     #expect(report.profiles[0].status.runtimeLabel == "MLX")
     #expect(report.profiles[0].status.runtimeTags?.contains("apple-silicon") == true)
     #expect(report.profiles[0].status.launchMode == "adapter")
     #expect(report.profiles[0].errors == ["missing MODEL_DIR or MODEL_REPO"])
     #expect(report.profiles[0].warnings == ["base_url is empty; endpoint health checks may fail"])
-    // L27: healthy is DERIVED from findings (one P1 blocker) — the wire key
+    // L27: healthy is DERIVED from findings (one P1 blocker) - the wire key
     // is gone from the fixture.
     #expect(report.healthy == false)
     #expect(report.findings?.count == 1)
     #expect(report.findings?.first?.id == "fm-profile-example-mlx-missing-model")
     #expect(report.findings?.first?.severity == .p1)
-    // L27: autoFixable derives from fixer presence — no fixer means not
+    // L27: autoFixable derives from fixer presence - no fixer means not
     // auto-fixable, and the pair cannot disagree.
     #expect(report.findings?.first?.autoFixable == false)
     #expect(report.nextSteps?.first?.contains("Fix missing model sources") == true)
@@ -116,7 +116,7 @@ import ModelSwitchboardTestSupport
     }
     """
     let status = try JSONDecoder().decode(ModelProfileStatus.self, from: Data(json.utf8))
-    // L09: parse-at-boundary — absent log_path is nil, not an invented "".
+    // L09: parse-at-boundary - absent log_path is nil, not an invented "".
     #expect(status.logPath == nil)
     #expect(status.profile == "port-1")
     #expect(status.origin == .unknown)

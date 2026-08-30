@@ -90,7 +90,7 @@ SERVER_MODEL_ID=qwen-local
 HEALTHCHECK_MODE=openai-models
 ```
 
-For [llama-swap](https://github.com/mostlygeek/llama-swap), point `BASE_URL` at the proxy listen address (often `http://127.0.0.1:8080/v1`). Clients keep one stable endpoint; llama-swap hot-swaps upstream servers from the requested `model` field. Model Switchboard still owns Activate/Stop for *other* managed profiles — treat llama-swap as the external front door when you want request-driven swapping instead of menu-bar exclusive activation.
+For [llama-swap](https://github.com/mostlygeek/llama-swap), point `BASE_URL` at the proxy listen address (often `http://127.0.0.1:8080/v1`). Clients keep one stable endpoint; llama-swap hot-swaps upstream servers from the requested `model` field. Model Switchboard still owns Activate/Stop for *other* managed profiles - treat llama-swap as the external front door when you want request-driven swapping instead of menu-bar exclusive activation.
 
 ```env
 DISPLAY_NAME="llama-swap"

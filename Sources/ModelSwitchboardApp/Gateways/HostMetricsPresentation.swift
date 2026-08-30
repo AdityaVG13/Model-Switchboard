@@ -2,7 +2,7 @@ import Foundation
 import ModelSwitchboardCore
 
 /// Formats `HostMetricsPayload` for operator-facing chrome (hero, header, rows).
-/// Never labels process RSS as VRAM — only nvidia-smi (or status `vram_mb`) counts.
+/// Never labels process RSS as VRAM - only nvidia-smi (or status `vram_mb`) counts.
 enum HostMetricsPresentation {
     static func primaryGPU(_ metrics: HostMetricsPayload?) -> HostGPUMetrics? {
         metrics?.gpus.first
@@ -34,7 +34,7 @@ enum HostMetricsPresentation {
             return String(format: "%.1f GB VRAM", vram / 1024)
         }
         if let rss = status.rssMB {
-            // Process resident set only — not GPU VRAM (often much smaller).
+            // Process resident set only - not GPU VRAM (often much smaller).
             return String(format: "%.1f GB RSS", rss / 1024)
         }
         return nil
@@ -89,7 +89,7 @@ enum HostMetricsPresentation {
     }
 
     static func percentLabel(_ value: Double?) -> String {
-        guard let value else { return "—" }
+        guard let value else { return "-" }
         return "\(Int(value.rounded()))%"
     }
 }

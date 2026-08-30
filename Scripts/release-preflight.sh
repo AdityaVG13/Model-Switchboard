@@ -84,7 +84,7 @@ pass "release workflow secret wiring"
 pass "privacy audit"
 
 if [[ "${MSW_PREFLIGHT_SKIP_TESTS:-0}" != "1" ]]; then
-  note "running swift test (native only — no Python test suites)"
+  note "running swift test (native only - no Python test suites)"
   swift test
   pass "swift test"
 

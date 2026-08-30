@@ -128,7 +128,7 @@ struct ModelSwitchboardApp: App {
             statusItemClickGate.attach(to: item)
         }
         .onChange(of: isMenuPresented) { _, presented in
-            // Paint host window as soon as presentation flips on — before content settles.
+            // Paint host window as soon as presentation flips on - before content settles.
             if presented, let window = MenuBarExtraWindowBackdrop.menuBarExtraWindow(for: statusItem) {
                 MenuBarExtraWindowBackdrop.apply(to: window)
             }

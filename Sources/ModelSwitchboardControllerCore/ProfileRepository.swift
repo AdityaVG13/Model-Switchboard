@@ -350,7 +350,7 @@ public enum RuntimeCatalog {
   }()
 
   public static func canonical(_ value: String?) -> String {
-    // L06: an absent runtime stays unknown — never silently "llama.cpp".
+    // L06: an absent runtime stays unknown - never silently "llama.cpp".
     let normalized = (value ?? "unknown").trimmingCharacters(in: .whitespacesAndNewlines)
       .lowercased().replacingOccurrences(of: "_", with: "-")
     return aliases[normalized] ?? normalized

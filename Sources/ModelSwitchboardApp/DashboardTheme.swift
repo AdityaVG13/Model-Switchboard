@@ -51,7 +51,7 @@ enum DashboardAppearanceKeys {
 // MARK: - Theme tokens (from the Switchboard Panel design)
 
 struct DashboardTheme {
-    /// Opaque panel fill — keep solid so Auto/Light/Dark swaps never desync.
+    /// Opaque panel fill - keep solid so Auto/Light/Dark swaps never desync.
     let panelBg: Color
     let cellBg: Color
     let hoverBg: Color

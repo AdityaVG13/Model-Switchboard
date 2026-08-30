@@ -135,11 +135,11 @@ Both editions share the controller contract, profile discovery, runtime tags, an
 | `Activate` / `Start` / `Stop` / `Restart` | ✓ | ✓ |
 | `Refresh` / `Stop All` | ✓ | ✓ |
 | `Launch At Login` + attached Settings / Help | ✓ | ✓ |
-| CPU / RAM / GPU utilization badges | — | ✓ |
-| `Benchmark All` + per-profile `Benchmark` | — | ✓ |
-| In-app Benchmarks panel + CSV export | — | ✓ |
-| `Reopen Last` | — | ✓ |
-| `Sync Droid` and future integration adapters | — | ✓ |
+| CPU / RAM / GPU utilization badges | - | ✓ |
+| `Benchmark All` + per-profile `Benchmark` | - | ✓ |
+| In-app Benchmarks panel + CSV export | - | ✓ |
+| `Reopen Last` | - | ✓ |
+| `Sync Droid` and future integration adapters | - | ✓ |
 
 </div>
 

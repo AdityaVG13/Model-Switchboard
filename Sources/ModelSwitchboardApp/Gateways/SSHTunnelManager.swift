@@ -5,7 +5,7 @@ import OSLog
 /// Maintains one SSH tunnel to a remote gateway's loopback controller, plus
 /// dynamic per-model port forwards over the same connection.
 ///
-/// Runs `ssh -N` with `BatchMode=yes` (key/agent auth only — never passwords),
+/// Runs `ssh -N` with `BatchMode=yes` (key/agent auth only - never passwords),
 /// `ExitOnForwardFailure=yes`, and a ControlMaster socket so model-endpoint
 /// forwards can be added and cancelled with `ssh -O` without reconnecting.
 /// Restarts with jittered exponential backoff while the gateway stays enabled.
@@ -88,7 +88,7 @@ actor SSHTunnelManager {
     private var consecutiveFailures = 0
     private var stderrTail: [String] = []
 
-    /// Per-instance id (not gateway id) — survives only for this manager object.
+    /// Per-instance id (not gateway id) - survives only for this manager object.
     nonisolated let instanceID: UUID
 
     init(
@@ -232,7 +232,7 @@ actor SSHTunnelManager {
     }
 
     /// The `-L` listener only opens after authentication succeeds. Require both
-    /// a local connect *and* a live ControlMaster — bare TCP can succeed against
+    /// a local connect *and* a live ControlMaster - bare TCP can succeed against
     /// a port squatter while ssh is still authenticating.
     private func waitUntilEstablished(process: Process) async -> Bool {
         let deadline = Date().addingTimeInterval(Self.establishTimeoutSeconds)
@@ -485,10 +485,10 @@ actor SSHTunnelManager {
         if lowered.contains("tailscale ssh requires")
             || lowered.contains("to authenticate, visit https://login.tailscale.com")
         {
-            return "Tailscale SSH needs re-auth for this host. Run `tailscale up` (or connect once) in Terminal, or set a Deploy host — an ssh-config alias like `spark` — on the gateway in Settings."
+            return "Tailscale SSH needs re-auth for this host. Run `tailscale up` (or connect once) in Terminal, or set a Deploy host - an ssh-config alias like `spark` - on the gateway in Settings."
         }
         if lowered.contains("permission denied") {
-            return "SSH auth failed. BatchMode needs a passphrase-less key or one loaded in an agent — run ssh-add, or set an identity file/agent for this gateway."
+            return "SSH auth failed. BatchMode needs a passphrase-less key or one loaded in an agent - run ssh-add, or set an identity file/agent for this gateway."
         }
         if lowered.contains("host key verification failed")
             || lowered.contains("remote host identification has changed") {

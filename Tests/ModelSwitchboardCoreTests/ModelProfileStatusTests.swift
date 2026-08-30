@@ -131,7 +131,7 @@ import ModelSwitchboardTestSupport
     #expect(claim.isLaunchFolderClaim)
 
     // L04/L05: origin is the single owner of claim-ness. Tags and name
-    // prefixes are descriptive data — a profile row with claimed tags is a
+    // prefixes are descriptive data - a profile row with claimed tags is a
     // flat config and hides when stale, exactly like any other.
     let tagged = ModelFixtures.profileStatus(
         profile: "port-8081",

@@ -47,7 +47,7 @@ final class StatusItemClickGate {
 
         let now = Date()
         if now.timeIntervalSince(lastAcceptedToggleAt) < minimumToggleInterval {
-            // Swallow — leaves the panel in its current open/closed state.
+            // Swallow - leaves the panel in its current open/closed state.
             return nil
         }
         lastAcceptedToggleAt = now

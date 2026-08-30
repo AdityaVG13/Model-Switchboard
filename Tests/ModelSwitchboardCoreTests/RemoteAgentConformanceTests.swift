@@ -126,7 +126,7 @@ struct RemoteAgentConformanceTests {
             return UInt16(bigEndian: assigned.sin_port)
         }
 
-        /// Native Swift OpenAI-compatible /v1/models stub — no Python test code.
+        /// Native Swift OpenAI-compatible /v1/models stub - no Python test code.
         static let stubServerSource = #"""
         #!/usr/bin/env swift
         import Foundation
@@ -204,7 +204,7 @@ struct RemoteAgentConformanceTests {
         #expect(stub.requestModel == "conformance-stub-model")
         #expect(stub.running == false)
         #expect(stub.origin == .profile)
-        // L03: Swift derives the census from statuses — the wire carries no
+        // L03: Swift derives the census from statuses - the wire carries no
         // profile_*_count fields (single owner: ProfileRuntimeCounts).
         let counts = ProfileRuntimeCounts(statuses: status.statuses)
         #expect(counts.total == status.statuses.count)
@@ -270,7 +270,7 @@ struct RemoteAgentConformanceTests {
 
     @Test func sharedPortProfilesConflictOnSwitch() async throws {
         let stubPort = AgentHarness.freePort()
-        // Two profiles claim the same port — switch must 409 before launch.
+        // Two profiles claim the same port - switch must 409 before launch.
         let shared = """
         DISPLAY_NAME="Conflict A"
         REQUEST_MODEL=conflict-a
@@ -323,12 +323,12 @@ struct RemoteAgentConformanceTests {
         ])
         defer { harness.shutdown() }
         let client = try harness.makeClient()
-        // L04: no server-side filter anymore — both rows ship on the wire.
+        // L04: no server-side filter anymore - both rows ship on the wire.
         try await Self.waitForAgent(client, expectedProfiles: 2)
 
         let status = try await client.fetchStatus()
         // L04: visibility is owned by Swift. The stale row ships on the wire
-        // and the board hides it — no second server-side filter.
+        // and the board hides it - no second server-side filter.
         let names = Set(status.statuses.map(\.profile))
         #expect(names.contains("conformance-stub"))
         #expect(names.contains("stale-missing"))
@@ -367,7 +367,7 @@ struct RemoteAgentConformanceTests {
 
     // MARK: - L30: contract key-set policing
 
-    /// The remote agent must emit exactly the contract key sets — no extras
+    /// The remote agent must emit exactly the contract key sets - no extras
     /// (ok / state / claim_path / health_ok / profile_*_count / discovery) and
     /// no missing keys. This is the anti-drift assertion for the wire contract
     /// shared by the Python remote agent and the Swift local controller.

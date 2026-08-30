@@ -15,7 +15,7 @@ import ModelSwitchboardCore
     }
     #expect(GatewayHub.agentDeployTarget(for: config)?.sshHost == "dgx-spark.tail1234.ts.net")
     #expect(GatewayHub.agentDeployTarget(for: withHost)?.sshHost == "spark")
-    // user@host form — away-from-home, the tailnet IP destination is what works.
+    // user@host form - away-from-home, the tailnet IP destination is what works.
     var withUserHost = config
     if case .direct(var payload) = withUserHost.connection {
         payload.deployHost = "aditya@100.122.96.76"

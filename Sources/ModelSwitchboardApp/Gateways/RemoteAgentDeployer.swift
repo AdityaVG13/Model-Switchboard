@@ -232,7 +232,7 @@ actor RemoteAgentDeployer {
             if process.terminationReason == .uncaughtSignal, process.terminationStatus == Self.sigtermStatus {
                 throw DeployError.sshFailed(
                     step: step,
-                    message: "SSH did not finish within \(Int(sshDeadline))s — the host is waiting on an interactive prompt (e.g. Tailscale SSH re-auth or a password). Connect once from Terminal, or set a Deploy host (ssh alias) in Settings."
+                    message: "SSH did not finish within \(Int(sshDeadline))s - the host is waiting on an interactive prompt (e.g. Tailscale SSH re-auth or a password). Connect once from Terminal, or set a Deploy host (ssh alias) in Settings."
                 )
             }
             let stderrLines = String(decoding: stderr, as: UTF8.self)

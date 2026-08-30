@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 /// Resolves the host `NSWindow` and paints a solid backdrop synchronously when
-/// the view attaches — before the next display refresh — so MenuBarExtra does
+/// the view attaches - before the next display refresh - so MenuBarExtra does
 /// not flash clear/black on open.
 struct WindowAccessor: NSViewRepresentable {
     let onResolve: (NSWindow?) -> Void

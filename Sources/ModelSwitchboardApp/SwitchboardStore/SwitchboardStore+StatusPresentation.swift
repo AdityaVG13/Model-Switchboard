@@ -25,7 +25,7 @@ extension SwitchboardStore {
     }
 
     func statusFreshness(relativeTo now: Date) -> StatusFreshness {
-        // Freshness is derived from the structured refresh state — never from
+        // Freshness is derived from the structured refresh state - never from
         // error-message text. `.cached` is the failedShowingCached provenance,
         // not a substring of the message copy.
         switch refreshState {

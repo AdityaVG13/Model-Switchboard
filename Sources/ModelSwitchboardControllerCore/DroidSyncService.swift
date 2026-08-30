@@ -38,7 +38,7 @@ struct DroidSyncService {
     var indexByName: [String: Int] = [:]
     for (index, model) in customModels.enumerated() {
       guard let name = model["displayName"] as? String else { continue }
-      // Keep the first occurrence — duplicate display names must not trap.
+      // Keep the first occurrence - duplicate display names must not trap.
       if indexByName[name] == nil {
         indexByName[name] = index
       }

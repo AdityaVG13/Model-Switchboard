@@ -116,7 +116,7 @@ class ProfileConflictError(AgentError):
 
     def __init__(self, message: str):
         super().__init__(message)
-        # Busy-port / ensure_unique detail is operator-actionable — surface it.
+        # Busy-port / ensure_unique detail is operator-actionable - surface it.
         self.public_message = message
 
 class OperationFailedError(AgentError):
@@ -191,7 +191,7 @@ RUNTIME_SPECS: dict[str, tuple[str, list[str], str]] = {
 }
 
 def canonical_runtime(value: str | None) -> str:
-    # L06: an absent runtime stays unknown — never silently "llama.cpp".
+    # L06: an absent runtime stays unknown - never silently "llama.cpp".
     normalized = (value or "unknown").strip().lower().replace("_", "-")
     return RUNTIME_ALIASES.get(normalized, normalized)
 
@@ -295,7 +295,7 @@ class Profile:
     values: dict[str, str]
     # L24: parsed tag list supplied at the claim boundary (profile_from_claim).
     # Env-file profiles leave this None; RUNTIME_TAGS/TAGS parse in
-    # runtime_tags below — the single comma-string parse site.
+    # runtime_tags below - the single comma-string parse site.
     tags: list[str] | None = None
 
     def __post_init__(self) -> None:
@@ -437,9 +437,9 @@ def resolve_model_artifact_fields(
     """Single owner of the MODEL_DIR / MODEL_PATH / MODEL_FILE precedence (L20).
 
     Documented precedence:
-      1. MODEL_DIR  — weights/checkpoint directory (HF / vLLM style).
-      2. MODEL_PATH — explicit path, file or directory.
-      3. MODEL_FILE — single-file weights; a RELATIVE MODEL_FILE resolves
+      1. MODEL_DIR  - weights/checkpoint directory (HF / vLLM style).
+      2. MODEL_PATH - explicit path, file or directory.
+      3. MODEL_FILE - single-file weights; a RELATIVE MODEL_FILE resolves
          against MODEL_DIR when the directory looks like a local path.
     Non-local values (HF ids, URLs) are kept as data but never validated
     against disk. Callers use this one function instead of re-deriving the

@@ -51,7 +51,7 @@ public final class KeychainTokenStorage: Sendable {
             return
         }
         let data = Data(trimmed.utf8)
-        // Always write the non-group item — this is what survives rebuilds of
+        // Always write the non-group item - this is what survives rebuilds of
         // ad-hoc signed debug installs without re-authorizing keychain access.
         _ = save(data: data, accessGroup: nil)
         // Best-effort App Group copy for the widget / shared suite.

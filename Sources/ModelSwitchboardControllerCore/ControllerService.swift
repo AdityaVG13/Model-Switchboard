@@ -159,7 +159,7 @@ public final class ControllerService: @unchecked Sendable {
         if owned == pid, ProcessRunner.processIsAlive(owned),
           commandLooksLikeModelServer(processCommand(pid))
         {
-          // Keep primary — leftover supervised model server.
+          // Keep primary - leftover supervised model server.
         } else {
           primaryPID = nil
         }

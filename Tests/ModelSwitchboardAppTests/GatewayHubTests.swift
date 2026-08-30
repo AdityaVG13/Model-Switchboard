@@ -279,7 +279,7 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
         #expect(hub.renameGateway(id: config.id, to: "Lab Box"))
         let after = try #require(hub.remoteRuntimes.first)
         #expect(after.name == "Lab Box")
-        // Same runtime instance — connection was not torn down for a label change.
+        // Same runtime instance - connection was not torn down for a label change.
         #expect(after === before)
         #expect(after.store.controllerBaseURL == "http://10.0.0.9:8877")
         #expect(GatewayConfigStore.load(from: defaults).first?.name == "Lab Box")
@@ -453,7 +453,7 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
 
 @Test func remoteGatewayHTTPTimeoutsLeaveRoomForDiscovery() {
     // Cold /api/status on a busy vLLM host previously took ~15s while the Mac
-    // client aborted at 5s request / 15s resource — permanent DIRECT · ERROR.
+    // client aborted at 5s request / 15s resource - permanent DIRECT · ERROR.
     #expect(GatewayHub.RemoteHTTPTimeouts.request >= 30)
     #expect(GatewayHub.RemoteHTTPTimeouts.resource >= GatewayHub.RemoteHTTPTimeouts.request)
 }

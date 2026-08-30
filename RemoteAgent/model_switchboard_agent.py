@@ -152,10 +152,10 @@ def is_tailscale_ip(address: str) -> bool:
 
 @dataclass(frozen=True)
 class TailscalePresence:
-    """This host's tailnet presence — present / absent / failed (L19).
+    """This host's tailnet presence - present / absent / failed (L19).
 
     Smart-constructor union: the two-optional tuple is gone. A failed or
-    absent presence carries no ipv4, and a present presence carries no error —
+    absent presence carries no ipv4, and a present presence carries no error -
     the illegal combinations are unrepresentable.
     """
 
@@ -195,7 +195,7 @@ def tailscale_status() -> TailscalePresence:
     """Tailnet presence for this host (CLI-backed, no interface sniffing).
 
     Requires the Tailscale CLI (`tailscale status` or `tailscale ip`). Interface
-    scans for any CGNAT address are intentionally not used for bind decisions —
+    scans for any CGNAT address are intentionally not used for bind decisions -
     that could treat a non-tailnet 100.64/10 address as "tailnet-only" and skip
     the normal non-loopback auth rules.
     """
@@ -514,7 +514,7 @@ def resolve_profiles_directory(
     return preferred
 
 def _peek_profile_keys(path: Path) -> set[str]:
-    """Best-effort key set for scan scoring — never executes file contents."""
+    """Best-effort key set for scan scoring - never executes file contents."""
     try:
         text = path.read_text(encoding="utf-8", errors="ignore")
     except OSError:
@@ -568,7 +568,7 @@ def scan_profile_directories(
 ) -> list[dict[str, Any]]:
     """Find directories that already hold Switchboard-shaped launch .env/.json files.
 
-    Does not invent flags — only groups files an AI or user already wrote
+    Does not invent flags - only groups files an AI or user already wrote
     (often `model.env`, `qwen.env`, …) by parent folder.
     """
     home = (home or Path.home()).expanduser()
@@ -644,7 +644,7 @@ def prompt_profiles_directory(
     reader = input_func or input
     candidates = scan_profile_directories(home)
     print("Model profiles are plain .env/.json launch files (ports, START_COMMAND, …).")
-    print("Switchboard only needs the folder that already holds them — it will not")
+    print("Switchboard only needs the folder that already holds them - it will not")
     print("author flags for every runtime fork.")
     print()
     print(f"Current profiles folder: {current}")
@@ -757,10 +757,10 @@ def openai_model_id_matches(expected: str | None, ids: list[str], *aliases: str)
     """True when *expected* matches a /v1/models id loosely.
 
     Explicit matching rule (tested): an exact id match, or basename equality
-    in either direction — llama.cpp often returns a full weights path as `id`
+    in either direction - llama.cpp often returns a full weights path as `id`
     while claim profiles store SERVER_MODEL_ID as the basename (or the
     reverse). Explicit aliases (e.g. REQUEST_MODEL) join the candidate set.
-    L23: None (no expected id) NEVER matches — identity must be verifiable.
+    L23: None (no expected id) NEVER matches - identity must be verifiable.
     Pass ANY_MODEL_ID to accept any non-empty id list explicitly.
     """
     if expected is ANY_MODEL_ID or expected == ANY_MODEL_ID:
@@ -791,7 +791,7 @@ class AgentService:
         self._watchdog_suppressed_until = 0.0
         self._watchdog_timer: threading.Timer | None = None
         # Profiles started by *this* agent process. Crash-recovery restarts only
-        # these — an agent reboot / login never spontaneously loads a model.
+        # these - an agent reboot / login never spontaneously loads a model.
         self._supervised: set[str] = set()
         self._benchmark_lock = threading.Lock()
         self._benchmark_running = False
@@ -885,10 +885,10 @@ class AgentService:
 
         claims: list[dict[str, Any]] = []
         listening: list[dict[str, Any]] = []
-        # Full discovery only when listing everything — targeted stays profile-only.
+        # Full discovery only when listing everything - targeted stays profile-only.
         if selected is None:
             # Visibility is owned by Swift (isBoardVisible on the wire facts):
-            # stale flat configs are shipped and hidden client-side (L04) —
+            # stale flat configs are shipped and hidden client-side (L04) -
             # no second claim-visibility filter here.
             # Reuse the same listeners snapshot (no second inventory).
             start_cmds = [
@@ -935,7 +935,7 @@ class AgentService:
                             "server_ids": live.get("server_ids"),
                             "base_url": live.get("base_url"),
                             # L07: prefer-known merge routes through the one
-                            # helper — live discovery inference wins, the claim
+                            # helper - live discovery inference wins, the claim
                             # flag hint backs it up, "unknown" is the fallback.
                             "runtime": first_known(
                                 live.get("runtime"), claim.get("runtime_hint")
@@ -979,7 +979,7 @@ class AgentService:
 
         benchmark = self.benchmark_status()
         # Ready N/M is derived by Swift (ProfileRuntimeCounts) from board-visible
-        # statuses — the single owner. The wire no longer carries counts.
+        # statuses - the single owner. The wire no longer carries counts.
         return {
             "statuses": statuses,
             "benchmark": benchmark,
@@ -1446,7 +1446,7 @@ class AgentService:
                 listener = listener_pid_from_inventory(profile.endpoint_port, listeners)
             else:
                 listener = listener_pid(profile.endpoint_port)
-            # Ownership only — never adopt a listener just because health
+            # Ownership only - never adopt a listener just because health
             # succeeded (that would make stop() SIGKILL foreign processes via
             # primary_pid without _process_matches). Mirrors Swift ControllerService.
             if listener is not None and self._process_matches(listener, profile):
@@ -1469,7 +1469,7 @@ class AgentService:
             alive = False
         ready_flag = bool(ready and (alive or listening))
         missing = missing_local_model_artifacts(profile.values)
-        # L08: `launchable` was deleted from the wire — Swift derives it from
+        # L08: `launchable` was deleted from the wire - Swift derives it from
         # missing_artifacts + running + ready (provably the same formula).
         command = process_command(pid) if ((alive or zombie) and pid) else None
         # L21: no interior runtime re-derivation. `runtime` / `label` / `tags` /
@@ -1516,7 +1516,7 @@ class AgentService:
                 raise UnsupportedError(
                     f"{canonical}: discovered endpoint has no launch claim; cannot start from Switchboard"
                 )
-            # Idempotent only when *this* agent owns a live pid file — not when a
+            # Idempotent only when *this* agent owns a live pid file - not when a
             # foreign listener happens to answer health on the profile port.
             owned_pid = self._read_pid(canonical)
             if owned_pid and process_is_alive(owned_pid):
@@ -1579,7 +1579,7 @@ class AgentService:
             clear_listening_tcp_cache()
 
     def _reap_unresolved_pid(self, name: str, force: bool = False) -> None:
-        """Pid-file leftover after resolve failed — kill only if it still looks like us."""
+        """Pid-file leftover after resolve failed - kill only if it still looks like us."""
         orphan = self._read_pid(name)
         if (
             orphan
@@ -1603,7 +1603,7 @@ class AgentService:
             primary_pid = current.get("pid")
             # Pid-file children we started this session are trusted even without
             # cmdline match. Leftover pid files from prior boots must look like
-            # a model server — never killpg a reused unrelated PID.
+            # a model server - never killpg a reused unrelated PID.
             if primary_pid and not self._process_matches(primary_pid, profile):
                 owned = self._read_pid(canonical)
                 if (
@@ -1685,7 +1685,7 @@ class AgentService:
             loaded[profile.name] = profile
             self.profiles.ensure_unique(profile.name, "activate", loaded)
             # Exclusive switch only stops managed profiles / session-supervised
-            # claims — never discovered listeners. Do not assemble the full
+            # claims - never discovered listeners. Do not assemble the full
             # status board (claim walk + live HTTP probes) just to find them.
             managed_names = set(loaded.keys()) | set(self._supervised)
             for other in sorted(managed_names - {canonical}):
@@ -1824,7 +1824,7 @@ class AgentService:
             return None
 
     def _process_matches(self, pid: int, profile: Profile) -> bool:
-        # Never treat the agent process as a model server — profile PORT equal
+        # Never treat the agent process as a model server - profile PORT equal
         # to the agent bind would otherwise match `serve --port N` and stop
         # would SIGKILL the agent itself.
         if pid == os.getpid():
@@ -1841,7 +1841,7 @@ class AgentService:
         for marker in markers:
             if marker and len(marker) >= 4 and marker.lower() in command:
                 return True
-        # Port tokens common to llama-server / vllm argv — whole tokens only so
+        # Port tokens common to llama-server / vllm argv - whole tokens only so
         # PORT=80 does not match --port 8080 / http://host:8080.
         port = profile.endpoint_port
         if port:
@@ -1921,7 +1921,7 @@ class AgentService:
                 terminate_process_tree(primary_pid, force=force)
         # Always re-check the listen port: vLLM may leave EngineCore on the
         # port under a different pid after the launcher shell exits.
-        # `force` only strengthens the signal — never skips ownership matching
+        # `force` only strengthens the signal - never skips ownership matching
         # (Swift terminateProfileProcesses always requires processMatches).
         listener = listener_pid(profile.endpoint_port)
         if (
@@ -1956,7 +1956,7 @@ class AgentService:
             listener = listener_pid_from_inventory(profile.endpoint_port, listeners)
             if listener is None:
                 return True
-            # Port held by an unrelated process — not our problem for stop.
+            # Port held by an unrelated process - not our problem for stop.
             if listener != primary_pid and not self._process_matches(listener, profile):
                 return True
             if process_is_zombie(listener):
@@ -2308,7 +2308,7 @@ def build_configuration(args: argparse.Namespace) -> AgentConfiguration:
         presence = tailscale_status()
         if not presence.present:
             raise InvalidConfigurationError(
-                "--tailscale: no Tailscale address found — is tailscaled running?"
+                "--tailscale: no Tailscale address found - is tailscaled running?"
             )
         host = presence.ipv4 or host
         tailscale = True
@@ -2355,7 +2355,7 @@ def _run_link(args: argparse.Namespace, configuration: AgentConfiguration) -> in
         presence = tailscale_status()
         if not presence.present:
             raise InvalidConfigurationError(
-                "--tailscale: no Tailscale address found — is tailscaled running?"
+                "--tailscale: no Tailscale address found - is tailscaled running?"
             )
         direct_host = presence.dns_name or presence.ipv4
     info = build_link_code(configuration.port, direct_host=direct_host)
@@ -2461,7 +2461,7 @@ def main(argv: list[str] | None = None) -> int:
                     print()
                     print("Claimed port folders (numeric dir + launch/flags markers):")
                     for claim in claims:
-                        model = claim.get("model_hint") or "—"
+                        model = claim.get("model_hint") or "-"
                         print(
                             f"  :{claim['port']}  {claim['path']}  "
                             f"({claim.get('runtime_hint') or 'unknown'})  {model}"
@@ -2499,7 +2499,7 @@ def main(argv: list[str] | None = None) -> int:
                         identity = str(model["request_model"])
                     elif claimed and claimed.get("model_hint"):
                         identity = str(claimed["model_hint"])
-                    print(f"  :{port:<5}  {flag_s:<18}  {identity or cmd or '—'}")
+                    print(f"  :{port:<5}  {flag_s:<18}  {identity or cmd or '-'}")
             return 0
         if args.command in ("start", "stop", "restart"):
             if not args.profiles:

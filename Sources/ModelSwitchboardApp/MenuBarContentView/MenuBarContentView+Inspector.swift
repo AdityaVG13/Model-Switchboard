@@ -90,7 +90,7 @@ extension MenuBarContentView {
                 theme: theme,
                 accent: accent,
                 runBenchmark: {
-                    // Footer CTA is scoped to This Mac — remote suites are started
+                    // Footer CTA is scoped to This Mac - remote suites are started
                     // from each gateway's row/hero actions, not this inspector button.
                     Task { await store.quickBenchmark() }
                 }
@@ -130,7 +130,7 @@ extension MenuBarContentView {
         guard let hostWindow else { return }
         let currentPanel = panel ?? inspectorCoordinator.openPanel
         guard let currentPanel else {
-            // Never re-key the host window on hide — that re-opens/focuses the
+            // Never re-key the host window on hide - that re-opens/focuses the
             // menu bar dashboard when the user already clicked away.
             inspectorController.hide()
             return

@@ -273,7 +273,7 @@ struct GatewaySettingsSection: View {
                     prompt: "~/.ssh/id_ed25519",
                     monospaced: true
                 )
-                Text("Uses your SSH keys and agent (BatchMode) — passwords are never handled. Connect once from Terminal first so the host key is trusted.")
+                Text("Uses your SSH keys and agent (BatchMode) - passwords are never handled. Connect once from Terminal first so the host key is trusted.")
                     .font(.system(size: 10))
                     .foregroundStyle(theme.sub)
                     .fixedSize(horizontal: false, vertical: true)
@@ -286,7 +286,7 @@ struct GatewaySettingsSection: View {
                     .foregroundStyle(theme.sub)
                     .fixedSize(horizontal: false, vertical: true)
                 field("Deploy host (optional)", text: optionalText(directOptionalTextBinding(binding, \.deployHost)), prompt: "ssh alias, e.g. spark", monospaced: true)
-                Text("Used only by Update to push the agent over SSH. Defaults to the URL host — which hangs when that host needs Tailscale SSH re-auth. Use an ssh-config alias (like `spark`) or a destination that works over the tailnet, e.g. `aditya@100.122.96.76`.")
+                Text("Used only by Update to push the agent over SSH. Defaults to the URL host - which hangs when that host needs Tailscale SSH re-auth. Use an ssh-config alias (like `spark`) or a destination that works over the tailnet, e.g. `aditya@100.122.96.76`.")
                     .font(.system(size: 10))
                     .foregroundStyle(theme.sub)
                     .fixedSize(horizontal: false, vertical: true)
@@ -394,7 +394,7 @@ struct GatewaySettingsSection: View {
 
     private var tokenFieldPrompt: String {
         if draftIsNew || !hasStoredToken || !draftToken.isEmpty {
-            return "Paste token — stored in keychain"
+            return "Paste token - stored in keychain"
         }
         return "••••••••  leave blank to keep saved token"
     }
@@ -403,7 +403,7 @@ struct GatewaySettingsSection: View {
         if hasStoredToken, draftToken.isEmpty, !draftIsNew {
             return "A token is already saved in the keychain for this gateway. Leave blank to keep it, or paste a new one to replace it."
         }
-        return "Required for Tailscale/direct agents with auth. Saved once in the keychain — you should not need to re-paste after relaunch."
+        return "Required for Tailscale/direct agents with auth. Saved once in the keychain - you should not need to re-paste after relaunch."
     }
 
     private func save() {
@@ -456,10 +456,10 @@ struct GatewaySettingsSection: View {
                 validationMessage = "Controller URL must be an http(s) URL."
                 return
             }
-            // ATS allows .ts.net and RFC1918 local networking — not Tailscale
+            // ATS allows .ts.net and RFC1918 local networking - not Tailscale
             // CGNAT IPs. Prefer MagicDNS (or SSH) for cleartext agent HTTP.
             if scheme == "http", GatewayConfig.isTailscaleCGNATAddress(host) {
-                validationMessage = "Use the host's MagicDNS name (.ts.net) for Tailscale direct mode — raw 100.x addresses are blocked by App Transport Security."
+                validationMessage = "Use the host's MagicDNS name (.ts.net) for Tailscale direct mode - raw 100.x addresses are blocked by App Transport Security."
                 return
             }
             saved = GatewayConfig.direct(
@@ -474,7 +474,7 @@ struct GatewaySettingsSection: View {
         closeEditor()
     }
 
-    /// Switching the connection kind rebuilds the payload from scratch — the
+    /// Switching the connection kind rebuilds the payload from scratch - the
     /// other kind's fields cannot (and must not) carry over, so a gateway can
     /// never be saved with dead SSH/URL fields from a previous kind.
     private func switchKind(_ config: inout GatewayConfig, to kind: GatewayKind) {
@@ -742,7 +742,7 @@ struct GatewaySettingsSection: View {
                         : " Paste the bearer token from the host if auth is enabled."
                     let urlText = direct.direct?.baseURL ?? ""
                     deployState = .success(
-                        "Agent installed in Tailscale mode — gateway switched to direct URL \(urlText).\(tokenHint) Save to connect."
+                        "Agent installed in Tailscale mode - gateway switched to direct URL \(urlText).\(tokenHint) Save to connect."
                     )
                     return
                 }

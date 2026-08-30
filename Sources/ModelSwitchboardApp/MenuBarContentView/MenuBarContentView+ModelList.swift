@@ -253,7 +253,7 @@ extension MenuBarContentView {
     @ViewBuilder
     var modelListSection: some View {
         // Multi-gateway: if This Mac has no profiles at all, skip the empty
-        // "MODELS · 0" block — remote sections already carry the list.
+        // "MODELS · 0" block - remote sections already carry the list.
         // Still show a compact offline notice when the local controller failed.
         if store.sortedStatuses.isEmpty && hub.hasRemoteGateways {
             if store.lastError != nil {

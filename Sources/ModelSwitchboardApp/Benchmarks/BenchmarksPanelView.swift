@@ -332,7 +332,7 @@ struct BenchmarksPanelView: View {
 
     private func suiteLine(latest: BenchmarkLatestReport, best: BenchmarkLatestRow?, gatewayLabel: String?) -> String {
         let suite = BenchmarkMetricFormatting.suiteLabel(latest.suite).lowercased()
-        let runtime = best?.runtime ?? "—"
+        let runtime = best?.runtime ?? "-"
         if let gatewayLabel {
             return "suite " + suite + " · " + runtime + " · " + gatewayLabel
         }

@@ -116,7 +116,7 @@ struct MenuBarContentView: View {
         (DashboardAccent(rawValue: accentRaw) ?? .orange).color
     }
 
-    /// Always light or dark — never nil — so MenuBarExtra semantic colors match tokens.
+    /// Always light or dark - never nil - so MenuBarExtra semantic colors match tokens.
     var resolvedColorScheme: ColorScheme {
         themePreference.colorScheme ?? systemColorScheme
     }
@@ -207,7 +207,7 @@ struct MenuBarContentView: View {
             synchronizeInspectorWindow()
         }
         .animation(inspectorAnimation, value: inspectorCoordinator.openPanel)
-        // Scope snappy animations to pending action chrome only — do not animate
+        // Scope snappy animations to pending action chrome only - do not animate
         // full status list replacements (causes black flicker in MenuBarExtra).
         .animation(.snappy(duration: 0.18), value: store.pendingProfileActions)
         .animation(.snappy(duration: 0.18), value: store.pendingGlobalActions)

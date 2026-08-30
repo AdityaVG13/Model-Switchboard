@@ -36,9 +36,9 @@ public struct ModelProfileStatus: Codable, Identifiable, Equatable, Sendable {
     /// named so display code switches once instead of re-deriving ad hoc.
     public enum Lifecycle: Equatable, Sendable {
         case stopped        // !running && !ready
-        case starting       // running && !ready  — owned process, endpoint pending
+        case starting       // running && !ready  - owned process, endpoint pending
         case running        // running && ready
-        case readyUnowned   // !running && ready  — foreign listener answers health
+        case readyUnowned   // !running && ready  - foreign listener answers health
 
         public var isActive: Bool { self != .stopped }
         public var isRunning: Bool { self == .running }
@@ -74,7 +74,7 @@ public struct ModelProfileStatus: Codable, Identifiable, Equatable, Sendable {
 
     /// Launchable when the agent found all model artifacts (missing_artifacts
     /// empty or absent) or the endpoint is live. Derived here from the wire
-    /// facts — the Python agent's `launchable` field was deleted (L08): the
+    /// facts - the Python agent's `launchable` field was deleted (L08): the
     /// two encodings were provably identical and one owner is enough.
     public var isLaunchable: Bool {
         (missingArtifacts?.isEmpty ?? true) || running || ready
@@ -212,7 +212,7 @@ public struct ModelProfileStatus: Codable, Identifiable, Equatable, Sendable {
         try container.encodeIfPresent(vramMB, forKey: .vramMB)
         try container.encodeIfPresent(command, forKey: .command)
         try container.encodeIfPresent(logPath, forKey: .logPath)
-        // Unknown origin is omitted — the local controller never had a source.
+        // Unknown origin is omitted - the local controller never had a source.
         if origin != .unknown {
             try container.encode(origin.rawValue, forKey: .origin)
         }

@@ -204,7 +204,7 @@ import Testing
     let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
     #expect(object["kind"] as? String == "direct")
     #expect(object["baseURL"] as? String == "http://10.0.0.9:8877")
-    // The ssh kind's fields cannot exist on a direct gateway — not even as dead keys.
+    // The ssh kind's fields cannot exist on a direct gateway - not even as dead keys.
     #expect(object["sshUser"] == nil)
     #expect(object["sshHost"] == nil)
     #expect(object["sshPort"] == nil)
@@ -225,7 +225,7 @@ import Testing
     // Blobs written before the collapse carry every field for every kind
     // (kind switched in the old settings form left dead ssh fields behind on
     // direct gateways). Decode ignores the foreign-kind keys; re-encode
-    // shrinks the gateway to its legal shape — the migration path.
+    // shrinks the gateway to its legal shape - the migration path.
     let legacy = """
     [{"id":"g1","name":"Lab","kind":"direct","baseURL":"http://10.0.0.9:8877",\
     "sshUser":"leftover","sshHost":"old-spark","sshPort":2222,"remotePort":8877,\

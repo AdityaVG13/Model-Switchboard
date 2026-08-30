@@ -25,7 +25,7 @@ struct HelpView: View {
                     title: "Remote Gateways",
                     bullets: [
                         "Add a remote host in Settings → Remote Gateways (SSH tunnel or direct agent URL). Remote Hosts in the footer shows live GPU / VRAM / CPU / RAM per box.",
-                        "SSH mode forwards model ports to this Mac so Copy Endpoint URL works locally. Direct mode talks to the agent over Tailscale or your LAN — MagicDNS `.ts.net` names are preferred over raw 100.x addresses."
+                        "SSH mode forwards model ports to this Mac so Copy Endpoint URL works locally. Direct mode talks to the agent over Tailscale or your LAN - MagicDNS `.ts.net` names are preferred over raw 100.x addresses."
                     ]
                 )
 

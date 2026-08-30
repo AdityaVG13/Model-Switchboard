@@ -99,7 +99,7 @@ extension MenuBarContentView {
 
     @ViewBuilder
     private var footerFreshnessChip: some View {
-        // Only tick when something is non-fresh — avoid a forever 1 Hz timer
+        // Only tick when something is non-fresh - avoid a forever 1 Hz timer
         // while the board is healthy.
         let needsWatch = hub.allStores.contains { store in
             switch store.statusFreshness(relativeTo: .now) {
@@ -208,7 +208,7 @@ extension MenuBarContentView {
         if states.contains(.error) {
             return ("ERROR", DashboardTheme.stopRed)
         }
-        // Collapse cached + stale into one quiet "STALE" signal — same urgency
+        // Collapse cached + stale into one quiet "STALE" signal - same urgency
         // for the operator, less chrome to parse.
         if states.contains(.cached) || states.contains(.stale) {
             return ("STALE", DashboardTheme.pendingOrange)

@@ -3,7 +3,7 @@ import Foundation
 /// Doctor-specific view over the shared profile snapshot.
 ///
 /// The doctor payload's per-profile rows are role-flagged views over
-/// `ModelProfileStatus` — the same snapshot type the status endpoint serves —
+/// `ModelProfileStatus` - the same snapshot type the status endpoint serves -
 /// plus the findings only doctor computes (`errors`/`warnings`). The former
 /// 10-field twin (profile/displayName/runtime/runtimeLabel/runtimeTags/
 /// launchMode/running/ready/pid/baseURL) is deleted: each of those facts now
@@ -18,7 +18,7 @@ public struct ProfileDiagnostic: Codable, Equatable, Identifiable, Sendable {
     public var id: String { status.profile }
 
     // Role-flagged pass-throughs used by the diagnostics UI (cards, error
-    // copy, sorting). Computed, not stored — they cannot diverge from the
+    // copy, sorting). Computed, not stored - they cannot diverge from the
     // snapshot.
     public var profile: String { status.profile }
     public var displayName: String { status.displayName }

@@ -20,7 +20,7 @@ struct HoldToConfirmTextButton: View {
     enum Chrome {
         /// Compact footer text control.
         case plain
-        /// Fills available width — hero Stop / settings destructive.
+        /// Fills available width - hero Stop / settings destructive.
         case filled(background: Color, foreground: Color)
     }
 
@@ -84,7 +84,7 @@ struct HoldToConfirmTextButton: View {
             DragGesture(minimumDistance: 0)
                 .onChanged { value in
                     guard !disabled, !isBusy else { return }
-                    // Scrubbing away cancels — mirrors cancel-by-drag-away.
+                    // Scrubbing away cancels - mirrors cancel-by-drag-away.
                     if hypot(value.translation.width, value.translation.height) > 28 {
                         cancelHold()
                         return

@@ -114,7 +114,7 @@ extension SwitchboardStore {
     }
 
     /// Record a transient refresh/action failure unless a sticky gateway
-    /// diagnostic (`.blocked`) is active — refresh failures must not clobber it.
+    /// diagnostic (`.blocked`) is active - refresh failures must not clobber it.
     func recordRefreshFailure(
         _ error: Error,
         actionName: String? = nil,

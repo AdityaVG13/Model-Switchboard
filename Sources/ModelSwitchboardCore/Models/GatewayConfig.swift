@@ -13,9 +13,9 @@ public enum GatewayKind: String, Codable, Sendable {
 /// The connection facts are a **discriminated union**: a gateway is either an
 /// SSH tunnel (`Connection.ssh`) or a direct URL (`Connection.direct`). The
 /// kind is the single discriminator, parsed once at the boundary (link code /
-/// settings form). The other kind's fields cannot be represented — a `.direct`
+/// settings form). The other kind's fields cannot be represented - a `.direct`
 /// gateway can never carry an ssh host and an `.ssh` gateway can never carry a
-/// base URL — so the old open product (`.direct` + `sshHost` set, kind
+/// base URL - so the old open product (`.direct` + `sshHost` set, kind
 /// switched in the form leaving dead fields behind) no longer exists.
 ///
 /// The local gateway is never persisted here: it is synthesized so its base URL
@@ -196,7 +196,7 @@ public struct GatewayConfig: Codable, Identifiable, Equatable, Sendable {
         }
     }
 
-    /// Tailscale IPv4 CGNAT range 100.64.0.0/10 — not covered by ATS
+    /// Tailscale IPv4 CGNAT range 100.64.0.0/10 - not covered by ATS
     /// `NSAllowsLocalNetworking`, so cleartext direct URLs must use MagicDNS.
     public static func isTailscaleCGNATAddress(_ host: String) -> Bool {
         let parts = host.split(separator: ".").compactMap { Int($0) }
@@ -381,7 +381,7 @@ public enum GatewayConfigStore {
     }
 
     public static func save(_ gateways: [GatewayConfig], to defaults: UserDefaults = .standard) {
-        // Never clobber a corrupt blob with an accidental empty write — that
+        // Never clobber a corrupt blob with an accidental empty write - that
         // permanently deletes every remote gateway after a schema glitch.
         if gateways.isEmpty, case .corrupt = loadResult(from: defaults) {
             return

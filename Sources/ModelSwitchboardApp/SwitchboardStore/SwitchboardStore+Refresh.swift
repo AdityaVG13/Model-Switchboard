@@ -56,7 +56,7 @@ extension SwitchboardStore {
             let payload = try await statusTask
             apply(payload: payload)
             cachePayload(payload, context: "refresh")
-            // Refresh itself holds isRefreshing — allow the post-refresh probe.
+            // Refresh itself holds isRefreshing - allow the post-refresh probe.
             await probeLoopbackEndpointsIfNeeded(allowDuringRefresh: true)
             if let report = try? await doctorTask {
                 apply(doctorReport: report)

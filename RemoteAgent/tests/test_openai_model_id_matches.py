@@ -37,7 +37,7 @@ class OpenAIModelIdMatchesTests(unittest.TestCase):
         )
 
     def test_no_expected_id_never_matches(self) -> None:
-        # L23: None means "no expected id" — identity must be verifiable.
+        # L23: None means "no expected id" - identity must be verifiable.
         # The old "None matches anything" encoding is gone; use ANY_MODEL_ID
         # for an explicit accept-any.
         self.assertFalse(openai_model_id_matches(None, ["a"]))
