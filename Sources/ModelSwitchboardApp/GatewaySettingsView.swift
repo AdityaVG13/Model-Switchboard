@@ -34,6 +34,16 @@ struct GatewaySettingsSection: View {
             DashboardSectionLabel(text: "REMOTE GATEWAYS", theme: theme)
                 .padding(EdgeInsets(top: 2, leading: 4, bottom: 6, trailing: 4))
 
+            Toggle(isOn: Binding(
+                get: { DisplayPrivacy.isHostInfoHidden },
+                set: { DisplayPrivacy.isHostInfoHidden = $0 }
+            )) {
+                Text("Hide hosts and addresses")
+                    .font(.system(size: 10.5))
+            }
+            .toggleStyle(.checkbox)
+            .padding(EdgeInsets(top: 2, leading: 4, bottom: 6, trailing: 4))
+
             VStack(alignment: .leading, spacing: 0) {
                 if hub.remoteRuntimes.isEmpty && draft == nil {
                     emptyState
@@ -106,7 +116,7 @@ struct GatewaySettingsSection: View {
                                 .accessibilityLabel("Rename \(runtime.name)")
                             }
                         }
-                        Text(runtime.config.endpointSummary)
+                        Text(DisplayPrivacy.connectionSummary(runtime.config.endpointSummary))
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundStyle(theme.sub)
                             .lineLimit(1)

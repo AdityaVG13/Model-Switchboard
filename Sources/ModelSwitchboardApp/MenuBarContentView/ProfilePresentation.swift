@@ -104,7 +104,7 @@ struct ProfileListRowView: View {
     }
 
     private var subtitle: String {
-        var parts = [profile.runtimeLabel ?? profile.runtime, ":\(profile.port)"]
+        var parts = [profile.runtimeLabel ?? profile.runtime, DisplayPrivacy.hostPort(profile.host, port: profile.port)]
         if let pending {
             parts.append(pending.lowercased() + "…")
         } else if let memory = HostMetricsPresentation.profileMemoryLabel(
@@ -146,9 +146,9 @@ struct ProfileListRowView: View {
         let servedModel = profile.serverIDs.first ?? profile.serverModelID
         guard let url = reachableEndpointURL else {
             let why = endpointUnavailableHint ?? "not reachable from this Mac"
-            return "\(servedModel) · \(profile.host):\(profile.port) (\(why))"
+            return "\(servedModel) · \(DisplayPrivacy.hostPort(profile.host, port: profile.port)) (\(why))"
         }
-        return "\(servedModel) · \(url)"
+        return "\(servedModel) · \(DisplayPrivacy.url(url))"
     }
 
     @ViewBuilder

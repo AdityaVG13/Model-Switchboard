@@ -226,7 +226,7 @@ struct RemoteHostsPanelView: View {
                             .font(.system(size: 9.5, weight: .semibold))
                             .kerning(0.5)
                             .foregroundStyle(theme.sub)
-                        if let detail = tailnet.detail {
+                        if let detail = tailnet.detail, !DisplayPrivacy.isHostInfoHidden {
                             Text(detail)
                                 .font(.system(size: 9.5))
                                 .foregroundStyle(theme.faint)
@@ -424,9 +424,9 @@ struct RemoteHostsPanelView: View {
 
     private func subtitle(runtime: GatewayRuntime, metrics: HostMetricsPayload?) -> String {
         if let host = metrics?.host, !host.isEmpty {
-            return host
+            return DisplayPrivacy.host(host)
         }
-        return runtime.config.endpointSummary
+        return DisplayPrivacy.connectionSummary(runtime.config.endpointSummary)
     }
 
     private func statusColor(runtime: GatewayRuntime, entry: RemoteHostMetricsMonitor.Entry) -> Color {

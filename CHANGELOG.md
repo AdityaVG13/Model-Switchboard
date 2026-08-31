@@ -5,6 +5,7 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 ### Added
 
+- Screen-share privacy: a "Hide hosts and addresses" toggle in Settings → Remote Gateways masks hostnames, tailnet names, IPs, SSH destinations, and the host part of endpoint URLs across the dashboard, Remote Hosts panel, and Settings (ports, paths, model names, and metrics stay visible; endpoint copy keeps working). For demos, streams, and shared screens.
 - sparkDash-derived host visibility for every remote gateway (agent 1.2.0): uptime on the gateway header, storage and network rate readouts, tailnet self-health (online state, backend state, warning reasons - catches the "healthy on LAN but off-tailnet" blind spot), and GPU process names next to running models.
 - Live LLM serving rates on model rows and the Remote Hosts panel: decode/prefill tok/s from llama.cpp `/slots`, vLLM Prometheus `/metrics`, and sglang `/server_info` counters, diffed over time so idle reads 0; plus KV-cache usage and request queue depth for vLLM. Loopback-only unless `ALLOW_REMOTE_HEALTHCHECK`, same SSRF posture as health probes; every probe failure degrades to a hidden label, never an error.
 
