@@ -11,6 +11,7 @@ Two guarantees pinned here:
 from __future__ import annotations
 
 import json
+import os
 import multiprocessing
 import sys
 import tempfile
@@ -25,10 +26,28 @@ from agent_core import agent_config_path  # noqa: E402
 import model_switchboard_agent as agent  # noqa: E402
 
 
-def _config_writer(root_str: str, key: str) -> None:
+def _config_writer(root_str: str, key: str, installer_style: bool) -> None:
+    """Writes like the agent (save_agent_config) or like the installer
+    (flocks config.json.lock directly), exercising the shared lock name."""
     root = Path(root_str)
-    for _ in range(25):
-        agent.save_agent_config(root, {key: "value-" + key})
+    if installer_style:
+        import fcntl
+
+        for _ in range(25):
+            path = agent_config_path(root)
+            lock_path = root / "config.json.lock"
+            with open(lock_path, "w", encoding="utf-8") as lock_handle:
+                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+                payload = {}
+                if path.is_file():
+                    payload = json.loads(path.read_text(encoding="utf-8"))
+                payload[key] = "installer-" + key
+                tmp = root / "config.json.tmp"
+                tmp.write_text(json.dumps(payload), encoding="utf-8")
+                os.replace(tmp, path)
+    else:
+        for _ in range(25):
+            agent.save_agent_config(root, {key: "value-" + key})
 
 
 class SaveAgentConfigTests(unittest.TestCase):
@@ -36,18 +55,26 @@ class SaveAgentConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             keys = [f"key-{i}" for i in range(4)]
-            procs = [
-                multiprocessing.Process(target=_config_writer, args=(str(root), key))
-                for key in keys
-            ]
+            # Interleave agent-style and installer-style writers so the test
+            # fails if the two flocks ever disagree on the lock file name
+            # (the with_suffix regression: agent locked config.lock).
+            procs = []
+            for index, key in enumerate(keys):
+                procs.append(
+                    multiprocessing.Process(
+                        target=_config_writer,
+                        args=(str(root), key, index % 2 == 1),
+                    )
+                )
             for proc in procs:
                 proc.start()
             for proc in procs:
                 proc.join(timeout=30)
                 self.assertEqual(proc.exitcode, 0)
             payload = json.loads(agent_config_path(root).read_text(encoding="utf-8"))
-            for key in keys:
-                self.assertEqual(payload.get(key), f"value-{key}", f"lost update for {key}")
+            for index, key in enumerate(keys):
+                expected = f"installer-{key}" if index % 2 == 1 else f"value-{key}"
+                self.assertEqual(payload.get(key), expected, f"lost update for {key}")
 
     def test_reader_never_sees_truncated_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -127,32 +127,40 @@ REPO_RAW_URL="${REPO_RAW_URL:-https://raw.githubusercontent.com/AdityaVG13/Model
 install_agent_module() {
     local name="$1"
     local adjacent="$2"
+    # SAFETY (cross-process file mutation): never write the live module path
+    # in place - a concurrent `model-switchboard-agent` launch could exec a
+    # partially-written file. Stage at $name.new, then a single atomic mv.
     if [ -f "$adjacent" ]; then
-        install -m 0644 "$adjacent" "$INSTALL_ROOT/$name"
+        install -m 0644 "$adjacent" "$INSTALL_ROOT/$name.new"
+        mv -f "$INSTALL_ROOT/$name.new" "$INSTALL_ROOT/$name"
     elif [ -f "$INSTALL_ROOT/$name" ]; then
         chmod 0644 "$INSTALL_ROOT/$name" 2>/dev/null || true
         log "Using $name already present at $INSTALL_ROOT"
     else
         command -v curl >/dev/null 2>&1 || die "no agent source found and curl is unavailable"
         log "Downloading $name from $REPO_RAW_URL"
-        curl -fsSL "$REPO_RAW_URL/$name" -o "$INSTALL_ROOT/$name" \
+        curl -fsSL "$REPO_RAW_URL/$name" -o "$INSTALL_ROOT/$name.new" \
             || die "could not download $name"
+        mv -f "$INSTALL_ROOT/$name.new" "$INSTALL_ROOT/$name"
         chmod 0644 "$INSTALL_ROOT/$name"
     fi
 }
 
 install_agent_module "agent_core.py" "$CORE_SOURCE"
 install_agent_module "discovery.py" "$DISCOVERY_SOURCE"
+# Same atomic-replace contract as install_agent_module (live-path safety).
 if [ -f "$AGENT_SOURCE" ]; then
-    install -m 0755 "$AGENT_SOURCE" "$INSTALL_ROOT/model_switchboard_agent.py"
+    install -m 0755 "$AGENT_SOURCE" "$INSTALL_ROOT/model_switchboard_agent.py.new"
+    mv -f "$INSTALL_ROOT/model_switchboard_agent.py.new" "$INSTALL_ROOT/model_switchboard_agent.py"
 elif [ -f "$INSTALL_ROOT/model_switchboard_agent.py" ]; then
     chmod 0755 "$INSTALL_ROOT/model_switchboard_agent.py"
     log "Using agent already present at $INSTALL_ROOT"
 else
     command -v curl >/dev/null 2>&1 || die "no agent source found and curl is unavailable"
     log "Downloading agent from $REPO_RAW_URL"
-    curl -fsSL "$REPO_RAW_URL/model_switchboard_agent.py" -o "$INSTALL_ROOT/model_switchboard_agent.py" \
+    curl -fsSL "$REPO_RAW_URL/model_switchboard_agent.py" -o "$INSTALL_ROOT/model_switchboard_agent.py.new" \
         || die "could not download the agent"
+    mv -f "$INSTALL_ROOT/model_switchboard_agent.py.new" "$INSTALL_ROOT/model_switchboard_agent.py"
     chmod 0755 "$INSTALL_ROOT/model_switchboard_agent.py"
 fi
 [ -f "$INSTALL_ROOT/agent_core.py" ] || die "agent_core.py missing next to the agent"

@@ -446,13 +446,17 @@ def save_agent_config(root: Path, updates: dict[str, Any]) -> Path:
     root = root.expanduser()
     root.mkdir(parents=True, exist_ok=True)
     path = agent_config_path(root)
-    lock_path = path.with_suffix(".lock")
+    # NOTE: Path.with_suffix would STRIP the ".json" out of "config.json"
+    # (config.json -> config.lock), producing a lock name that does not match
+    # the installer's config.json.lock. Build names by concatenation; the
+    # installer's writer must keep using exactly these two names.
+    lock_path = path.parent / (path.name + ".lock")
     with open(lock_path, "w", encoding="utf-8") as lock_handle:
         if fcntl is not None:
             fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
         payload = load_agent_config(root)
         payload.update(updates)
-        temporary = path.with_suffix(".tmp")
+        temporary = path.parent / (path.name + ".tmp")
         temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         os.replace(temporary, path)
         try:
