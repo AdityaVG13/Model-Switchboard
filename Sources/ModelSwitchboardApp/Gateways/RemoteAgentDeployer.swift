@@ -83,6 +83,11 @@ actor RemoteAgentDeployer {
         // 1. Push core + discovery + agent into the install root (installer
         //    prefers pre-pushed modules over downloading anything). Core first:
         //    discovery and the agent both import it.
+        //    SAFETY (cross-process file mutation): files land at
+        //    <file>.new first, then a single remote `mv -f` replaces the live
+        //    path atomically. Writing directly onto the live module could let
+        //    a concurrent `model-switchboard-agent` invocation exec a
+        //    partially-written Python file (SyntaxError mid-boot).
         for (step, file, data) in [
             ("push agent core", "agent_core.py", coreData),
             ("push discovery", "discovery.py", discoveryData),
@@ -91,7 +96,7 @@ actor RemoteAgentDeployer {
             _ = try await runSSH(
                 ssh: ssh,
                 step: step,
-                remoteCommand: "mkdir -p ~/\(Self.remoteRoot) && cat > ~/\(Self.remoteRoot)/\(file)",
+                remoteCommand: "mkdir -p ~/\(Self.remoteRoot) && cat > ~/\(Self.remoteRoot)/\(file).new && mv -f ~/\(Self.remoteRoot)/\(file).new ~/\(Self.remoteRoot)/\(file)",
                 stdin: data
             )
         }

@@ -87,15 +87,16 @@ func makeSources() throws -> (
     #expect(coreArguments.contains("BatchMode=yes"))
     #expect(coreArguments.contains("-p\n2222"))
     #expect(coreArguments.contains("--\ngpuadmin@spark.local\n"))
-    #expect(coreArguments.contains("cat > ~/.local/share/model-switchboard-agent/agent_core.py"))
+    #expect(coreArguments.contains("cat > ~/.local/share/model-switchboard-agent/agent_core.py.new"))
+    #expect(coreArguments.contains("mv -f ~/.local/share/model-switchboard-agent/agent_core.py.new ~/.local/share/model-switchboard-agent/agent_core.py"))
     #expect(try fixture.recordedStdin(0) == Data("CORE-PY-CONTENT".utf8))
 
     let discoveryArguments = try fixture.recordedArguments(1)
-    #expect(discoveryArguments.contains("cat > ~/.local/share/model-switchboard-agent/discovery.py"))
+    #expect(discoveryArguments.contains("cat > ~/.local/share/model-switchboard-agent/discovery.py.new"))
     #expect(try fixture.recordedStdin(1) == Data("DISCOVERY-PY-CONTENT".utf8))
 
     let pushArguments = try fixture.recordedArguments(2)
-    #expect(pushArguments.contains("cat > ~/.local/share/model-switchboard-agent/model_switchboard_agent.py"))
+    #expect(pushArguments.contains("cat > ~/.local/share/model-switchboard-agent/model_switchboard_agent.py.new"))
     #expect(pushArguments.contains("/.ssh/spark_key"))
     #expect(try fixture.recordedStdin(2) == Data("AGENT-PY-CONTENT".utf8))
 

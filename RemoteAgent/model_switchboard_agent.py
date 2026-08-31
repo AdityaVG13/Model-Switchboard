@@ -425,17 +425,40 @@ def preferred_profiles_directory() -> Path:
     """Visible default: ~/model-profiles (not buried under the agent install root)."""
     return Path.home() / "model-profiles"
 
+try:
+    import fcntl  # POSIX advisory locks; unavailable on Windows.
+except ImportError:  # pragma: no cover - Windows only
+    fcntl = None  # type: ignore[assignment]
+
 def save_agent_config(root: Path, updates: dict[str, Any]) -> Path:
+    """Merge *updates* into config.json, cross-process safe.
+
+    SAFETY (multi-writer contract): config.json is written by the running
+    agent (set-profiles-dir), the installer (driven by the Mac deployer over
+    SSH), and `link` - concurrently across processes. All writers MUST use
+    this flock + atomic-replace pattern:
+      - flock serializes the read-modify-write between processes (an
+        in-process Lock cannot stop two agents/installers).
+      - write <path>.tmp then os.replace, so a reader never sees a truncated
+        file (a mid-write crash previously left config.json empty and
+        silently reset profiles_dir to the default).
+    """
     root = root.expanduser()
     root.mkdir(parents=True, exist_ok=True)
     path = agent_config_path(root)
-    payload = load_agent_config(root)
-    payload.update(updates)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    try:
-        path.chmod(0o600)
-    except OSError:
-        pass
+    lock_path = path.with_suffix(".lock")
+    with open(lock_path, "w", encoding="utf-8") as lock_handle:
+        if fcntl is not None:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+        payload = load_agent_config(root)
+        payload.update(updates)
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        os.replace(temporary, path)
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
     return path
 
 def save_profiles_directory(root: Path, profiles_dir: Path) -> Path:

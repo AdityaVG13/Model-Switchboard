@@ -160,22 +160,30 @@ fi
 
 # Persist the profiles folder so `serve` (systemd) keeps using it without flags.
 python3 - "$INSTALL_ROOT" "$PROFILES_DIR" <<'PY'
-import json, sys
+import fcntl, json, os, sys
 from pathlib import Path
 root, profiles = Path(sys.argv[1]), Path(sys.argv[2])
 root.mkdir(parents=True, exist_ok=True)
 path = root / "config.json"
+lock_path = root / "config.json.lock"
 payload = {}
-if path.is_file():
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception as exc:
-        raise SystemExit(f"refusing to rewrite corrupt config.json: {exc}") from None
-if not isinstance(payload, dict):
-    raise SystemExit("refusing to rewrite config.json: root value is not an object")
-payload["profiles_dir"] = str(profiles)
-path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-path.chmod(0o600)
+# Cross-process safe read-modify-write: the running agent and `link` also
+# write this file (flock-serialized, atomic replace). Same contract as
+# save_agent_config in the agent.
+with open(lock_path, "w", encoding="utf-8") as lock_handle:
+    fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+    if path.is_file():
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise SystemExit(f"refusing to rewrite corrupt config.json: {exc}") from None
+    if not isinstance(payload, dict):
+        raise SystemExit("refusing to rewrite config.json: root value is not an object")
+    payload["profiles_dir"] = str(profiles)
+    temporary = root / "config.json.tmp"
+    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(temporary, path)
+    path.chmod(0o600)
 PY
 
 cat > "$BIN_PATH" <<EOF
