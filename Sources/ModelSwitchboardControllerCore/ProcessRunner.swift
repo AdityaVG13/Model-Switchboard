@@ -26,11 +26,17 @@ public enum ProcessRunner {
     process.standardOutput = stdout
     process.standardError = stderr
     try process.run()
+    // Drain both pipes BEFORE waiting for exit: readDataToEndOfFile returns
+    // when the child closes its write end, so this cannot deadlock. Waiting
+    // first would hang once output exceeds the 64KB pipe buffer (the child
+    // blocks writing while we block on exit).
+    let stdoutData = stdout.fileHandleForReading.readDataToEndOfFile()
+    let stderrData = stderr.fileHandleForReading.readDataToEndOfFile()
     process.waitUntilExit()
     let result = ProcessResult(
       status: process.terminationStatus,
-      stdout: String(decoding: stdout.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self),
-      stderr: String(decoding: stderr.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+      stdout: String(decoding: stdoutData, as: UTF8.self),
+      stderr: String(decoding: stderrData, as: UTF8.self)
     )
     if check, result.status != 0 {
       throw ControllerError.operationFailed(

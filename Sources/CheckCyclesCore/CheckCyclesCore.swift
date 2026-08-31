@@ -71,9 +71,11 @@ public enum CheckCyclesCore {
         process.standardOutput = stdout
         process.standardError = stderr
         try process.run()
-        process.waitUntilExit()
+        // Drain pipes before waiting for exit (see ProcessRunner.run: wait-
+        // then-read deadlocks once output exceeds the pipe buffer).
         let data = stdout.fileHandleForReading.readDataToEndOfFile()
         let err = String(decoding: stderr.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        process.waitUntilExit()
         guard process.terminationStatus == 0 else {
             throw CheckCyclesError.commandFailed("swift package describe", err)
         }

@@ -95,7 +95,7 @@ final class ControllerServiceManager {
 
         do {
             try bootstrapSupportDirectory()
-            removeLegacyLaunchAgent()
+            await removeLegacyLaunchAgent()
             let service = SMAppService.agent(plistName: Self.plistName)
             switch service.status {
             case .notRegistered:
@@ -108,22 +108,22 @@ final class ControllerServiceManager {
 
             if service.status == .enabled {
                 await waitForController(timeoutSeconds: 1.5)
-            } else if !isControllerReachable() {
-                launchDetachedControllerIfNeeded()
+            } else if !(await isControllerReachable()) {
+                await launchDetachedControllerIfNeeded()
                 await waitForController(timeoutSeconds: 2.0)
             }
 
-            if !isControllerReachable() {
+            if !(await isControllerReachable()) {
                 lastDiagnostic = unreachableDiagnostic(for: service.status)
             }
         } catch {
             let message = "Controller registration failed: \(error.localizedDescription)"
             Self.logger.error("\(message, privacy: .public)")
             lastDiagnostic = message
-            if !isControllerReachable() {
-                launchDetachedControllerIfNeeded()
+            if !(await isControllerReachable()) {
+                await launchDetachedControllerIfNeeded()
                 await waitForController(timeoutSeconds: 2.0)
-                if isControllerReachable() {
+                if await isControllerReachable() {
                     lastDiagnostic = nil
                 }
             }
@@ -148,8 +148,8 @@ final class ControllerServiceManager {
         }
     }
 
-    private func launchDetachedControllerIfNeeded() {
-        guard !isControllerReachable() else { return }
+    private func launchDetachedControllerIfNeeded() async {
+        guard !(await isControllerReachable()) else { return }
         guard let binary = bundle.controllerBinaryURL else { return }
 
         let process = Process()
@@ -176,12 +176,27 @@ final class ControllerServiceManager {
     private func waitForController(timeoutSeconds: TimeInterval) async {
         let deadline = Date().addingTimeInterval(timeoutSeconds)
         while Date() < deadline {
-            if isControllerReachable() { return }
+            if await Self.offMainQueue { Self.controllerReachableSync() } { return }
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
     }
 
-    private func isControllerReachable() -> Bool {
+    /// Runs `body` off the main actor. The reachability probe blocks up to
+    /// 200ms in connect(2); polling it inline would freeze the UI.
+    private static func offMainQueue(_ body: @escaping @Sendable () -> Bool) async -> Bool {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global().async {
+                continuation.resume(returning: body())
+            }
+        }
+    }
+
+    /// Awaitable reachability check that never blocks the main actor.
+    private func isControllerReachable() async -> Bool {
+        await Self.offMainQueue { Self.controllerReachableSync() }
+    }
+
+    private nonisolated static func controllerReachableSync() -> Bool {
         var address = sockaddr_in()
         address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
         address.sin_family = sa_family_t(AF_INET)
@@ -193,28 +208,15 @@ final class ControllerServiceManager {
         defer { close(socketFD) }
 
         var timeout = timeval(tv_sec: 0, tv_usec: 200_000)
-        _ = setsockopt(
-            socketFD,
-            SOL_SOCKET,
-            SO_SNDTIMEO,
-            &timeout,
-            socklen_t(MemoryLayout<timeval>.size)
-        )
-        _ = setsockopt(
-            socketFD,
-            SOL_SOCKET,
-            SO_RCVTIMEO,
-            &timeout,
-            socklen_t(MemoryLayout<timeval>.size)
-        )
-
-        let connectResult = withUnsafePointer(to: &address) { pointer in
-            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
-                Darwin.connect(socketFD, sockaddrPointer, socklen_t(MemoryLayout<sockaddr_in>.size))
+        setsockopt(socketFD, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+        let result = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(socketFD, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
             }
         }
-        return connectResult == 0
+        return result == 0
     }
+
 
     private func bootstrapSupportDirectory() throws {
         guard let source = bundle.controllerSupportURL else { return }
@@ -271,15 +273,33 @@ final class ControllerServiceManager {
         ]
     }
 
-    private func removeLegacyLaunchAgent() {
+    /// Removes a legacy LaunchAgent, awaiting `launchctl` off the main actor.
+    ///
+    /// SAFETY: `launchctl bootout` talks to launchd and has no internal
+    /// timeout; a wedged launchd would otherwise freeze the app on startup.
+    /// The wait is bounded and runs off the main queue.
+    private func removeLegacyLaunchAgent() async {
         let legacy = fileManager.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/LaunchAgents/io.modelswitchboard.controller.plist")
         guard fileManager.fileExists(atPath: legacy.path) else { return }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
         process.arguments = ["bootout", "gui/\(getuid())", legacy.path]
-        try? process.run()
-        process.waitUntilExit()
+        let exited = AsyncStream<Void>.makeStream()
+        process.terminationHandler = { _ in
+            exited.continuation.yield(())
+            exited.continuation.finish()
+        }
+        guard (try? process.run()) != nil else {
+            try? fileManager.removeItem(at: legacy)
+            return
+        }
+        let deadlineTask = Task {
+            try? await Task.sleep(for: .seconds(5))
+            if process.isRunning { process.terminate() }
+        }
+        for await _ in exited.stream { break }
+        deadlineTask.cancel()
         try? fileManager.removeItem(at: legacy)
     }
 }

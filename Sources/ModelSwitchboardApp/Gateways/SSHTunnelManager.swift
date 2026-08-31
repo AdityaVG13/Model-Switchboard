@@ -67,6 +67,9 @@ actor SSHTunnelManager {
     nonisolated let configuration: Configuration
     /// Sticky local agent forward port. May be reassigned if the previous
     /// ephemeral bind is stolen before ssh starts (Address already in use).
+    /// SAFETY: only mutated inside actor-isolated methods, and a UInt16 store
+    /// is a single aligned store; readers (`localBaseURL`, argument builders)
+    /// see either the old or the new port, never a torn value.
     nonisolated(unsafe) private(set) var localPort: UInt16
     /// Per-instance control socket leaf name. Must not be keyed only by gateway
     /// id: teardown is fire-and-forget, and a replacement manager for the same
@@ -237,14 +240,27 @@ actor SSHTunnelManager {
     private func waitUntilEstablished(process: Process) async -> Bool {
         let deadline = Date().addingTimeInterval(Self.establishTimeoutSeconds)
         while Date() < deadline, process.isRunning, desiredActive {
-            if Self.canConnectLoopback(port: localPort),
-               runControlCommand(["-O", "check"])
+            // canConnectLoopback blocks up to 250ms in connect(2); hop off the
+            // cooperative pool so a pool thread is never pinned per poll.
+            let connected = await Self.offPool { Self.canConnectLoopback(port: self.localPort) }
+            if connected,
+               await runControlCommand(["-O", "check"])
             {
                 return true
             }
             try? await Task.sleep(for: .seconds(Self.establishPollSeconds))
         }
         return false
+    }
+
+    /// Runs `body` on a global-queue thread. Cooperative-pool escape hatch for
+    /// bounded blocking syscalls (see SAFETY on runControlCommand).
+    private static func offPool<T: Sendable>(_ body: @escaping @Sendable () -> T) async -> T {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global().async {
+                continuation.resume(returning: body())
+            }
+        }
     }
 
     private func terminateProcess() {
@@ -281,12 +297,12 @@ actor SSHTunnelManager {
         let missing = remotePorts.subtracting(activeForwards.keys)
         for remotePort in stale {
             guard let localPort = activeForwards[remotePort] else { continue }
-            _ = runControlCommand(["-O", "cancel", "-L", Self.forwardSpec(local: localPort, remote: remotePort)])
+            _ = await runControlCommand(["-O", "cancel", "-L", Self.forwardSpec(local: localPort, remote: remotePort)])
             activeForwards.removeValue(forKey: remotePort)
         }
         for remotePort in missing {
             guard let localPort = allocateForwardLocalPort(preferring: remotePort) else { continue }
-            if runControlCommand(["-O", "forward", "-L", Self.forwardSpec(local: localPort, remote: remotePort)]) {
+            if await runControlCommand(["-O", "forward", "-L", Self.forwardSpec(local: localPort, remote: remotePort)]) {
                 activeForwards[remotePort] = localPort
             }
         }
@@ -306,7 +322,7 @@ actor SSHTunnelManager {
             } else {
                 continue
             }
-            if runControlCommand(["-O", "forward", "-L", Self.forwardSpec(local: localPort, remote: remotePort)]) {
+            if await runControlCommand(["-O", "forward", "-L", Self.forwardSpec(local: localPort, remote: remotePort)]) {
                 activeForwards[remotePort] = localPort
             }
         }
@@ -339,7 +355,15 @@ actor SSHTunnelManager {
         return nil
     }
 
-    private func runControlCommand(_ arguments: [String]) -> Bool {
+    /// One `ssh -O` control invocation, awaited without blocking the
+    /// cooperative pool.
+    ///
+    /// SAFETY (concurrency contract): a ControlMaster socket can be alive but
+    /// stalled, making `ssh -O` block on network I/O with no internal timeout.
+    /// Synchronous `waitUntilExit()` here would pin a cooperative thread for
+    /// that duration, so completion is awaited through a termination handler
+    /// and the process is SIGTERM'd at `controlCommandTimeout`.
+    private func runControlCommand(_ arguments: [String]) async -> Bool {
         let process = Process()
         process.executableURL = executableURL
         // `--` so a destination that looks like an ssh option cannot be
@@ -348,14 +372,27 @@ actor SSHTunnelManager {
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         process.standardInput = FileHandle.nullDevice
+        let exited = AsyncStream<Void>.makeStream()
+        process.terminationHandler = { _ in
+            exited.continuation.yield(())
+            exited.continuation.finish()
+        }
         do {
             try process.run()
         } catch {
             return false
         }
-        process.waitUntilExit()
+        let deadlineProcess = process
+        DispatchQueue.global().asyncAfter(deadline: .now() + Self.controlCommandTimeout) {
+            if deadlineProcess.isRunning {
+                deadlineProcess.terminate()
+            }
+        }
+        for await _ in exited.stream { break }
         return process.terminationStatus == 0
     }
+
+    private static let controlCommandTimeout: TimeInterval = 5
 
     private static func forwardSpec(local: Int, remote: Int) -> String {
         "127.0.0.1:\(local):127.0.0.1:\(remote)"

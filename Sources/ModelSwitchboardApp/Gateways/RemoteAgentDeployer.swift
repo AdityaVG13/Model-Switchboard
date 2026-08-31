@@ -166,6 +166,16 @@ actor RemoteAgentDeployer {
         return nil
     }
 
+    /// Runs one ssh invocation without blocking the cooperative pool.
+    ///
+    /// SAFETY (concurrency contract): ssh can wedge indefinitely - a Tailscale
+    /// SSH re-auth banner prints and then the process waits for interactive
+    /// input WITHOUT reading stdin, so the pushed payload (agent_core.py is
+    /// >64KB, the pipe buffer size) makes a naive blocking write hang forever.
+    /// Therefore: the deadline watchdog is armed BEFORE the stdin write, the
+    /// write runs on a global queue (never the cooperative pool), stdout/
+    /// stderr are drained via readability handlers, and completion is awaited
+    /// through a termination-handler continuation.
     private func runSSH(
         ssh: GatewayConfig.Connection.SSH,
         step: String,
@@ -199,24 +209,51 @@ actor RemoteAgentDeployer {
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
 
-        try process.run()
-        // Feed stdin off the current task; FileHandle writes are blocking.
-        let writeHandle = stdinPipe.fileHandleForWriting
+        final class PipeBox: @unchecked Sendable {
+            private let lock = NSLock()
+            private var data = Data()
+            func append(_ chunk: Data) {
+                lock.lock()
+                data.append(chunk)
+                lock.unlock()
+            }
+            var value: Data {
+                lock.lock()
+                defer { lock.unlock() }
+                return data
+            }
+        }
+        let stdoutBox = PipeBox()
+        let stderrBox = PipeBox()
+        let stdinErrorBox = PipeBox()
+        for (pipe, box) in [(stdoutPipe, stdoutBox), (stderrPipe, stderrBox)] {
+            pipe.fileHandleForReading.readabilityHandler = { handle in
+                let chunk = handle.availableData
+                if chunk.isEmpty {
+                    handle.readabilityHandler = nil
+                    return
+                }
+                box.append(chunk)
+            }
+        }
+
+        let exited = AsyncStream<Void>.makeStream()
+        process.terminationHandler = { _ in
+            exited.continuation.yield(())
+            exited.continuation.finish()
+        }
+
         do {
-            try writeHandle.write(contentsOf: stdin)
-            try writeHandle.close()
+            try process.run()
         } catch {
-            process.terminate()
             throw DeployError.sshFailed(
                 step: step,
-                message: "failed to write install payload over SSH: \(error.localizedDescription)"
+                message: "could not run ssh: \(error.localizedDescription)"
             )
         }
 
-        // Deadline watchdog: interactive prompts ssh cannot answer in
-        // BatchMode (Tailscale SSH re-auth, host-key confirm) would hang
-        // readDataToEndOfFile forever. SIGTERM the process at the deadline;
-        // the pipes then hit EOF and the failure path reports it.
+        // Watchdog BEFORE the stdin write: the write itself can block forever
+        // on a full pipe when the remote never reads (re-auth banner).
         let deadlineProcess = process
         DispatchQueue.global().asyncAfter(deadline: .now() + sshDeadline) {
             if deadlineProcess.isRunning {
@@ -224,9 +261,27 @@ actor RemoteAgentDeployer {
             }
         }
 
-        let stdout = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-        let stderr = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
+        // Feed stdin off the cooperative pool; FileHandle writes are blocking.
+        DispatchQueue.global().async {
+            do {
+                try stdinPipe.fileHandleForWriting.write(contentsOf: stdin)
+                try stdinPipe.fileHandleForWriting.close()
+            } catch {
+                // EPIPE after the watchdog SIGTERM is expected; the deadline
+                // error path reports it. Record anyway for diagnostics.
+                stdinErrorBox.append(
+                    Data("stdin write failed: \(error.localizedDescription)\n".utf8)
+                )
+            }
+        }
+
+        for await _ in exited.stream { break }
+        // The process is gone: any remaining pipe data is already buffered in
+        // the kernel, so this read cannot block (write end is closed).
+        stdoutPipe.fileHandleForReading.readabilityHandler = nil
+        stderrPipe.fileHandleForReading.readabilityHandler = nil
+        let stdout = stdoutBox.value + stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        let stderr = stderrBox.value + stderrPipe.fileHandleForReading.readDataToEndOfFile()
 
         guard process.terminationStatus == 0 else {
             if process.terminationReason == .uncaughtSignal, process.terminationStatus == Self.sigtermStatus {
@@ -235,9 +290,14 @@ actor RemoteAgentDeployer {
                     message: "SSH did not finish within \(Int(sshDeadline))s - the host is waiting on an interactive prompt (e.g. Tailscale SSH re-auth or a password). Connect once from Terminal, or set a Deploy host (ssh alias) in Settings."
                 )
             }
-            let stderrLines = String(decoding: stderr, as: UTF8.self)
+            var stderrLines = String(decoding: stderr, as: UTF8.self)
                 .split(whereSeparator: \.isNewline)
                 .map(String.init)
+            if stderrLines.isEmpty, !stdinErrorBox.value.isEmpty {
+                stderrLines = String(decoding: stdinErrorBox.value, as: UTF8.self)
+                    .split(whereSeparator: \.isNewline)
+                    .map(String.init)
+            }
             let message = SSHTunnelManager.classifyFailure(stderrLines: stderrLines)
             Self.logger.error("deploy \(step, privacy: .public) failed: \(message, privacy: .public)")
             throw DeployError.sshFailed(step: step, message: message)

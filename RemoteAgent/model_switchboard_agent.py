@@ -1179,43 +1179,47 @@ class AgentService:
             if self._benchmark_running:
                 raise OperationFailedError("benchmark already running")
             self._benchmark_running = True
-        loaded = self.profiles.load()
-        if profiles:
-            names = [n for n in profiles if n in loaded]
-            missing = [n for n in profiles if n not in loaded]
-            if missing and not names:
-                with self._benchmark_lock:
-                    self._benchmark_running = False
-                raise ProfileNotFoundError(missing[0])
-        else:
-            names = sorted(loaded.keys())
-        if not names:
+        # From here to the worker start, any failure MUST reset the flag or
+        # every future benchmark is rejected with "already running" (the flag
+        # is only cleared by the worker's finally or the validation paths).
+        try:
+            loaded = self.profiles.load()
+            if profiles:
+                names = [n for n in profiles if n in loaded]
+                missing = [n for n in profiles if n not in loaded]
+                if missing and not names:
+                    raise ProfileNotFoundError(missing[0])
+            else:
+                names = sorted(loaded.keys())
+            if not names:
+                raise UsageError("no profiles available to benchmark")
+
+            log_path = self._benchmark_log_path()
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            log_path.write_text("", encoding="utf-8")
+            # Marker pid = this agent process while the worker thread runs.
+            self._benchmark_pid_file().write_text(f"{os.getpid()}\n", encoding="utf-8")
+
+            def worker() -> None:
+                try:
+                    self._run_benchmark_worker(
+                        names,
+                        suite=suite,
+                        allow_concurrent=allow_concurrent,
+                        keep_running=keep_running,
+                        log_path=log_path,
+                    )
+                finally:
+                    self._benchmark_pid_file().unlink(missing_ok=True)
+                    with self._benchmark_lock:
+                        self._benchmark_running = False
+
+            thread = threading.Thread(target=worker, name="msw-benchmark", daemon=True)
+            thread.start()
+        except BaseException:
             with self._benchmark_lock:
                 self._benchmark_running = False
-            raise UsageError("no profiles available to benchmark")
-
-        log_path = self._benchmark_log_path()
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        log_path.write_text("", encoding="utf-8")
-        # Marker pid = this agent process while the worker thread runs.
-        self._benchmark_pid_file().write_text(f"{os.getpid()}\n", encoding="utf-8")
-
-        def worker() -> None:
-            try:
-                self._run_benchmark_worker(
-                    names,
-                    suite=suite,
-                    allow_concurrent=allow_concurrent,
-                    keep_running=keep_running,
-                    log_path=log_path,
-                )
-            finally:
-                self._benchmark_pid_file().unlink(missing_ok=True)
-                with self._benchmark_lock:
-                    self._benchmark_running = False
-
-        thread = threading.Thread(target=worker, name="msw-benchmark", daemon=True)
-        thread.start()
+            raise
         return self.benchmark_status()
 
     def _run_benchmark_worker(

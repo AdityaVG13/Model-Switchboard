@@ -697,6 +697,32 @@ _GPU_METRICS_CACHE: dict[str, Any] = {"at": 0.0, "payload": None}
 
 _GPU_METRICS_TTL_SECONDS = 2.0
 
+# SAFETY: the cache dict is read by concurrent ThreadingHTTPServer handlers.
+# Readers may see a torn (timestamp, payload) pair under CPython's GIL; the
+# write order below (payload first, timestamp last) makes a torn read at worst
+# extend the previous TTL by one fill - never serve a new timestamp with the
+# OLD payload. Do not reorder the writes.
+_GPU_METRICS_CACHE_LOCK = threading.Lock()
+
+def gpu_metrics_snapshot() -> dict[str, Any]:
+    """Cached GPU snapshot for status rows + /api/host/metrics."""
+    now = time.time()
+    with _GPU_METRICS_CACHE_LOCK:
+        cached = _GPU_METRICS_CACHE.get("payload")
+        if cached is not None and now - float(_GPU_METRICS_CACHE.get("at") or 0) < _GPU_METRICS_TTL_SECONDS:
+            return cached
+    nvidia = _run_nvidia_smi_query()
+    if nvidia is None:
+        payload = {"gpus": [], "vram_by_pid": {}, "source": "unavailable"}
+    else:
+        payload = nvidia
+    with _GPU_METRICS_CACHE_LOCK:
+        # Payload first, timestamp last: a torn read extends the OLD entry's
+        # TTL instead of stamping stale data as fresh.
+        _GPU_METRICS_CACHE["payload"] = payload
+        _GPU_METRICS_CACHE["at"] = now
+    return payload
+
 _CPU_SAMPLE_LOCK = threading.Lock()
 
 _CPU_PREV: tuple[float, float] | None = None
@@ -887,21 +913,6 @@ def _run_nvidia_smi_query() -> dict[str, Any] | None:
     except (OSError, subprocess.TimeoutExpired):
         pass
     return {"gpus": gpus, "vram_by_pid": by_pid, "process_names": proc_names, "source": "nvidia-smi"}
-
-def gpu_metrics_snapshot() -> dict[str, Any]:
-    """Cached GPU snapshot for status rows + /api/host/metrics."""
-    now = time.time()
-    cached = _GPU_METRICS_CACHE.get("payload")
-    if cached is not None and now - float(_GPU_METRICS_CACHE.get("at") or 0) < _GPU_METRICS_TTL_SECONDS:
-        return cached
-    nvidia = _run_nvidia_smi_query()
-    if nvidia is None:
-        payload = {"gpus": [], "vram_by_pid": {}, "source": "unavailable"}
-    else:
-        payload = nvidia
-    _GPU_METRICS_CACHE["at"] = now
-    _GPU_METRICS_CACHE["payload"] = payload
-    return payload
 
 def process_vram_mb(pid: int | None) -> float | None:
     """GPU memory (MiB) attributed to *pid* via nvidia-smi, if available."""
@@ -1129,6 +1140,8 @@ def sample_network_rates() -> dict[str, Any] | None:
 
 _TAILSCALE_HEALTH_TTL_SECONDS = 30.0
 _TAILSCALE_HEALTH_CACHE: dict[str, Any] = {"at": 0.0, "payload": None, "present": False}
+# Same contract as _GPU_METRICS_CACHE_LOCK: payload before timestamp on fill.
+_TAILSCALE_HEALTH_LOCK = threading.Lock()
 
 def parse_tailscale_status_health(payload: Any) -> dict[str, Any] | None:
     """The node's own tailnet view: Self.Online + backend state + warnings.
@@ -1156,16 +1169,18 @@ def parse_tailscale_status_health(payload: Any) -> dict[str, Any] | None:
 def tailscale_health_snapshot() -> dict[str, Any] | None:
     """Cached `tailscale status --json` self-health; None when CLI absent."""
     now = time.monotonic()
-    cached = _TAILSCALE_HEALTH_CACHE
-    if cached.get("present") and now - float(cached.get("at") or 0) < _TAILSCALE_HEALTH_TTL_SECONDS:
-        return cached.get("payload")
+    with _TAILSCALE_HEALTH_LOCK:
+        cached = _TAILSCALE_HEALTH_CACHE
+        if cached.get("present") and now - float(cached.get("at") or 0) < _TAILSCALE_HEALTH_TTL_SECONDS:
+            return cached.get("payload")
     try:
         result = subprocess.run(
             ["tailscale", "status", "--json"],
             capture_output=True, text=True, timeout=5, check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
-        _TAILSCALE_HEALTH_CACHE.update({"at": now, "payload": None, "present": True})
+        with _TAILSCALE_HEALTH_LOCK:
+            _TAILSCALE_HEALTH_CACHE.update({"payload": None, "present": True, "at": time.monotonic()})
         return None
     payload: dict[str, Any] | None = None
     if result.returncode == 0:
@@ -1173,7 +1188,8 @@ def tailscale_health_snapshot() -> dict[str, Any] | None:
             payload = parse_tailscale_status_health(json.loads(result.stdout))
         except json.JSONDecodeError:
             payload = None
-    _TAILSCALE_HEALTH_CACHE.update({"at": now, "payload": payload, "present": True})
+    with _TAILSCALE_HEALTH_LOCK:
+        _TAILSCALE_HEALTH_CACHE.update({"payload": payload, "present": True, "at": time.monotonic()})
     return payload
 
 # ---- LLM serving rates: llama.cpp / vLLM / sglang ---------------------------
@@ -1347,7 +1363,13 @@ def _detect_llm_backend(root: str) -> str | None:
     return backend
 
 def _llm_rates_from_counters(state: dict[str, Any], now: float, in_total: float, out_total: float) -> tuple[float | None, float | None, bool]:
-    """Counter-diff rates. Returns (tok_s, prompt_tok_s, sampled_now)."""
+    """Counter-diff rates. Returns (tok_s, prompt_tok_s, sampled_now).
+
+    SAFETY: caller MUST hold _LLM_RATE_LOCK. The read-modify-write of
+    last_ts/in/out is the only synchronization for these counters; unlocked
+    concurrent status requests on the same endpoint lose deltas and spike
+    the reported rate.
+    """
     last_ts = state.get("last_ts")
     prev_in = state.get("in")
     prev_out = state.get("out")
@@ -1389,7 +1411,6 @@ def sample_llm_serving_rates(base_url: str, allow_remote: bool = False) -> dict[
     backend = _detect_llm_backend(root)
     if backend is None:
         return None
-    allow_remote_env = allow_remote or (os.environ.get("ALLOW_REMOTE_HEALTHCHECK") or "").lower() in ("1", "true", "yes")
     result: dict[str, Any] = {
         "backend": backend,
         "tok_s": None,
@@ -1411,7 +1432,14 @@ def sample_llm_serving_rates(base_url: str, allow_remote: bool = False) -> dict[
                 if slots:
                     total_out = sum(decoded for decoded, _ in slots.values())
                     total_in = sum(prompted for _, prompted in slots.values())
-                    tok_s, prompt_tok_s, _ = _llm_rates_from_counters(state, now, float(total_in), float(total_out))
+                    # Fresh timestamp AFTER the probe: the counter snapshot is
+                    # post-probe, so dt must start post-probe too (the probe
+                    # itself takes up to 1.5s; using the pre-probe now would
+                    # understate dt and overstate the rate).
+                    with _LLM_RATE_LOCK:
+                        tok_s, prompt_tok_s, _ = _llm_rates_from_counters(
+                            state, time.monotonic(), float(total_in), float(total_out)
+                        )
                     result["tok_s"] = tok_s
                     result["prompt_tok_s"] = prompt_tok_s
         except (urllib.error.URLError, OSError, ValueError):
@@ -1429,7 +1457,10 @@ def sample_llm_serving_rates(base_url: str, allow_remote: bool = False) -> dict[
                 gen = parse_prometheus_metric_sum(text, "vllm:generation_tokens_total")
                 prompt = parse_prometheus_metric_sum(text, "vllm:prompt_tokens_total")
                 if gen is not None and prompt is not None:
-                    tok_s, prompt_tok_s, _ = _llm_rates_from_counters(state, now, prompt, gen)
+                    with _LLM_RATE_LOCK:
+                        tok_s, prompt_tok_s, _ = _llm_rates_from_counters(
+                            state, time.monotonic(), prompt, gen
+                        )
                     result["tok_s"] = tok_s
                     result["prompt_tok_s"] = prompt_tok_s
                 result["kv_cache_usage"] = parse_prometheus_metric_sum(text, "vllm:gpu_cache_usage_perc")
@@ -1458,7 +1489,10 @@ def sample_llm_serving_rates(base_url: str, allow_remote: bool = False) -> dict[
             out_raw = info.get("output_tokens")
             try:
                 if in_raw is not None and out_raw is not None:
-                    tok_s, prompt_tok_s, _ = _llm_rates_from_counters(state, now, float(in_raw), float(out_raw))
+                    with _LLM_RATE_LOCK:
+                        tok_s, prompt_tok_s, _ = _llm_rates_from_counters(
+                            state, time.monotonic(), float(in_raw), float(out_raw)
+                        )
                     result["tok_s"] = tok_s
                     result["prompt_tok_s"] = prompt_tok_s
             except (TypeError, ValueError):
@@ -1469,9 +1503,9 @@ def sample_llm_serving_rates(base_url: str, allow_remote: bool = False) -> dict[
                     current = float(info["last_gen_throughput"])
                 except (TypeError, ValueError):
                     current = 0.0
-                sticky_prev = state.get("sticky_last")
-                moves = 0 if current != sticky_prev else int(state.get("sticky_moves") or 0) + 1
                 with _LLM_RATE_LOCK:
+                    sticky_prev = state.get("sticky_last")
+                    moves = 0 if current != sticky_prev else int(state.get("sticky_moves") or 0) + 1
                     state["sticky_last"] = current
                     state["sticky_moves"] = moves
                 result["tok_s"] = round(current * 100) / 100 if moves < 2 else 0.0

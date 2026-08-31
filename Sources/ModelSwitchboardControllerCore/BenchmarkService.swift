@@ -29,6 +29,12 @@ public final class BenchmarkService: @unchecked Sendable {
     allowConcurrent: Bool,
     keepRunning: Bool
   ) throws -> BenchmarkStatus {
+    // SAFETY (TOCTOU): status() -> running-check -> pid-write is not atomic.
+    // Two concurrent `start` calls could both see no pid file and both spawn
+    // a benchmark. Accepted: the controller serves HTTP on one serial
+    // DispatchQueue and `model-switchboardctl benchmark` is a single operator
+    // invocation. If the controller ever handles requests concurrently,
+    // serialize start() through ControllerService's mutationLock first.
     if status().running { throw ControllerError.operationFailed("benchmark already running") }
     try fileManager.createDirectory(
       at: service.configuration.runDirectory, withIntermediateDirectories: true)
