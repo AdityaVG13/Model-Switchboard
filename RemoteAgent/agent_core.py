@@ -60,6 +60,17 @@ LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
 def is_loopback(host: str) -> bool:
     return host.strip().strip("[]").lower() in LOOPBACK_HOSTS
 
+def is_tailscale_ip(address: str) -> bool:
+    """Tailscale assigns IPv4 from the CGNAT range 100.64.0.0/10."""
+    parts = address.split(".")
+    if len(parts) != 4:
+        return False
+    try:
+        first, second = int(parts[0]), int(parts[1])
+    except ValueError:
+        return False
+    return first == 100 and 64 <= second <= 127
+
 class _NoHTTPRedirectHandler(urllib.request.HTTPRedirectHandler):
     """Refuse redirects so loopback-only health/discovery cannot SSRF off-box."""
 
@@ -844,13 +855,14 @@ def _run_nvidia_smi_query() -> dict[str, Any] | None:
                 "vram_total_mb": _nvidia_smi_number(parts[5]),
             }
         )
-    # Per-process VRAM (compute apps). Still populated on GB10 when FB is N/A.
+    # Per-process VRAM + names (compute apps). Still populated on GB10 when FB is N/A.
     by_pid: dict[int, float] = {}
+    proc_names: dict[int, str] = {}
     try:
         proc_result = subprocess.run(
             [
                 "nvidia-smi",
-                "--query-compute-apps=pid,used_gpu_memory",
+                "--query-compute-apps=pid,used_gpu_memory,process_name",
                 "--format=csv,noheader,nounits",
             ],
             capture_output=True,
@@ -870,9 +882,11 @@ def _run_nvidia_smi_query() -> dict[str, Any] | None:
                 mem = _nvidia_smi_number(parts[1])
                 if mem is not None:
                     by_pid[pid] = by_pid.get(pid, 0.0) + mem
+                if len(parts) >= 3 and parts[2]:
+                    proc_names[pid] = parts[2]
     except (OSError, subprocess.TimeoutExpired):
         pass
-    return {"gpus": gpus, "vram_by_pid": by_pid, "source": "nvidia-smi"}
+    return {"gpus": gpus, "vram_by_pid": by_pid, "process_names": proc_names, "source": "nvidia-smi"}
 
 def gpu_metrics_snapshot() -> dict[str, Any]:
     """Cached GPU snapshot for status rows + /api/host/metrics."""
@@ -999,3 +1013,468 @@ def load_agent_config(root: Path) -> dict[str, Any]:
         return {}
     return payload if isinstance(payload, dict) else {}
 
+
+# ---- host extras: uptime / storage / network / tailnet ----------------------
+
+def parse_proc_uptime_seconds(text: str) -> float | None:
+    """First field of /proc/uptime is total uptime seconds."""
+    try:
+        return float(text.split()[0])
+    except (IndexError, ValueError):
+        return None
+
+def parse_macos_boottime_seconds(text: str) -> float | None:
+    """Extract `sec = <int>` from `sysctl -n kern.boottime` output."""
+    match = re.search(r"sec\s*=\s*(\d+)", text)
+    if not match:
+        return None
+    return time.time() - float(match.group(1))
+
+def read_uptime_seconds() -> float | None:
+    """Uptime via /proc/uptime (Linux) or kern.boottime (macOS)."""
+    try:
+        return parse_proc_uptime_seconds(
+            Path("/proc/uptime").read_text(encoding="utf-8")
+        )
+    except OSError:
+        pass
+    try:
+        result = subprocess.run(
+            ["sysctl", "-n", "kern.boottime"],
+            capture_output=True, text=True, timeout=3, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    boot = parse_macos_boottime_seconds(result.stdout)
+    if boot is None:
+        return None
+    return max(0.0, time.time() - boot)
+
+def storage_usage(path: str = "/") -> dict[str, Any] | None:
+    """Root filesystem usage via os.statvfs (POSIX). None on unsupported platforms."""
+    statvfs = getattr(os, "statvfs", None)
+    if statvfs is None:
+        return None
+    try:
+        st = statvfs(path)
+    except OSError:
+        return None
+    if st.f_blocks <= 0 or st.f_frsize <= 0:
+        return None
+    total_bytes = st.f_blocks * st.f_frsize
+    free_bytes = st.f_bavail * st.f_frsize
+    used_bytes = max(0, total_bytes - free_bytes)
+    percent = (used_bytes / total_bytes) * 100.0 if total_bytes else None
+    return {
+        "used_mb": round(used_bytes / (1024 * 1024) * 10) / 10,
+        "total_mb": round(total_bytes / (1024 * 1024)) ,
+        "percent": round(percent * 10) / 10 if percent is not None else None,
+        "source": "statvfs",
+    }
+
+_PROC_NET_DEV_LOCK = threading.Lock()
+_PROC_NET_DEV_PREV: tuple[float, int, int] | None = None
+
+def _sum_proc_net_dev(text: str) -> tuple[int, int] | None:
+    """Sum rx/tx byte counters across interfaces (loopback excluded)."""
+    rx_total = 0
+    tx_total = 0
+    saw_any = False
+    for line in text.splitlines():
+        if ":" not in line:
+            continue
+        iface, rest = line.split(":", 1)
+        iface = iface.strip()
+        if not iface or iface == "lo" or iface.startswith(("docker", "veth", "br-")):
+            continue
+        parts = rest.split()
+        if len(parts) < 9:
+            continue
+        try:
+            rx_total += int(parts[0])
+            tx_total += int(parts[8])
+        except ValueError:
+            continue
+        saw_any = True
+    return (rx_total, tx_total) if saw_any else None
+
+def sample_network_rates() -> dict[str, Any] | None:
+    """RX/TX rates from /proc/net/dev deltas. None off-Linux or on first sample."""
+    global _PROC_NET_DEV_PREV
+    try:
+        text = Path("/proc/net/dev").read_text(encoding="utf-8")
+    except OSError:
+        return None
+    totals = _sum_proc_net_dev(text)
+    if totals is None:
+        return None
+    now = time.monotonic()
+    with _PROC_NET_DEV_LOCK:
+        prev = _PROC_NET_DEV_PREV
+        _PROC_NET_DEV_PREV = (now, totals[0], totals[1])
+    if prev is None:
+        return {"rx_kbps": None, "tx_kbps": None, "source": "proc"}
+    dt = now - prev[0]
+    if dt <= 0 or dt > 30:
+        return {"rx_kbps": None, "tx_kbps": None, "source": "proc"}
+    rx_kbps = max(0.0, (totals[0] - prev[1]) / dt / 1024)
+    tx_kbps = max(0.0, (totals[1] - prev[2]) / dt / 1024)
+    return {
+        "rx_kbps": round(rx_kbps * 10) / 10,
+        "tx_kbps": round(tx_kbps * 10) / 10,
+        "source": "proc",
+    }
+
+_TAILSCALE_HEALTH_TTL_SECONDS = 30.0
+_TAILSCALE_HEALTH_CACHE: dict[str, Any] = {"at": 0.0, "payload": None, "present": False}
+
+def parse_tailscale_status_health(payload: Any) -> dict[str, Any] | None:
+    """The node's own tailnet view: Self.Online + backend state + warnings.
+
+    Peer state is never the verdict; this is what `tailscale status --json`
+    reports about the host itself. Read-only parsing, no tailscale mutations.
+    """
+    if not isinstance(payload, dict):
+        return None
+    self_info = payload.get("Self")
+    if not isinstance(self_info, dict):
+        return None
+    ips = [ip for ip in (self_info.get("TailscaleIPs") or []) if isinstance(ip, str)]
+    health = payload.get("Health")
+    health_messages = [str(h) for h in health] if isinstance(health, list) else []
+    result: dict[str, Any] = {
+        "online": bool(self_info.get("Online")),
+        "backend_state": str(payload.get("BackendState") or ""),
+        "ipv4": next((ip for ip in ips if is_tailscale_ip(ip)), None),
+        "dns_name": (str(self_info.get("DNSName") or "").rstrip(".") or None),
+        "health": health_messages,
+    }
+    return result
+
+def tailscale_health_snapshot() -> dict[str, Any] | None:
+    """Cached `tailscale status --json` self-health; None when CLI absent."""
+    now = time.monotonic()
+    cached = _TAILSCALE_HEALTH_CACHE
+    if cached.get("present") and now - float(cached.get("at") or 0) < _TAILSCALE_HEALTH_TTL_SECONDS:
+        return cached.get("payload")
+    try:
+        result = subprocess.run(
+            ["tailscale", "status", "--json"],
+            capture_output=True, text=True, timeout=5, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        _TAILSCALE_HEALTH_CACHE.update({"at": now, "payload": None, "present": True})
+        return None
+    payload: dict[str, Any] | None = None
+    if result.returncode == 0:
+        try:
+            payload = parse_tailscale_status_health(json.loads(result.stdout))
+        except json.JSONDecodeError:
+            payload = None
+    _TAILSCALE_HEALTH_CACHE.update({"at": now, "payload": payload, "present": True})
+    return payload
+
+# ---- LLM serving rates: llama.cpp / vLLM / sglang ---------------------------
+
+_LLM_RATE_LOCK = threading.Lock()
+_LLM_RATE_STATE: dict[str, dict[str, Any]] = {}
+_LLM_BACKEND_TTL_SECONDS = 60.0
+_LLM_RATE_MIN_INTERVAL_SECONDS = 1.0
+
+def _llm_root_url(base_url: str) -> str:
+    """http://host:port root for an OpenAI-style base_url ending in /v1."""
+    root = (base_url or "").strip().rstrip("/")
+    if root.endswith("/v1"):
+        root = root[: -len("/v1")]
+    return root
+
+def parse_llamacpp_slots_tokens(text: str) -> dict[str, tuple[int, int]] | None:
+    """Per-slot (decoded, processed-prompt) cumulative counters from /slots.
+
+    Accepts the n_decoded and next_token[0].n_decoded layouts; prompt side
+    prefers n_prompt_tokens_processed and falls back to n_prompt_tokens.
+    Returns None when the body is not a slots array.
+    """
+    try:
+        slots = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(slots, list):
+        return None
+    out: dict[str, tuple[int, int]] = {}
+    for index, slot in enumerate(slots):
+        if not isinstance(slot, dict):
+            continue
+        slot_id = str(slot.get("id", index))
+        decoded_raw = slot.get("n_decoded")
+        if decoded_raw is None and isinstance(slot.get("next_token"), list):
+            next_token = slot["next_token"]
+            if next_token and isinstance(next_token[0], dict):
+                decoded_raw = next_token[0].get("n_decoded")
+        if isinstance(decoded_raw, list):
+            decoded_raw = decoded_raw[0] if decoded_raw else 0
+        try:
+            decoded = int(decoded_raw or 0)
+        except (TypeError, ValueError):
+            decoded = 0
+        prompt_raw = slot.get("n_prompt_tokens_processed")
+        if prompt_raw is None:
+            prompt_raw = slot.get("n_prompt_tokens")
+        try:
+            prompted = int(prompt_raw or 0)
+        except (TypeError, ValueError):
+            prompted = 0
+        out[slot_id] = (decoded, prompted)
+    return out or None
+
+def parse_prometheus_metric_sum(text: str, metric: str) -> float | None:
+    """Sum one Prometheus metric family across labeled lines (no HELP/#)."""
+    total = 0.0
+    saw_any = False
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if not (line == metric or line.startswith(metric + "{") or line.startswith(metric + " ")):
+            continue
+        value_part = line.rsplit(" ", 1)[-1].strip()
+        try:
+            total += float(value_part)
+            saw_any = True
+        except ValueError:
+            continue
+    return total if saw_any else None
+
+def parse_sglang_server_info(text: str) -> dict[str, Any] | None:
+    """Cumulative token counters + sticky throughput gauge from /server_info."""
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    result: dict[str, Any] = {
+        "input_tokens": payload.get("total_input_tokens"),
+        "output_tokens": payload.get("total_output_tokens"),
+        "last_gen_throughput": None,
+    }
+    states = payload.get("internal_states")
+    if isinstance(states, list):
+        for state in states:
+            if isinstance(state, dict) and state.get("last_gen_throughput") is not None:
+                result["last_gen_throughput"] = state.get("last_gen_throughput")
+                break
+    return result
+
+def _llm_rate_state_for(root: str) -> dict[str, Any]:
+    with _LLM_RATE_LOCK:
+        state = _LLM_RATE_STATE.get(root)
+        if state is None:
+            state = {
+                "backend": None,
+                "backend_checked_at": 0.0,
+                "last_ts": None,
+                "in": None,
+                "out": None,
+                "slots": {},
+                "sticky_last": None,
+                "sticky_moves": 0,
+            }
+            _LLM_RATE_STATE[root] = state
+        return state
+
+def _detect_llm_backend(root: str) -> str | None:
+    """Cheap backend classification: /slots, /metrics, /server_info, then vLLM default."""
+    state = _llm_rate_state_for(root)
+    now = time.monotonic()
+    if state.get("backend") is not None and now - float(state.get("backend_checked_at") or 0) < _LLM_BACKEND_TTL_SECONDS:
+        return state.get("backend")
+    backend: str | None = None
+    try:
+        request = urllib.request.Request(f"{root}/slots", headers={"Accept": "application/json"})
+        with _urlopen_no_redirect(request, 1.0) as response:
+            if 200 <= response.status < 300:
+                body = response.read()
+            else:
+                body = b""
+        if body and parse_llamacpp_slots_tokens(body.decode("utf-8", errors="replace")) is not None:
+            backend = "llamacpp"
+    except (urllib.error.URLError, OSError, ValueError):
+        pass
+    if backend is None:
+        try:
+            request = urllib.request.Request(f"{root}/metrics", headers={"Accept": "text/plain"})
+            with _urlopen_no_redirect(request, 1.5) as response:
+                if 200 <= response.status < 300:
+                    body = response.read()
+                else:
+                    body = b""
+            if body and parse_prometheus_metric_sum(
+                body.decode("utf-8", errors="replace"), "vllm:generation_tokens_total"
+            ) is not None:
+                backend = "vllm"
+        except (urllib.error.URLError, OSError, ValueError):
+            pass
+    if backend is None:
+        for path in ("/server_info", "/get_server_info"):
+            try:
+                request = urllib.request.Request(f"{root}{path}", headers={"Accept": "application/json"})
+                with _urlopen_no_redirect(request, 1.0) as response:
+                    if 200 <= response.status < 300:
+                        body = response.read()
+                    else:
+                        body = b""
+                if body and parse_sglang_server_info(body.decode("utf-8", errors="replace")) is not None:
+                    backend = "sglang"
+                    break
+            except (urllib.error.URLError, OSError, ValueError):
+                continue
+    if backend is None:
+        # sparkDash defaults unknown OpenAI-compatible servers to vLLM; a
+        # /v1/models answer is enough to commit to the vLLM sampler for the TTL.
+        try:
+            request = urllib.request.Request(f"{root}/v1/models", headers={"Accept": "application/json"})
+            with _urlopen_no_redirect(request, 1.0) as response:
+                if 200 <= response.status < 300:
+                    backend = "vllm"
+        except (urllib.error.URLError, OSError, ValueError):
+            backend = None
+    with _LLM_RATE_LOCK:
+        state["backend"] = backend
+        state["backend_checked_at"] = now
+    return backend
+
+def _llm_rates_from_counters(state: dict[str, Any], now: float, in_total: float, out_total: float) -> tuple[float | None, float | None, bool]:
+    """Counter-diff rates. Returns (tok_s, prompt_tok_s, sampled_now)."""
+    last_ts = state.get("last_ts")
+    prev_in = state.get("in")
+    prev_out = state.get("out")
+    state["last_ts"] = now
+    state["in"] = in_total
+    state["out"] = out_total
+    if last_ts is None or prev_in is None or prev_out is None:
+        return None, None, True
+    dt = now - float(last_ts)
+    if dt <= 0 or dt >= 10:
+        return None, None, True
+    tok_s = max(0.0, (out_total - prev_out) / dt)
+    prompt_tok_s = max(0.0, (in_total - prev_in) / dt)
+    return round(tok_s * 100) / 100, round(prompt_tok_s * 100) / 100, True
+
+def sample_llm_serving_rates(base_url: str, allow_remote: bool = False) -> dict[str, Any] | None:
+    """Live decode/prefill tok/s for a running model endpoint (TTL-coalesced).
+
+    Loopback-only unless allow_remote (same SSRF posture as health probes).
+    All failures degrade to None fields; never raises.
+    """
+    root = _llm_root_url(base_url)
+    if not root:
+        return None
+    parsed = urllib.parse.urlparse(root)
+    host = parsed.hostname or ""
+    if not host:
+        return None
+    if not allow_remote and not is_loopback(host):
+        return None
+    state = _llm_rate_state_for(root)
+    now = time.monotonic()
+    with _LLM_RATE_LOCK:
+        last_ts = state.get("last_ts")
+        if last_ts is not None and now - float(last_ts) < _LLM_RATE_MIN_INTERVAL_SECONDS:
+            cached = state.get("cached_result")
+            if isinstance(cached, dict):
+                return dict(cached)
+    backend = _detect_llm_backend(root)
+    if backend is None:
+        return None
+    allow_remote_env = allow_remote or (os.environ.get("ALLOW_REMOTE_HEALTHCHECK") or "").lower() in ("1", "true", "yes")
+    result: dict[str, Any] = {
+        "backend": backend,
+        "tok_s": None,
+        "prompt_tok_s": None,
+        "kv_cache_usage": None,
+        "requests_running": None,
+        "requests_waiting": None,
+    }
+    if backend == "llamacpp":
+        try:
+            request = urllib.request.Request(f"{root}/slots", headers={"Accept": "application/json"})
+            with _urlopen_no_redirect(request, 1.5) as response:
+                if 200 <= response.status < 300:
+                    body = response.read()
+                else:
+                    body = b""
+            if body:
+                slots = parse_llamacpp_slots_tokens(body.decode("utf-8", errors="replace"))
+                if slots:
+                    total_out = sum(decoded for decoded, _ in slots.values())
+                    total_in = sum(prompted for _, prompted in slots.values())
+                    tok_s, prompt_tok_s, _ = _llm_rates_from_counters(state, now, float(total_in), float(total_out))
+                    result["tok_s"] = tok_s
+                    result["prompt_tok_s"] = prompt_tok_s
+        except (urllib.error.URLError, OSError, ValueError):
+            pass
+    elif backend == "vllm":
+        try:
+            request = urllib.request.Request(f"{root}/metrics", headers={"Accept": "text/plain"})
+            with _urlopen_no_redirect(request, 2.0) as response:
+                if 200 <= response.status < 300:
+                    body = response.read()
+                else:
+                    body = b""
+            if body:
+                text = body.decode("utf-8", errors="replace")
+                gen = parse_prometheus_metric_sum(text, "vllm:generation_tokens_total")
+                prompt = parse_prometheus_metric_sum(text, "vllm:prompt_tokens_total")
+                if gen is not None and prompt is not None:
+                    tok_s, prompt_tok_s, _ = _llm_rates_from_counters(state, now, prompt, gen)
+                    result["tok_s"] = tok_s
+                    result["prompt_tok_s"] = prompt_tok_s
+                result["kv_cache_usage"] = parse_prometheus_metric_sum(text, "vllm:gpu_cache_usage_perc")
+                result["requests_running"] = parse_prometheus_metric_sum(text, "vllm:num_requests_running")
+                result["requests_waiting"] = parse_prometheus_metric_sum(text, "vllm:num_requests_waiting")
+        except (urllib.error.URLError, OSError, ValueError):
+            pass
+    elif backend == "sglang":
+        info: dict[str, Any] | None = None
+        for path in ("/server_info", "/get_server_info"):
+            try:
+                request = urllib.request.Request(f"{root}{path}", headers={"Accept": "application/json"})
+                with _urlopen_no_redirect(request, 1.5) as response:
+                    if 200 <= response.status < 300:
+                        body = response.read()
+                    else:
+                        body = b""
+                if body:
+                    info = parse_sglang_server_info(body.decode("utf-8", errors="replace"))
+                    if info is not None:
+                        break
+            except (urllib.error.URLError, OSError, ValueError):
+                continue
+        if info is not None:
+            in_raw = info.get("input_tokens")
+            out_raw = info.get("output_tokens")
+            try:
+                if in_raw is not None and out_raw is not None:
+                    tok_s, prompt_tok_s, _ = _llm_rates_from_counters(state, now, float(in_raw), float(out_raw))
+                    result["tok_s"] = tok_s
+                    result["prompt_tok_s"] = prompt_tok_s
+            except (TypeError, ValueError):
+                pass
+            if result["tok_s"] is None and info.get("last_gen_throughput") is not None:
+                # Sticky gauge: report only while it moves, expire to 0 otherwise.
+                try:
+                    current = float(info["last_gen_throughput"])
+                except (TypeError, ValueError):
+                    current = 0.0
+                sticky_prev = state.get("sticky_last")
+                moves = 0 if current != sticky_prev else int(state.get("sticky_moves") or 0) + 1
+                with _LLM_RATE_LOCK:
+                    state["sticky_last"] = current
+                    state["sticky_moves"] = moves
+                result["tok_s"] = round(current * 100) / 100 if moves < 2 else 0.0
+    with _LLM_RATE_LOCK:
+        state["cached_result"] = dict(result)
+    return result

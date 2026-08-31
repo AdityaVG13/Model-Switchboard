@@ -88,6 +88,63 @@ enum HostMetricsPresentation {
         compactGPUStrip(metrics)
     }
 
+    /// "up 3d 4h" style uptime label; nil when the host did not report it.
+    static func uptimeLabel(_ metrics: HostMetricsPayload?) -> String? {
+        guard let seconds = metrics?.uptimeSeconds, seconds >= 0 else { return nil }
+        let duration = seconds
+        let days = Int(duration / 86400)
+        let hours = Int((duration.truncatingRemainder(dividingBy: 86400)) / 3600)
+        let minutes = Int((duration.truncatingRemainder(dividingBy: 3600)) / 60)
+        if days > 0 { return "up \(days)d \(hours)h" }
+        if hours > 0 { return "up \(hours)h \(minutes)m" }
+        return "up \(minutes)m"
+    }
+
+    /// "412.3/1830.0 GB" storage label; nil when unavailable.
+    static func storageLabel(_ metrics: HostMetricsPayload?) -> String? {
+        guard let storage = metrics?.storage,
+              let total = storage.totalMB, total > 0
+        else { return nil }
+        let used = storage.usedMB ?? 0
+        return String(format: "%.1f/%.1f GB", used / 1024, total / 1024)
+    }
+
+    /// "↓ 1.2 · ↑ 0.3 MB/s" network label; nil until the second sample.
+    static func networkLabel(_ metrics: HostMetricsPayload?) -> String? {
+        guard let network = metrics?.network else { return nil }
+        let rx = network.rxKbps.map { $0 / 1024 }
+        let tx = network.txKbps.map { $0 / 1024 }
+        guard rx != nil || tx != nil else { return nil }
+        let rxText = rx.map { String(format: "%.1f", $0) } ?? "-"
+        let txText = tx.map { String(format: "%.1f", $0) } ?? "-"
+        return "↓ \(rxText) · ↑ \(txText) MB/s"
+    }
+
+    /// Tailnet state for the Remote Hosts card: short label + detail.
+    static func tailnetLabel(_ metrics: HostMetricsPayload?) -> (label: String, detail: String?)? {
+        guard let tailnet = metrics?.tailscale else { return nil }
+        let warnings = tailnet.health
+        if tailnet.online == false {
+            return (label: "TAILNET OFF", detail: warnings.first)
+        }
+        if !warnings.isEmpty {
+            return (label: "TAILNET WARN", detail: warnings.first)
+        }
+        if tailnet.online == true {
+            return (label: "TAILNET OK", detail: tailnet.ipv4)
+        }
+        return nil
+    }
+
+    /// Compact tok/s label for a running row: "42.3 tok/s" or nil.
+    static func servingRateLabel(_ status: ModelProfileStatus) -> String? {
+        guard let tokS = status.serving?.tokS, tokS > 0 else { return nil }
+        if tokS >= 100 {
+            return String(format: "%.0f tok/s", tokS)
+        }
+        return String(format: "%.1f tok/s", tokS)
+    }
+
     static func percentLabel(_ value: Double?) -> String {
         guard let value else { return "-" }
         return "\(Int(value.rounded()))%"

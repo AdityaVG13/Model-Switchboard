@@ -78,6 +78,9 @@ from agent_core import (
     missing_local_model_artifacts,
     parse_env_profile,
     parse_json_profile,
+    parse_llamacpp_slots_tokens,
+    parse_prometheus_metric_sum,
+    parse_sglang_server_info,
     parse_tag_string,
     port_is_listening,
     port_listening_from_inventory,
@@ -88,8 +91,13 @@ from agent_core import (
     process_rss_mb,
     process_stat_state,
     process_vram_mb,
+    read_uptime_seconds,
     reap_child,
     resolve_model_artifact_fields,
+    sample_llm_serving_rates,
+    sample_network_rates,
+    storage_usage,
+    tailscale_health_snapshot,
     terminate_process_tree,
 )
 from discovery import (  # noqa: E402
@@ -106,7 +114,7 @@ from discovery import (  # noqa: E402
     status_dict_from_discovery,
 )
 
-AGENT_VERSION = "1.1.4"
+AGENT_VERSION = "1.2.0"
 
 MINIMUM_TOKEN_BYTES = 16
 
@@ -140,15 +148,9 @@ PROFILE_SCAN_MAX_DEPTH = 5
 PROFILE_SCAN_MAX_CANDIDATES = 8
 
 def is_tailscale_ip(address: str) -> bool:
-    """Tailscale assigns IPv4 from the CGNAT range 100.64.0.0/10."""
-    parts = address.split(".")
-    if len(parts) != 4:
-        return False
-    try:
-        first, second = int(parts[0]), int(parts[1])
-    except ValueError:
-        return False
-    return first == 100 and 64 <= second <= 127
+    """Deprecated alias kept for import compatibility; see agent_core."""
+    from agent_core import is_tailscale_ip as _impl
+    return _impl(address)
 
 @dataclass(frozen=True)
 class TailscalePresence:
@@ -387,7 +389,12 @@ def host_metrics_payload() -> dict[str, Any]:
     gpus = [dict(entry) for entry in (gpu.get("gpus") or [])]
     gpu_source = gpu.get("source") or "unavailable"
     vram_by_pid = gpu.get("vram_by_pid") or {}
+    proc_names = gpu.get("process_names") or {}
     _apply_unified_memory_vram(gpus, vram_by_pid, mem if isinstance(mem, dict) else None)
+    uptime = read_uptime_seconds()
+    storage = storage_usage("/")
+    network = sample_network_rates()
+    tailscale = tailscale_health_snapshot()
     return {
         "host": hostname,
         "collected_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -396,9 +403,17 @@ def host_metrics_payload() -> dict[str, Any]:
         "gpus": gpus,
         "gpu_source": gpu_source,
         "processes": [
-            {"pid": pid, "vram_mb": round(float(mb) * 10) / 10}
+            {
+                "pid": pid,
+                "vram_mb": round(float(mb) * 10) / 10,
+                "name": proc_names.get(pid),
+            }
             for pid, mb in sorted((gpu.get("vram_by_pid") or {}).items())
         ],
+        "uptime_seconds": round(uptime) if uptime is not None else None,
+        "storage": storage,
+        "network": network,
+        "tailscale": tailscale,
         "agent_version": AGENT_VERSION,
     }
 
@@ -1477,6 +1492,16 @@ class AgentService:
         # the profile's RUNTIME + START_COMMAND). The live process command
         # never overrides the configured runtime here; discovery rows get their
         # runtime inferred once at the discovery boundary instead.
+        # Live serving rates for running rows (llama.cpp /slots, vLLM /metrics,
+        # sglang /server_info). Loopback-only unless ALLOW_REMOTE_HEALTHCHECK,
+        # same SSRF posture as health probes; all failures degrade to None.
+        llm_rates: dict[str, Any] | None = None
+        if alive and ready_flag:
+            rates_root = profile.base_url or ""
+            llm_rates = sample_llm_serving_rates(
+                rates_root,
+                allow_remote=(os.environ.get("ALLOW_REMOTE_HEALTHCHECK") or "").lower() in ("1", "true", "yes"),
+            )
         return {
             "profile": profile.name,
             "display_name": display_name,
@@ -1502,6 +1527,7 @@ class AgentService:
             "log_path": profile.log_path,
             "source": "profile",
             "missing_artifacts": missing,
+            "serving": llm_rates,
         }
 
     # -- lifecycle ---------------------------------------------------------

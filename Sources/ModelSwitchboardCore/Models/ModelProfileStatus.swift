@@ -29,6 +29,9 @@ public struct ModelProfileStatus: Codable, Identifiable, Equatable, Sendable {
     public let origin: Origin
     /// Absolute/expanded paths the agent could not find (may be empty).
     public let missingArtifacts: [String]?
+    /// Live serving rates (tok/s etc.) for running rows; nil for old agents
+    /// or when the backend probe fails.
+    public let serving: ServingMetrics?
 
     public var id: String { profile }
 
@@ -114,7 +117,8 @@ public struct ModelProfileStatus: Codable, Identifiable, Equatable, Sendable {
         command: String?,
         logPath: String? = nil,
         origin: Origin = .unknown,
-        missingArtifacts: [String]? = nil
+        missingArtifacts: [String]? = nil,
+        serving: ServingMetrics? = nil
     ) {
         self.profile = profile
         self.displayName = displayName
@@ -137,6 +141,7 @@ public struct ModelProfileStatus: Codable, Identifiable, Equatable, Sendable {
         self.logPath = logPath
         self.origin = origin
         self.missingArtifacts = missingArtifacts
+        self.serving = serving
     }
 
     enum CodingKeys: String, CodingKey {
@@ -161,6 +166,7 @@ public struct ModelProfileStatus: Codable, Identifiable, Equatable, Sendable {
         case logPath = "log_path"
         case origin = "source"
         case missingArtifacts = "missing_artifacts"
+        case serving
     }
 
     /// Parse at the boundary: `log_path` absent/null decodes to nil (no
@@ -189,6 +195,7 @@ public struct ModelProfileStatus: Codable, Identifiable, Equatable, Sendable {
         logPath = try container.decodeIfPresent(String.self, forKey: .logPath)
         origin = Origin(wireValue: try container.decodeIfPresent(String.self, forKey: .origin))
         missingArtifacts = try container.decodeIfPresent([String].self, forKey: .missingArtifacts)
+        serving = try container.decodeIfPresent(ServingMetrics.self, forKey: .serving)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -217,6 +224,9 @@ public struct ModelProfileStatus: Codable, Identifiable, Equatable, Sendable {
             try container.encode(origin.rawValue, forKey: .origin)
         }
         try container.encodeIfPresent(missingArtifacts, forKey: .missingArtifacts)
+        if let serving {
+            try container.encode(serving, forKey: .serving)
+        }
     }
 }
 

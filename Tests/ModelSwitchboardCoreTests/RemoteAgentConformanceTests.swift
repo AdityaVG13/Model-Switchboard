@@ -401,7 +401,7 @@ struct RemoteAgentConformanceTests {
             "launch_mode", "host", "port", "base_url", "request_model",
             "server_model_id", "pid", "running", "ready", "server_ids", "rss_mb",
             "vram_mb", "command", "log_path", "source",
-            "missing_artifacts",
+            "missing_artifacts", "serving",
         ]
         for status in statuses {
             #expect(Set(status.keys) == allowedStatusKeys)

@@ -114,13 +114,18 @@ struct ProfileListRowView: View {
         ) {
             parts.append(memory)
         }
-        let benchRows = store.benchmark?.latest?.rows.filter { $0.profile == profile.profile } ?? []
-        if let tok = benchRows.compactMap(\.decodeTokensPerSec).max() {
-            parts.append(String(format: "%.1f t/s", tok))
-        }
-        if let best = benchRows.max(by: { ($0.decodeTokensPerSec ?? -1) < ($1.decodeTokensPerSec ?? -1) }),
-           let ttft = best.ttftMS {
-            parts.append(String(format: "%.0f ms", ttft))
+        // Live serving rate (agent-reported) outranks the stored benchmark row.
+        if let serving = HostMetricsPresentation.servingRateLabel(profile) {
+            parts.append(serving)
+        } else {
+            let benchRows = store.benchmark?.latest?.rows.filter { $0.profile == profile.profile } ?? []
+            if let tok = benchRows.compactMap(\.decodeTokensPerSec).max() {
+                parts.append(String(format: "%.1f t/s", tok))
+            }
+            if let best = benchRows.max(by: { ($0.decodeTokensPerSec ?? -1) < ($1.decodeTokensPerSec ?? -1) }),
+               let ttft = best.ttftMS {
+                parts.append(String(format: "%.0f ms", ttft))
+            }
         }
         if showReachability, isDisplayedRunning, reachableEndpointURL == nil {
             parts.append(endpointUnavailableHint ?? "not reachable")

@@ -3,6 +3,11 @@
 All notable changes to this project are documented in this file.
 
 ## [Unreleased]
+### Added
+
+- sparkDash-derived host visibility for every remote gateway (agent 1.2.0): uptime on the gateway header, storage and network rate readouts, tailnet self-health (online state, backend state, warning reasons - catches the "healthy on LAN but off-tailnet" blind spot), and GPU process names next to running models.
+- Live LLM serving rates on model rows and the Remote Hosts panel: decode/prefill tok/s from llama.cpp `/slots`, vLLM Prometheus `/metrics`, and sglang `/server_info` counters, diffed over time so idle reads 0; plus KV-cache usage and request queue depth for vLLM. Loopback-only unless `ALLOW_REMOTE_HEALTHCHECK`, same SSRF posture as health probes; every probe failure degrades to a hidden label, never an error.
+
 ### Fixed
 
 - Gateway agent updates can no longer hang forever on "Pushing agent…": each deploy step is killed at a 120s deadline with a pointed message, and Tailscale SSH re-auth prompts ("To authenticate, visit https://login.tailscale.com/…") are classified into remediation instead of stalling BatchMode ssh silently.

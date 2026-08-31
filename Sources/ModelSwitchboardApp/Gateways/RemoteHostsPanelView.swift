@@ -93,6 +93,11 @@ struct RemoteHostsPanelView: View {
                                 .font(.system(size: 13.5, weight: .semibold))
                                 .foregroundStyle(theme.label)
                                 .lineLimit(1)
+                            if let uptime = HostMetricsPresentation.uptimeLabel(metrics) {
+                                Text(uptime)
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(theme.faint)
+                            }
                             Button {
                                 renamingGatewayID = runtime.id
                                 renameDraft = runtime.name
@@ -198,6 +203,39 @@ struct RemoteHostsPanelView: View {
                     )
                 }
 
+                if let storage = HostMetricsPresentation.storageLabel(metrics) {
+                    Text("STORAGE \(storage)")
+                        .font(.system(size: 9.5, design: .monospaced))
+                        .foregroundStyle(theme.sub)
+                        .lineLimit(1)
+                }
+                if let network = HostMetricsPresentation.networkLabel(metrics) {
+                    Text(network)
+                        .font(.system(size: 9.5, design: .monospaced))
+                        .foregroundStyle(theme.sub)
+                        .lineLimit(1)
+                }
+                if let tailnet = HostMetricsPresentation.tailnetLabel(metrics) {
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(tailnet.label.contains("OFF")
+                                ? DashboardTheme.stopRed
+                                : (tailnet.label.contains("WARN") ? DashboardTheme.pendingOrange : DashboardTheme.runningGreen))
+                            .frame(width: 6, height: 6)
+                        Text(tailnet.label)
+                            .font(.system(size: 9.5, weight: .semibold))
+                            .kerning(0.5)
+                            .foregroundStyle(theme.sub)
+                        if let detail = tailnet.detail {
+                            Text(detail)
+                                .font(.system(size: 9.5))
+                                .foregroundStyle(theme.faint)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
+                }
+
                 if let gpus = metrics?.gpus, gpus.count > 1 {
                     ForEach(gpus) { gpu in
                         Text(gpuLine(gpu))
@@ -239,6 +277,11 @@ struct RemoteHostsPanelView: View {
                                 .foregroundStyle(theme.label)
                                 .lineLimit(1)
                             Spacer(minLength: 0)
+                            if let rate = HostMetricsPresentation.servingRateLabel(status) {
+                                Text(rate)
+                                    .font(.system(size: 10.5, design: .monospaced))
+                                    .foregroundStyle(accent)
+                            }
                             Text(HostMetricsPresentation.profileMemoryLabel(
                                 status: status,
                                 metrics: metrics,
@@ -246,6 +289,14 @@ struct RemoteHostsPanelView: View {
                             ) ?? "- · :" + status.port)
                                 .font(.system(size: 10.5, design: .monospaced))
                                 .foregroundStyle(theme.sub)
+                        }
+                        if let procName = gpuProcessName(for: status, metrics: metrics) {
+                            Text(procName)
+                                .font(.system(size: 9.5, design: .monospaced))
+                                .foregroundStyle(theme.faint)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .padding(.leading, 2)
                         }
                     }
                 }
@@ -258,6 +309,12 @@ struct RemoteHostsPanelView: View {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(theme.panelBorder, lineWidth: 1)
         }
+    }
+
+    /// nvidia-smi compute-app process name matching a running profile's pid.
+    private func gpuProcessName(for status: ModelProfileStatus, metrics: HostMetricsPayload?) -> String? {
+        guard let pid = status.pid else { return nil }
+        return metrics?.processes.first(where: { $0.pid == pid })?.name
     }
 
     private func metricTile(label: String, value: String, detail: String?) -> some View {
