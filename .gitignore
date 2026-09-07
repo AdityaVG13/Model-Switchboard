@@ -93,3 +93,6 @@ tests/artifacts/
 
 # state-space-collapse campaign artifacts (machine-local, never ship)
 .state-space-collapse/
+
+# module-coupling-topology skill books (machine-local, never ship)
+.module-coupling-topology/
