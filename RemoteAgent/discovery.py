@@ -25,18 +25,18 @@ from agent_core import (
     Profile,
     RUNTIME_SPECS,
     SCAN_ROOTS_ENV,
-    _WEIGHT_SUFFIXES,
-    _looks_like_local_fs_path,
-    _urlopen_no_redirect,
+    WEIGHT_SUFFIXES,
     canonical_runtime,
     first_known,
     listener_pid_from_inventory,
     load_agent_config,
+    looks_like_local_fs_path,
     port_is_listening,
     process_command,
     process_is_alive,
     process_rss_mb,
     process_vram_mb,
+    urlopen_no_redirect,
 )
 
 PORT_CLAIM_DIR_RE = re.compile(r"^\d{2,5}$")
@@ -113,6 +113,9 @@ def _configured_scan_roots(agent_root: Path | None = None) -> list[Path]:
                 if isinstance(item, str) and item.strip():
                     roots.append(Path(item).expanduser())
     return roots
+
+
+configured_scan_roots = _configured_scan_roots
 
 
 def parse_loose_env_assignments(file: Path) -> dict[str, str]:
@@ -569,7 +572,7 @@ def probe_model_endpoint(port: int, host: str = "127.0.0.1") -> ProbeOutcome:
     for url in health_urls:
         try:
             request = urllib.request.Request(url, headers={"Accept": "application/json"})
-            with _urlopen_no_redirect(request, DISCOVERY_PROBE_TIMEOUT) as response:
+            with urlopen_no_redirect(request, DISCOVERY_PROBE_TIMEOUT) as response:
                 if 200 <= response.status < 300:
                     health_ok = True
                     break
@@ -579,7 +582,7 @@ def probe_model_endpoint(port: int, host: str = "127.0.0.1") -> ProbeOutcome:
     models_url = f"http://{host}:{port}/v1/models"
     try:
         request = urllib.request.Request(models_url, headers={"Accept": "application/json"})
-        with _urlopen_no_redirect(request, DISCOVERY_PROBE_TIMEOUT) as response:
+        with urlopen_no_redirect(request, DISCOVERY_PROBE_TIMEOUT) as response:
             body = response.read()
         parsed = json.loads(body)
         entries = parsed.get("data", []) if isinstance(parsed, dict) else []
@@ -1012,7 +1015,7 @@ def profile_from_claim(claim: dict[str, Any]) -> Profile:
     # missing_artifacts does not false-positive on live directory checkpoints.
     if model_file_flag:
         model_file = model_file_flag
-    elif any(model_raw.lower().endswith(suffix) for suffix in _WEIGHT_SUFFIXES):
+    elif any(model_raw.lower().endswith(suffix) for suffix in WEIGHT_SUFFIXES):
         model_file = model_raw
     elif request_s.endswith(".gguf") and not is_placeholder_model_name(request_s):
         model_file = request_s
@@ -1022,8 +1025,8 @@ def profile_from_claim(claim: dict[str, Any]) -> Profile:
     if not model_dir and model_raw and not model_file:
         candidate = Path(model_raw).expanduser()
         if candidate.is_dir() or (
-            _looks_like_local_fs_path(model_raw)
-            and not any(model_raw.lower().endswith(s) for s in _WEIGHT_SUFFIXES)
+            looks_like_local_fs_path(model_raw)
+            and not any(model_raw.lower().endswith(s) for s in WEIGHT_SUFFIXES)
         ):
             model_dir = model_raw
     values: dict[str, str] = {

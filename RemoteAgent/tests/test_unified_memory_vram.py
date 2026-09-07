@@ -11,17 +11,18 @@ AGENT_DIR = Path(__file__).resolve().parents[1]
 if str(AGENT_DIR) not in sys.path:
     sys.path.insert(0, str(AGENT_DIR))
 
+from agent_core import apply_unified_memory_vram, nvidia_smi_number  # noqa: E402
 import model_switchboard_agent as agent  # noqa: E402
 
 
 class NvidiaSmiNumberTests(unittest.TestCase):
     def test_na_and_not_supported_are_missing(self) -> None:
         for raw in ("N/A", "[N/A]", "n/a", "Not Supported", "[Not Supported]", ""):
-            self.assertIsNone(agent._nvidia_smi_number(raw))
+            self.assertIsNone(nvidia_smi_number(raw))
 
     def test_numeric(self) -> None:
-        self.assertEqual(agent._nvidia_smi_number(" 3 "), 3.0)
-        self.assertEqual(agent._nvidia_smi_number("26009.6"), 26009.6)
+        self.assertEqual(nvidia_smi_number(" 3 "), 3.0)
+        self.assertEqual(nvidia_smi_number("26009.6"), 26009.6)
 
 
 class UnifiedMemoryVRAMTests(unittest.TestCase):
@@ -37,7 +38,7 @@ class UnifiedMemoryVRAMTests(unittest.TestCase):
             }
         ]
         # 25.4 GiB attributed; 34 GiB classic /proc used must not leak into VRAM.
-        agent._apply_unified_memory_vram(
+        apply_unified_memory_vram(
             gpus,
             vram_by_pid={100: 14000.0, 200: 12009.6},
             mem={"used_mb": 34816.0, "total_mb": 124620.8},
@@ -48,7 +49,7 @@ class UnifiedMemoryVRAMTests(unittest.TestCase):
 
     def test_uma_idle_is_zero_not_host_ram(self) -> None:
         gpus = [{"vram_used_mb": None, "vram_total_mb": None}]
-        agent._apply_unified_memory_vram(
+        apply_unified_memory_vram(
             gpus,
             vram_by_pid={},
             mem={"used_mb": 34816.0, "total_mb": 124620.8},
@@ -58,7 +59,7 @@ class UnifiedMemoryVRAMTests(unittest.TestCase):
 
     def test_discrete_gpu_keeps_smi_used(self) -> None:
         gpus = [{"vram_used_mb": 55296.0, "vram_total_mb": 131072.0}]
-        agent._apply_unified_memory_vram(
+        apply_unified_memory_vram(
             gpus,
             vram_by_pid={1: 100.0},
             mem={"used_mb": 32000.0, "total_mb": 64000.0},
@@ -83,8 +84,8 @@ class UnifiedMemoryVRAMTests(unittest.TestCase):
         }
         ram = {"used_mb": 34816.0, "total_mb": 124620.8, "percent": 27.9, "source": "proc"}
         with mock.patch.object(agent, "gpu_metrics_snapshot", return_value=snap):
-            with mock.patch.object(agent, "_sample_memory", return_value=ram):
-                with mock.patch.object(agent, "_sample_cpu_percent", return_value=1.0):
+            with mock.patch.object(agent, "sample_memory", return_value=ram):
+                with mock.patch.object(agent, "sample_cpu_percent", return_value=1.0):
                     payload = agent.host_metrics_payload()
         self.assertAlmostEqual(payload["gpus"][0]["vram_used_mb"], 26009.6)
         self.assertAlmostEqual(payload["gpus"][0]["vram_total_mb"], 124620.8)
@@ -106,8 +107,8 @@ class UnifiedMemoryVRAMTests(unittest.TestCase):
         }
         ram = {"used_mb": 34816.0, "total_mb": 124620.8, "percent": 27.9, "source": "proc"}
         with mock.patch.object(agent, "gpu_metrics_snapshot", return_value=snap):
-            with mock.patch.object(agent, "_sample_memory", return_value=ram):
-                with mock.patch.object(agent, "_sample_cpu_percent", return_value=1.0):
+            with mock.patch.object(agent, "sample_memory", return_value=ram):
+                with mock.patch.object(agent, "sample_cpu_percent", return_value=1.0):
                     payload = agent.host_metrics_payload()
         self.assertIsNone(gpu_entry["vram_used_mb"])
         self.assertIsNone(gpu_entry["vram_total_mb"])

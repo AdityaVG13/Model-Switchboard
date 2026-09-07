@@ -48,25 +48,8 @@ from agent_core import (
     TERMINATE_TIMEOUT_SECONDS,
     UnsupportedError,
     UsageError,
-    _CPU_PREV,
-    _CPU_SAMPLE_LOCK,
-    _GPU_METRICS_CACHE,
-    _GPU_METRICS_TTL_SECONDS,
-    _NVIDIA_SMI_MISSING,
-    _NoHTTPRedirectHandler,
-    _WEIGHT_SUFFIXES,
-    _apply_unified_memory_vram,
-    _looks_like_local_fs_path,
-    _nvidia_smi_number,
-    _parse_env_value,
-    _proc_stat_table_available,
-    _read_proc_meminfo,
-    _run_nvidia_smi_query,
-    _sample_cpu_percent,
-    _sample_memory,
-    _signal_process_tree,
-    _urlopen_no_redirect,
     agent_config_path,
+    apply_unified_memory_vram,
     canonical_runtime,
     first_known,
     gpu_metrics_snapshot,
@@ -94,18 +77,21 @@ from agent_core import (
     read_uptime_seconds,
     reap_child,
     resolve_model_artifact_fields,
+    sample_cpu_percent,
     sample_llm_serving_rates,
+    sample_memory,
     sample_network_rates,
     storage_usage,
     tailscale_health_snapshot,
     terminate_process_tree,
+    urlopen_no_redirect,
 )
 from discovery import (  # noqa: E402
     PORT_CLAIM_DIR_RE,
     PORT_CLAIM_MARKERS,
-    _configured_scan_roots,
     clear_listening_tcp_cache,
     command_looks_like_model_server,
+    configured_scan_roots,
     discover_live_model_endpoints,
     list_listening_tcp,
     profile_from_claim,
@@ -382,15 +368,15 @@ def host_metrics_payload() -> dict[str, Any]:
     Graceful when nvidia-smi or /proc are absent (old agent / non-GPU host).
     """
     gpu = gpu_metrics_snapshot()
-    mem = _sample_memory()
-    cpu_percent = _sample_cpu_percent()
+    mem = sample_memory()
+    cpu_percent = sample_cpu_percent()
     hostname = socket.gethostname()
     # Copy GPU dicts so UMA fill does not mutate the nvidia-smi TTL cache.
     gpus = [dict(entry) for entry in (gpu.get("gpus") or [])]
     gpu_source = gpu.get("source") or "unavailable"
     vram_by_pid = gpu.get("vram_by_pid") or {}
     proc_names = gpu.get("process_names") or {}
-    _apply_unified_memory_vram(gpus, vram_by_pid, mem if isinstance(mem, dict) else None)
+    apply_unified_memory_vram(gpus, vram_by_pid, mem if isinstance(mem, dict) else None)
     uptime = read_uptime_seconds()
     storage = storage_usage("/")
     network = sample_network_rates()
@@ -505,7 +491,7 @@ def _directory_has_loadable_profiles(directory: Path) -> bool:
 
 def _profiles_dir_from_scan_roots(root: Path) -> Path | None:
     """First configured scan_roots entry that already holds port-claim markers."""
-    for scan_root in _configured_scan_roots(root):
+    for scan_root in configured_scan_roots(root):
         try:
             resolved = scan_root.expanduser().resolve()
         except OSError:
@@ -1422,7 +1408,7 @@ class AgentService:
         )
         started = time.perf_counter()
         try:
-            with _urlopen_no_redirect(request, 30) as response:
+            with urlopen_no_redirect(request, 30) as response:
                 raw = response.read()
             elapsed_s = max(time.perf_counter() - started, 1e-6)
             payload = json.loads(raw.decode("utf-8"))
@@ -1933,7 +1919,7 @@ class AgentService:
             return False, []
         request = urllib.request.Request(url, headers={"Accept": "application/json"})
         try:
-            with _urlopen_no_redirect(request, HEALTH_TIMEOUT_SECONDS) as response:
+            with urlopen_no_redirect(request, HEALTH_TIMEOUT_SECONDS) as response:
                 body = response.read()
         except (urllib.error.URLError, OSError, ValueError):
             return False, []

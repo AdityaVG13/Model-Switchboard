@@ -1512,3 +1512,13 @@ def sample_llm_serving_rates(base_url: str, allow_remote: bool = False) -> dict[
     with _LLM_RATE_LOCK:
         state["cached_result"] = dict(result)
     return result
+
+
+# F01 public surface. Peers import these; leading-underscore names stay internal.
+WEIGHT_SUFFIXES = _WEIGHT_SUFFIXES
+apply_unified_memory_vram = _apply_unified_memory_vram
+looks_like_local_fs_path = _looks_like_local_fs_path
+nvidia_smi_number = _nvidia_smi_number
+sample_cpu_percent = _sample_cpu_percent
+sample_memory = _sample_memory
+urlopen_no_redirect = _urlopen_no_redirect

@@ -122,7 +122,7 @@ class AnyIdHealthTests(unittest.TestCase):
                 values={"REQUEST_MODEL": "port-8050", "PORT": "8050", "HEALTHCHECK_ANY_ID": "1"},
             )
             with mock.patch.object(
-                agent, "_urlopen_no_redirect", lambda request, timeout: self._FakeResponse(self.MODELS_BODY)
+                agent, "urlopen_no_redirect", lambda request, timeout: self._FakeResponse(self.MODELS_BODY)
             ):
                 ready, ids = service._probe_health(profile)
             self.assertTrue(ready)
@@ -140,7 +140,7 @@ class AnyIdHealthTests(unittest.TestCase):
                 },
             )
             with mock.patch.object(
-                agent, "_urlopen_no_redirect", lambda request, timeout: self._FakeResponse(self.MODELS_BODY)
+                agent, "urlopen_no_redirect", lambda request, timeout: self._FakeResponse(self.MODELS_BODY)
             ):
                 ready, ids = service._probe_health(profile)
             self.assertFalse(ready)
