@@ -82,3 +82,51 @@ private func sparkMetrics(
         HostMetricsPresentation.profileMemoryLabel(status: status, metrics: nil, isRunning: false) == nil
     )
 }
+
+@MainActor
+@Test func dashPresentationLabels() {
+    let metrics = HostMetricsPayload(
+        uptimeSeconds: 3 * 86400 + 4 * 3600 + 5 * 60,
+        storage: HostStorageMetrics(usedMB: 422_296.6, totalMB: 1_875_335.2, percent: 22.5, source: "statvfs"),
+        network: HostNetworkMetrics(rxKbps: 1240.5, txKbps: 310.2, source: "proc"),
+        tailscale: TailnetHealth(online: true, backendState: "Running", ipv4: "100.122.96.76", dnsName: nil, health: [])
+    )
+    #expect(HostMetricsPresentation.uptimeLabel(metrics) == "up 3d 4h")
+    #expect(HostMetricsPresentation.storageLabel(metrics) == "412.4/1831.4 GB")
+    #expect(HostMetricsPresentation.networkLabel(metrics) == "↓ 1.2 · ↑ 0.3 MB/s")
+    let tailnet = HostMetricsPresentation.tailnetLabel(metrics)
+    #expect(tailnet?.label == "TAILNET OK")
+    #expect(tailnet?.detail == "100.122.96.76")
+
+    // Offline + warning states surface, not hide.
+    let offline = HostMetricsPayload(
+        tailscale: TailnetHealth(online: false, backendState: "NeedsLogin", ipv4: nil, dnsName: nil, health: ["login expired"])
+    )
+    #expect(HostMetricsPresentation.tailnetLabel(offline)?.label == "TAILNET OFF")
+
+    let warned = HostMetricsPayload(
+        tailscale: TailnetHealth(online: true, backendState: "Running", ipv4: nil, dnsName: nil, health: ["derp relay issue"])
+    )
+    #expect(HostMetricsPresentation.tailnetLabel(warned)?.label == "TAILNET WARN")
+
+    // No data -> no label (graceful degradation).
+    #expect(HostMetricsPresentation.uptimeLabel(nil) == nil)
+    #expect(HostMetricsPresentation.tailnetLabel(HostMetricsPayload()) == nil)
+}
+
+@MainActor
+@Test func servingRateLabelFormats() {
+    func status(_ tokS: Double?) -> ModelProfileStatus {
+        ModelProfileStatus(
+            profile: "p", displayName: "P", runtime: "vllm", host: "127.0.0.1", port: "8050",
+            baseURL: "http://127.0.0.1:8050/v1", requestModel: "m", serverModelID: "m",
+            pid: 1, running: true, ready: true, serverIDs: [], rssMB: nil,
+            command: nil,
+            serving: tokS.map { ServingMetrics(backend: "vllm", tokS: $0) }
+        )
+    }
+    #expect(HostMetricsPresentation.servingRateLabel(status(42.31)) == "42.3 tok/s")
+    #expect(HostMetricsPresentation.servingRateLabel(status(123.4)) == "123 tok/s")
+    #expect(HostMetricsPresentation.servingRateLabel(status(0)) == nil)
+    #expect(HostMetricsPresentation.servingRateLabel(status(nil)) == nil)
+}
