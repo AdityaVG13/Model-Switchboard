@@ -299,7 +299,6 @@ enum ModelSwitchboardControllerMain {
       "command": command,
       "dry_run": true,
       "status": "planned",
-      "ok": true,
       "plan": profiles.map { ["action": command, "profile": $0] },
       "results": [],
     ])

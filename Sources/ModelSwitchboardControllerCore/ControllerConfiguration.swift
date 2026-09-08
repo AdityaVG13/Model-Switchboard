@@ -63,8 +63,7 @@ public struct ControllerConfiguration: Sendable, Equatable {
   }
 
   public static func isLoopback(_ host: String) -> Bool {
-    let value = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]")).lowercased()
-    return value == "localhost" || value == "127.0.0.1" || value == "::1"
+    LoopbackHost.isLoopback(host)
   }
 
   public static func from(arguments: [String], currentDirectory: URL) throws

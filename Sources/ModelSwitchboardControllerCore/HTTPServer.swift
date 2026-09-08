@@ -52,7 +52,7 @@ public final class ControllerHTTPServer: @unchecked Sendable {
         receive(connection, buffer: next)
       case .error(let status, let code, let message):
         let body =
-          (try? JSONSupport.data(["ok": false, "error": code, "message": message])) ?? Data()
+          (try? JSONSupport.data(["error": code, "message": message])) ?? Data()
         send(ControllerHTTPResponse(status: status, body: body), connection: connection)
       default:
         connection.cancel()

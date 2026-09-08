@@ -74,7 +74,7 @@
       "json": {},
       "headers": {"Authorization": "Bearer conformance-token-0000000000000001"}
     },
-    "expected": {"status": 200, "json_path_equals": {"ok": true}}
+    "expected": {"status": 200, "json_path_equals": {"error": null}}
   },
   {
     "id": "MSB-API-ACTION-001",
@@ -83,7 +83,7 @@
     "description": "POST /api/start starts the requested profile and returns an action response",
     "arrange": "start_profile_ok",
     "request": {"method": "POST", "path": "/api/start", "json": {"profile": "qwen35-a3b"}},
-    "expected": {"status": 200, "json_path_equals": {"ok": true}}
+    "expected": {"status": 200, "json_path_equals": {"error": null}}
   },
   {
     "id": "MSB-API-ACTION-002",
@@ -119,7 +119,7 @@
     "description": "Integration runs default to the sync action",
     "arrange": "integration_run",
     "request": {"method": "POST", "path": "/api/integrations/run", "json": {"integration": "droid"}},
-    "expected": {"status": 200, "json_path_equals": {"ok": true}}
+    "expected": {"status": 200, "json_path_equals": {"error": null}}
   },
   {
     "id": "MSB-API-BENCH-001",
@@ -134,7 +134,7 @@
     },
     "expected": {
       "status": 200,
-      "json_path_equals": {"ok": true},
+      "json_path_equals": {"error": null},
       "json_path_suffix": {"benchmark.log_path": "benchmark.log"}
     }
   },

@@ -224,9 +224,9 @@ check_write_permissions() {
 
 is_loopback_host() {
   local host
-  host="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  host="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -d '[]')"
   case "$host" in
-    localhost|127.*|::1|\[::1\]) return 0 ;;
+    localhost|127.0.0.1|::1) return 0 ;;
     *) return 1 ;;
   esac
 }

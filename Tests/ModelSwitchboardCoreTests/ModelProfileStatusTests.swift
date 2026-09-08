@@ -109,8 +109,11 @@ import ModelSwitchboardTestSupport
     #expect(LoopbackHost.isLoopback("127.0.0.1"))
     #expect(LoopbackHost.isLoopback("localhost"))
     #expect(LoopbackHost.isLoopback("::1"))
+    #expect(LoopbackHost.isLoopback("[::1]"))
     #expect(LoopbackHost.isLoopback("  LOCALHOST  "))
     #expect(!LoopbackHost.isLoopback("192.168.1.1"))
+    #expect(!LoopbackHost.isLoopback("127.1"))
+    #expect(!LoopbackHost.isLoopback(""))
     #expect(ModelFixtures.profileStatus(host: "127.0.0.1").usesLoopbackEndpoint)
     #expect(!ModelFixtures.profileStatus(host: "10.0.0.8", baseURL: "http://10.0.0.8:8081/v1").usesLoopbackEndpoint)
 }

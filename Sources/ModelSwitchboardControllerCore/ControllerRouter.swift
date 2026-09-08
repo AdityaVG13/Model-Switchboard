@@ -200,7 +200,8 @@ public final class ControllerRouter: @unchecked Sendable {
 
   private func fallback() -> ControllerHTTPResponse {
     ControllerHTTPResponse(
-      status: 500, body: Data("{\"error\":\"internal_error\"}".utf8))
+      status: 500,
+      body: Data("{\"error\":\"internal_error\",\"message\":\"internal error\"}".utf8))
   }
 
   private func constantTimeEqual(_ lhs: String, _ rhs: String) -> Bool {

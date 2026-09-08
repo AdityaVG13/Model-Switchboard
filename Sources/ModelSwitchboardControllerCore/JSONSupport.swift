@@ -42,8 +42,10 @@ public enum JSONSupport {
   }
 
   /// True when `/v1/models` JSON lists `id` in `.data[]`. Invalid JSON is a miss.
+  /// Empty `expected` never matches (identity must be explicit; use a sentinel id).
   public static func openaiModelsContains(id expected: String, json data: Data) -> Bool {
-    guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+    guard !expected.isEmpty,
+      let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
       let items = object["data"] as? [Any]
     else { return false }
     return items.contains { item in

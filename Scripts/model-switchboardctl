@@ -128,7 +128,7 @@ DOCS
 
 print_dry_run() {
   local action="$1" endpoint="$2" payload="$3"
-  printf '{\n  "schema_version": "1",\n  "tool": "model-switchboardctl",\n  "command": "%s",\n  "dry_run": true,\n  "status": "planned",\n  "ok": true,\n  "plan": [{"endpoint": "%s", "payload": %s}],\n  "results": []\n}\n' "$action" "$endpoint" "$payload"
+  printf '{\n  "schema_version": "1",\n  "tool": "model-switchboardctl",\n  "command": "%s",\n  "dry_run": true,\n  "status": "planned",\n  "plan": [{"endpoint": "%s", "payload": %s}],\n  "results": []\n}\n' "$action" "$endpoint" "$payload"
 }
 
 is_dry_run() {

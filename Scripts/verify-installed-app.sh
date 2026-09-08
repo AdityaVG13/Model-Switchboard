@@ -338,8 +338,8 @@ first_profile() {
   json="$(status_json)" || return 1
   printf '%s\n' "$json" | jq -r '
     def loopback:
-      ((. // "") | ascii_downcase) as $h
-      | ($h == "" or $h == "127.0.0.1" or $h == "::1" or $h == "localhost");
+      ((. // "") | ascii_downcase | gsub("\\\\[|\\\\]"; "")) as $h
+      | ($h == "127.0.0.1" or $h == "::1" or $h == "localhost");
     .statuses
     | sort_by(
         (if .running then 0 else 1 end),
