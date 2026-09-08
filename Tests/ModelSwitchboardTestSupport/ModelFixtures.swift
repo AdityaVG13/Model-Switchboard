@@ -20,7 +20,7 @@ public enum ModelFixtures {
         command: String? = nil,
         logPath: String? = "/tmp/qwen.log",
         origin: ModelProfileStatus.Origin = .unknown,
-        missingArtifacts: [String]? = nil
+        missingArtifacts: [String]? = []
     ) -> ModelProfileStatus {
         ModelProfileStatus(
             profile: profile,

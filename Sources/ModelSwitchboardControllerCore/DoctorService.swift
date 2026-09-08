@@ -62,7 +62,7 @@ public final class DoctorService: @unchecked Sendable {
       ),
       launchAgent: LaunchAgentStatus(
         plistPath: plist.path,
-        installed: launchAgentRunning || fileManager.fileExists(atPath: plist.path),
+        installed: fileManager.fileExists(atPath: plist.path),
         running: launchAgentRunning
       ),
       integrations: integrations,
@@ -84,9 +84,7 @@ public final class DoctorService: @unchecked Sendable {
       "schema_version": report.schemaVersion ?? "1",
       "tool_version": report.toolVersion ?? toolVersion(),
       "generated_at": report.generatedAt ?? ISO8601DateFormatter().string(from: Date()),
-      "healthy": report.healthy,
       "finding_count": report.findings?.count ?? 0,
-      "auto_fixable_count": report.findings?.filter(\.autoFixable).count ?? 0,
     ]
   }
 

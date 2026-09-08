@@ -117,7 +117,7 @@ public struct ModelProfileStatus: Codable, Identifiable, Equatable, Sendable {
         command: String?,
         logPath: String? = nil,
         origin: Origin = .unknown,
-        missingArtifacts: [String]? = nil,
+        missingArtifacts: [String]? = [],
         serving: ServingMetrics? = nil
     ) {
         self.profile = profile
@@ -194,7 +194,7 @@ public struct ModelProfileStatus: Codable, Identifiable, Equatable, Sendable {
         command = try container.decodeIfPresent(String.self, forKey: .command)
         logPath = try container.decodeIfPresent(String.self, forKey: .logPath)
         origin = Origin(wireValue: try container.decodeIfPresent(String.self, forKey: .origin))
-        missingArtifacts = try container.decodeIfPresent([String].self, forKey: .missingArtifacts)
+        missingArtifacts = try container.decodeIfPresent([String].self, forKey: .missingArtifacts) ?? []
         serving = try container.decodeIfPresent(ServingMetrics.self, forKey: .serving)
     }
 
@@ -219,14 +219,9 @@ public struct ModelProfileStatus: Codable, Identifiable, Equatable, Sendable {
         try container.encodeIfPresent(vramMB, forKey: .vramMB)
         try container.encodeIfPresent(command, forKey: .command)
         try container.encodeIfPresent(logPath, forKey: .logPath)
-        // Unknown origin is omitted - the local controller never had a source.
-        if origin != .unknown {
-            try container.encode(origin.rawValue, forKey: .origin)
-        }
-        try container.encodeIfPresent(missingArtifacts, forKey: .missingArtifacts)
-        if let serving {
-            try container.encode(serving, forKey: .serving)
-        }
+        try container.encode(origin.rawValue, forKey: .origin)
+        try container.encode(missingArtifacts ?? [], forKey: .missingArtifacts)
+        try container.encode(serving, forKey: .serving)
     }
 }
 
@@ -299,7 +294,11 @@ public extension ModelProfileStatus {
     }
 
     var stateLabel: String {
-        lifecycle.isRunning ? "Running" : "Not Running"
+        switch lifecycle {
+        case .running, .readyUnowned: return "Running"
+        case .starting: return "Starting"
+        case .stopped: return "Not Running"
+        }
     }
 
     var stateDescription: String {

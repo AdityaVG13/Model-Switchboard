@@ -1,5 +1,14 @@
 import Foundation
 
+enum EnvFlag {
+  static func isEnabled(_ raw: String?) -> Bool {
+    switch (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+    case "1", "true", "yes": return true
+    default: return false
+    }
+  }
+}
+
 public struct ControllerProfile: Sendable, Equatable {
   public let name: String
   public let values: [String: String]
@@ -27,10 +36,19 @@ public struct ControllerProfile: Sendable, Equatable {
   public var requestModel: String { values["REQUEST_MODEL"] ?? name }
   public var serverModelID: String { values["SERVER_MODEL_ID"] ?? requestModel }
   public var healthcheckMode: String {
-    (values["HEALTHCHECK_MODE"] ?? "openai-models").lowercased()
+    switch (values["HEALTHCHECK_MODE"] ?? "openai-models").lowercased() {
+    case "http-200", "http200": return "http-200"
+    case "disabled", "off", "none": return "disabled"
+    default: return "openai-models"
+    }
   }
   public var endpointHost: String {
-    if let host = values["HOST"], !host.isEmpty { return host }
+    if let host = values["HOST"], !host.isEmpty {
+      if host == "0.0.0.0" || host == "::" || host == "[::]" {
+        return ControllerConfiguration.defaultHost
+      }
+      return host
+    }
     return URL(string: baseURL)?.host ?? ControllerConfiguration.defaultHost
   }
   public var endpointPort: String {
@@ -362,7 +380,9 @@ public enum RuntimeCatalog {
       ?? RuntimeSpec(label: profile.runtime, tags: ["managed", "custom"], launchMode: "adapter")
     if profile["START_COMMAND"] != nil {
       spec = RuntimeSpec(label: spec.label, tags: spec.tags, launchMode: "command")
-    } else if let launchMode = profile["LAUNCH_MODE"]?.lowercased(), !launchMode.isEmpty {
+    } else if let launchMode = profile["LAUNCH_MODE"]?.lowercased(),
+      ["adapter", "external", "command"].contains(launchMode)
+    {
       spec = RuntimeSpec(label: spec.label, tags: spec.tags, launchMode: launchMode)
     }
     return spec

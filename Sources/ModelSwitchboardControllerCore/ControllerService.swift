@@ -122,7 +122,10 @@ public final class ControllerService: @unchecked Sendable {
       serverIDs: health.serverIDs,
       rssMB: rssMB(pid),
       command: processCommand(pid),
-      logPath: profile.logPath
+      logPath: profile.logPath,
+      origin: .profile,
+      missingArtifacts: [],
+      serving: nil
     )
   }
 
@@ -179,7 +182,7 @@ public final class ControllerService: @unchecked Sendable {
           stopError = error
         }
       }
-      if profile["STOP_COMMAND_ONLY"] != "1" {
+      if !EnvFlag.isEnabled(profile["STOP_COMMAND_ONLY"]) {
         terminateProfileProcesses(profile, primaryPID: primaryPID)
         if !waitUntilStopped(profile, primaryPID: primaryPID) {
           terminateProfileProcesses(profile, primaryPID: primaryPID)
@@ -372,8 +375,8 @@ public final class ControllerService: @unchecked Sendable {
     let lowered = command.lowercased()
     let markers = [
       "llama-server", "llama.cpp", "llamacpp", "vllm", "sglang", "ollama",
-      "tabbyapi", "aphrodite", "mlx", "mlc_llm", "kobold", "exllama",
-      "lmdeploy", "tensorrt", "trtllm", "localai", "gguf",
+      "tabbyapi", "aphrodite", "mlx", "mlc_llm", "koboldcpp", "kobold", "exllama",
+      "tgi-", "openai-compatible", "lmdeploy", "tensorrt", "trtllm", "localai", "gguf",
     ]
     return markers.contains { lowered.contains($0) }
   }
@@ -382,8 +385,8 @@ public final class ControllerService: @unchecked Sendable {
     guard profile.healthcheckMode != "disabled", let url = URL(string: profile.healthcheckURL),
       ["http", "https"].contains(url.scheme?.lowercased() ?? "")
     else { return (false, []) }
-    let remoteAllowed = ["1", "true", "yes"].contains(
-      ProcessInfo.processInfo.environment["ALLOW_REMOTE_HEALTHCHECK"]?.lowercased() ?? "")
+    let remoteAllowed = EnvFlag.isEnabled(
+      ProcessInfo.processInfo.environment["ALLOW_REMOTE_HEALTHCHECK"])
     guard remoteAllowed || ControllerConfiguration.isLoopback(url.host ?? "") else {
       return (false, [])
     }
@@ -405,8 +408,11 @@ public final class ControllerService: @unchecked Sendable {
       let entries = object["data"] as? [[String: Any]]
     else { return (false, []) }
     let ids = entries.compactMap { $0["id"] as? String }.filter { !$0.isEmpty }
+    if EnvFlag.isEnabled(profile["HEALTHCHECK_ANY_ID"]) {
+      return (!ids.isEmpty, ids)
+    }
     let expected = profile["HEALTHCHECK_EXPECT_ID"] ?? profile.serverModelID
-    return (expected.isEmpty ? !ids.isEmpty : ids.contains(expected), ids)
+    return (!expected.isEmpty && ids.contains(expected), ids)
   }
 
   private func profileWorkingDirectory(_ profile: ControllerProfile) -> URL? {
