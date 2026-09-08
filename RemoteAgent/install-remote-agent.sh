@@ -216,7 +216,7 @@ if [ ! -f "$PROFILES_DIR/example-llamacpp.env.example" ]; then
 DISPLAY_NAME="Qwen 2.5 7B (llama.cpp)"
 RUNTIME=llama.cpp
 REQUEST_MODEL=qwen2.5-7b-instruct
-MODEL_FILE=~/models/qwen2.5-7b-instruct-q5_k_m.gguf
+MODEL_FILE=~/models/your-model.gguf
 PORT=8002
 # EXTRA_ARGS="-c 8192 -ngl 99"
 EOF

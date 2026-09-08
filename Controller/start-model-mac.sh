@@ -38,19 +38,6 @@ detect_model_root() {
             return 0
         fi
     done
-
-    candidate="$HOME/AI/models"
-    if [ -d "$candidate" ]; then
-        printf '%s\n' "$candidate"
-        return 0
-    fi
-
-    candidate="$WORK_DIR/../models"
-    if [ -d "$candidate" ]; then
-        printf '%s\n' "$candidate"
-        return 0
-    fi
-
     return 1
 }
 
@@ -180,7 +167,7 @@ resolve_vllm_mlx_server() {
 
 canonical_runtime() {
     local raw normalized
-    raw="${1:-llama.cpp}"
+    raw="${1:-unknown}"
     normalized="$(printf '%s' "$raw" | tr '[:upper:]_' '[:lower:]-')"
     case "$normalized" in
         llamacpp|llama-cpp|llama.cpp)
@@ -459,7 +446,7 @@ install_agentlightning() {
     warn "Agent Lightning install skipped"
 }
 
-RUNTIME="$(canonical_runtime "${RUNTIME:-llama.cpp}")"
+RUNTIME="$(canonical_runtime "${RUNTIME:-unknown}")"
 REQUEST_MODEL="${REQUEST_MODEL:-${SERVER_MODEL_ID:-$MODEL_PROFILE}}"
 SERVER_MODEL_ID="${SERVER_MODEL_ID:-$REQUEST_MODEL}"
 MODEL_ALIAS="${MODEL_ALIAS:-$REQUEST_MODEL}"
@@ -530,7 +517,7 @@ if [ "$RUNTIME" = "llama.cpp" ]; then
     if [ -z "$MODEL_PATH" ]; then
         [ -n "${MODEL_FILE:-}" ] || die "MODEL_PATH or MODEL_FILE is required for $MODEL_PROFILE"
         MODEL_ROOT_RESOLVED="$(detect_model_root || true)"
-        [ -n "$MODEL_ROOT_RESOLVED" ] || die "MODEL_FILE requires MODEL_ROOT, MODEL_ROOT_HINT, ~/AI/models, or ../models for $MODEL_PROFILE"
+        [ -n "$MODEL_ROOT_RESOLVED" ] || die "MODEL_FILE requires MODEL_ROOT or MODEL_ROOT_HINT for $MODEL_PROFILE"
         MODEL_PATH="$MODEL_ROOT_RESOLVED/$MODEL_FILE"
     fi
     if [ ! -f "$MODEL_PATH" ]; then

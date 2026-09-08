@@ -53,7 +53,7 @@ Daemon-style runtimes (`ollama`, LiteLLM, …) are monitored health-only.
 The installer prints a pairing code; regenerate it with `link`:
 
 ```
-modelswitchboard-gateway://user@host?name=spark&agent_port=8877
+modelswitchboard-gateway://user@host?name=gpu&agent_port=8877
 ```
 
 Paste it into **Settings → Remote Gateways → Add Remote Gateway**. It prefills
@@ -75,7 +75,7 @@ editable fields; the gateway gets a named panel section.
   The agent binds only the host's Tailscale address (WireGuard-encrypted,
   tailnet-only, never the open LAN), **requires a bearer token by default**,
   and prints a **direct** pairing code using its MagicDNS name
-  (`modelswitchboard-gateway://spark.tail1234.ts.net?…&mode=direct`).
+  (`modelswitchboard-gateway://host.example.ts.net?…&mode=direct`).
   Paste the link **and** the generated token into the Mac gateway form.
   You are then connected as a Direct URL gateway with no SSH involved.
 
