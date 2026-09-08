@@ -39,7 +39,8 @@ class UnnamedClaimTests(unittest.TestCase):
             claims = discovery.scan_port_claim_directories(roots=[Path(tmp)], listeners=[])
             self.assertEqual(len(claims), 1)
             profile = discovery.profile_from_claim(claims[0])
-            self.assertEqual(profile.values.get("HEALTHCHECK_ANY_ID"), "1")
+            self.assertTrue(profile.healthcheck_any_id)
+            self.assertNotIn("HEALTHCHECK_ANY_ID", profile.values)
             self.assertEqual(profile.request_model, "port-8050")
             self.assertEqual(profile.display_name, "Port 8050")
 
@@ -167,8 +168,9 @@ class UnnamedStatusAdoptionTests(unittest.TestCase):
                 mock.patch.object(service, "_read_pid", return_value=None),
             ):
                 payload = service.status(profile, allow_port_fallback=False, listeners=[])
-            self.assertEqual(payload["request_model"], "balesh-parent-A")
-            self.assertEqual(payload["server_model_id"], "balesh-parent-A")
+            self.assertEqual(payload["profile"], "port-8050")
+            self.assertEqual(payload["request_model"], "port-8050")
+            self.assertEqual(payload["server_model_id"], "port-8050")
             self.assertEqual(payload["display_name"], "balesh-parent-A")
 
     def test_status_keeps_asserted_identity_for_named_claim(self) -> None:

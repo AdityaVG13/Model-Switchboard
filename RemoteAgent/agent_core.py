@@ -60,6 +60,12 @@ LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
 def is_loopback(host: str) -> bool:
     return host.strip().strip("[]").lower() in LOOPBACK_HOSTS
 
+
+def env_flag(raw: str | None) -> bool:
+    """Single owner of env-string booleans. Empty never matches."""
+    return (raw or "").strip().lower() in {"1", "true", "yes"}
+
+
 def is_tailscale_ip(address: str) -> bool:
     """Tailscale assigns IPv4 from the CGNAT range 100.64.0.0/10."""
     parts = address.split(".")
@@ -197,6 +203,23 @@ RUNTIME_SPECS: dict[str, tuple[str, list[str], str]] = {
     "localai": ("LocalAI", ["external", "openai-compatible", "multi-backend"], "external"),
     "external": ("OpenAI-compatible endpoint", ["external", "openai-compatible"], "external"),
     "command": ("Custom command", ["managed", "custom", "openai-compatible"], "command"),
+    "mlx": ("MLX", ["managed", "openai-compatible", "mlx", "apple-silicon"], "adapter"),
+    "rvllm-mlx": ("rVLLM MLX", ["managed", "openai-compatible", "mlx", "continuous-batching"], "adapter"),
+    "vllm-mlx": ("vLLM-MLX", ["managed", "openai-compatible", "mlx", "server"], "adapter"),
+    "ddtree-mlx": ("DDTree MLX", ["managed", "openai-compatible", "mlx", "speculative-decoding"], "adapter"),
+    "turboquant": ("TurboQuant", ["managed", "openai-compatible", "gguf", "quantized"], "adapter"),
+    "mlx-vlm": ("MLX-VLM", ["managed", "openai-compatible", "mlx", "vision"], "adapter"),
+    "mlx-omni-server": ("MLX Omni Server", ["managed", "openai-compatible", "mlx", "multimodal"], "adapter"),
+    "mlx-openai-server": ("MLX OpenAI Server", ["managed", "openai-compatible", "mlx"], "adapter"),
+    "mlx-llm-server": ("MLX-LLM Server", ["managed", "openai-compatible", "mlx"], "adapter"),
+    "mlx-serve": ("MLX Serve", ["managed", "openai-compatible", "mlx", "multimodal"], "adapter"),
+    "mlxengine": ("MLX Engine", ["managed", "openai-compatible", "mlx", "multimodal"], "adapter"),
+    "ollmlx": ("ollmlx", ["external", "openai-compatible", "mlx"], "external"),
+    "omlx": ("oMLX", ["managed", "openai-compatible", "mlx", "agent-cache"], "adapter"),
+    "mlc-llm": ("MLC-LLM", ["managed", "openai-compatible", "mlc", "metal"], "adapter"),
+    "nexa": ("Nexa SDK", ["managed", "openai-compatible", "multimodal"], "adapter"),
+    "lm-studio": ("LM Studio", ["external", "openai-compatible", "desktop"], "external"),
+    "jan": ("Jan", ["external", "openai-compatible", "desktop"], "external"),
     # L07-part: unknown is a first-class runtime id, not a special-cased string.
     "unknown": ("Unknown", ["discovered", "external"], "external"),
 }
@@ -308,6 +331,8 @@ class Profile:
     # Env-file profiles leave this None; RUNTIME_TAGS/TAGS parse in
     # runtime_tags below - the single comma-string parse site.
     tags: list[str] | None = None
+    origin: str = "profile"
+    healthcheck_any_id: bool = False
 
     def __post_init__(self) -> None:
         normalized = dict(self.values)
@@ -318,6 +343,10 @@ class Profile:
             raise InvalidProfileError(f"{self.name}: missing REQUEST_MODEL")
         if not normalized.get("PORT") and not normalized.get("BASE_URL"):
             raise InvalidProfileError(f"{self.name}: missing PORT or BASE_URL")
+        flag = env_flag(normalized.pop("HEALTHCHECK_ANY_ID", None))
+        self.healthcheck_any_id = self.healthcheck_any_id or flag
+        if self.origin not in {"profile", "claim"}:
+            self.origin = "profile"
         self.values = normalized
 
     def get(self, key: str) -> str | None:
@@ -366,11 +395,18 @@ class Profile:
 
     @property
     def healthcheck_mode(self) -> str:
-        return (self.values.get("HEALTHCHECK_MODE") or "openai-models").lower()
+        raw = (self.values.get("HEALTHCHECK_MODE") or "openai-models").lower()
+        if raw in {"http-200", "http200"}:
+            return "http-200"
+        if raw in {"disabled", "off", "none"}:
+            return "disabled"
+        return "openai-models"
 
     @property
     def endpoint_host(self) -> str:
         host = self.values.get("HOST", "")
+        if host in {"0.0.0.0", "::", "[::]"}:
+            return "127.0.0.1"
         if host:
             return host
         parsed = urllib.parse.urlparse(self.base_url)
@@ -1316,7 +1352,7 @@ def _detect_llm_backend(root: str) -> str | None:
             else:
                 body = b""
         if body and parse_llamacpp_slots_tokens(body.decode("utf-8", errors="replace")) is not None:
-            backend = "llamacpp"
+            backend = "llama.cpp"
     except (urllib.error.URLError, OSError, ValueError):
         pass
     if backend is None:
@@ -1348,15 +1384,8 @@ def _detect_llm_backend(root: str) -> str | None:
             except (urllib.error.URLError, OSError, ValueError):
                 continue
     if backend is None:
-        # sparkDash defaults unknown OpenAI-compatible servers to vLLM; a
-        # /v1/models answer is enough to commit to the vLLM sampler for the TTL.
-        try:
-            request = urllib.request.Request(f"{root}/v1/models", headers={"Accept": "application/json"})
-            with _urlopen_no_redirect(request, 1.0) as response:
-                if 200 <= response.status < 300:
-                    backend = "vllm"
-        except (urllib.error.URLError, OSError, ValueError):
-            backend = None
+        # /v1/models 2xx is not a backend identity. Unknown stays unknown.
+        backend = None
     with _LLM_RATE_LOCK:
         state["backend"] = backend
         state["backend_checked_at"] = now
@@ -1419,7 +1448,7 @@ def sample_llm_serving_rates(base_url: str, allow_remote: bool = False) -> dict[
         "requests_running": None,
         "requests_waiting": None,
     }
-    if backend == "llamacpp":
+    if backend == "llama.cpp":
         try:
             request = urllib.request.Request(f"{root}/slots", headers={"Accept": "application/json"})
             with _urlopen_no_redirect(request, 1.5) as response:

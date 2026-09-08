@@ -51,6 +51,7 @@ from agent_core import (
     agent_config_path,
     apply_unified_memory_vram,
     canonical_runtime,
+    env_flag,
     first_known,
     gpu_metrics_snapshot,
     is_loopback,
@@ -1452,16 +1453,11 @@ class AgentService:
         request_model = profile.request_model
         server_model_id = profile.server_model_id
         display_name = profile.display_name
-        if server_ids:
-            if is_placeholder_model_name(request_model):
-                request_model = server_ids[0]
-            if is_placeholder_model_name(server_model_id):
-                server_model_id = server_ids[0]
-            if (
-                display_name.lower() == f"port {profile.endpoint_port}"
-                or is_placeholder_model_name(display_name)
-            ):
-                display_name = Path(request_model).name
+        if server_ids and (
+            display_name.lower() == f"port {profile.endpoint_port}"
+            or is_placeholder_model_name(display_name)
+        ):
+            display_name = Path(server_ids[0]).name
         pid = self._read_pid(profile.name)
         zombie = bool(pid and process_is_zombie(pid))
         if pid is not None and not process_is_alive(pid):
@@ -1517,7 +1513,7 @@ class AgentService:
             rates_root = profile.base_url or ""
             llm_rates = sample_llm_serving_rates(
                 rates_root,
-                allow_remote=(os.environ.get("ALLOW_REMOTE_HEALTHCHECK") or "").lower() in ("1", "true", "yes"),
+                allow_remote=env_flag(os.environ.get("ALLOW_REMOTE_HEALTHCHECK")),
             )
         return {
             "profile": profile.name,
@@ -1542,7 +1538,7 @@ class AgentService:
             "vram_mb": process_vram_mb(pid) if alive and pid else None,
             "command": command,
             "log_path": profile.log_path,
-            "source": "profile",
+            "source": profile.origin,
             "missing_artifacts": missing,
             "serving": llm_rates,
         }
@@ -1791,7 +1787,7 @@ class AgentService:
             "launch_agent": {
                 "plist_path": str(unit),
                 "installed": unit.is_file(),
-                "running": True,
+                "running": unit.is_file(),
             },
             "integrations": [],
             "profiles_dir": payload["profiles_dir"],
@@ -1938,7 +1934,7 @@ class AgentService:
         # A claim with no model-name hint carries the synthetic port-N identity:
         # there is nothing to verify against, so a non-empty served id list is
         # the proof of readiness (the endpoint proves itself).
-        if profile.get("HEALTHCHECK_ANY_ID") == "1":
+        if profile.healthcheck_any_id:
             return bool(ids), ids
         expected = profile.get("HEALTHCHECK_EXPECT_ID") or profile.server_model_id
         matched = openai_model_id_matches(

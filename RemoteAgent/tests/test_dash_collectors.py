@@ -88,16 +88,16 @@ class TailnetHealthTests(unittest.TestCase):
             "Health": [],
             "Self": {
                 "Online": True,
-                "TailscaleIPs": ["100.122.96.76", "fd7a:115c:a1e0::1"],
-                "DNSName": "dgx-spark.tail01763b.ts.net.",
+                "TailscaleIPs": ["100.64.1.2", "fd7a:115c:a1e0::1"],
+                "DNSName": "gpu.example.ts.net.",
             },
         }
         health = parse_tailscale_status_health(payload)
         self.assertIsNotNone(health)
         self.assertTrue(health["online"])
         self.assertEqual(health["backend_state"], "Running")
-        self.assertEqual(health["ipv4"], "100.122.96.76")
-        self.assertEqual(health["dns_name"], "dgx-spark.tail01763b.ts.net")
+        self.assertEqual(health["ipv4"], "100.64.1.2")
+        self.assertEqual(health["dns_name"], "gpu.example.ts.net")
         self.assertEqual(health["health"], [])
 
     def test_offline_with_warning(self) -> None:

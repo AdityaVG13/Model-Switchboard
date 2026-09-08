@@ -54,6 +54,7 @@ MODEL_SERVER_COMMAND_MARKERS = (
     "aphrodite",
     "tgi-",
     "openai-compatible",
+    "mlx",
     "mlc_llm",
     "koboldcpp",
     "kobold",
@@ -82,10 +83,13 @@ MODEL_SERVER_INTERNAL_COMMAND_MARKERS = (
     "multiprocessing.spawn",
     "multiprocessing.resource_tracker",
 )
+# Well-known OS / infra ports that are never a local OpenAI-compatible model
+# server. Do not put application HTTP ports here (8080, 8088, 8443, 9100, …):
+# operators run models on those, and a skip list must not encode one machine.
 SKIP_LISTEN_PORTS = frozenset({
     22, 25, 53, 67, 68, 69, 80, 110, 123, 135, 139, 143, 161, 389, 443,
     445, 465, 587, 631, 636, 993, 995, 2375, 2376, 3306, 3389, 5432, 5900,
-    6379, 6443, 8088, 8443, 9100, 10250, 27017,
+    6379, 6443, 10250, 27017,
 })
 DISCOVERY_PROBE_BUDGET = 24
 DISCOVERY_PROBE_TIMEOUT = 0.6
@@ -495,9 +499,13 @@ def infer_runtime_from_command(command: str | None) -> str:
         return "tgi"
     if "ollama" in lowered:
         return "ollama"
+    if "mlx" in lowered:
+        return "mlx"
+    if "kobold" in lowered:
+        return "koboldcpp"
     if any(
         token in lowered
-        for token in ("llama-server", "llama.cpp", "llamacpp", "llama-cpp", "kobold")
+        for token in ("llama-server", "llama.cpp", "llamacpp", "llama-cpp")
     ):
         return "llama.cpp"
     if "tabby" in lowered:
@@ -539,8 +547,7 @@ class ProbeOutcome:
 
     Make-unrepresentable: `ready` and `openai_models` are DERIVED, never
     stored - a probe can no longer claim ready while every check failed.
-    The wire-facing dict shape (port/host/ready/health_ok/openai_models/
-    model_ids/base_url) is preserved via as_item_dict().
+    Wire-facing discovery rows expose derived `ready` only.
     """
 
     port: int
@@ -914,7 +921,6 @@ def discover_live_model_endpoints(
                 "server_ids": model_ids,
                 "display_name": display,
                 "ready": probe.ready,
-                "health_ok": probe.health_ok,
                 "base_url": probe.base_url,
                 "source": "discovery",
             }
@@ -982,6 +988,8 @@ def status_dict_from_discovery(
         # L09: no invented log path - None when the row has no launch claim.
         "log_path": item.get("log_path"),
         "source": source,
+        "missing_artifacts": item.get("missing_artifacts") or [],
+        "serving": item.get("serving"),
     }
 
 
@@ -1058,8 +1066,17 @@ def profile_from_claim(claim: dict[str, Any]) -> Profile:
     # SERVER_MODEL_ID derived from the request (or the placeholder itself)
     # counts as "no hint" - only an explicit SERVER_MODEL_ID/REQUEST_MODEL/
     # MODEL* name does.
-    if is_placeholder_model_name(request_s) and values.get("SERVER_MODEL_ID") in (None, "", request_s):
-        values["HEALTHCHECK_ANY_ID"] = "1"
+    any_id = is_placeholder_model_name(request_s) and values.get("SERVER_MODEL_ID") in (
+        None,
+        "",
+        request_s,
+    )
     # L24: tags pass as a parsed list (no comma-string re-encoding); the
     # env-file comma format is only for real files on disk.
-    return Profile(name=name, values=values, tags=["claimed", "launch-folder"])
+    return Profile(
+        name=name,
+        values=values,
+        tags=["claimed", "launch-folder"],
+        origin="claim",
+        healthcheck_any_id=any_id,
+    )
