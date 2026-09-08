@@ -290,13 +290,13 @@ struct GatewaySettingsSection: View {
 
                 deploySection(config: binding.wrappedValue)
             case .direct:
-                field("Controller URL", text: directTextBinding(binding, \.baseURL), prompt: "http://spark.tail1234.ts.net:8877", monospaced: true)
+                field("Controller URL", text: directTextBinding(binding, \.baseURL), prompt: "http://host.example.ts.net:8877", monospaced: true)
                 Text("The agent must be reachable at this URL. Tailscale is the easy path: run the agent with --tailscale (token required by default; paste the installer-generated token here). Plain LAN binds require --unsafe-bind plus a bearer token.")
                     .font(.system(size: 10))
                     .foregroundStyle(theme.sub)
                     .fixedSize(horizontal: false, vertical: true)
-                field("Deploy host (optional)", text: optionalText(directOptionalTextBinding(binding, \.deployHost)), prompt: "ssh alias, e.g. spark", monospaced: true)
-                Text("Used only by Update to push the agent over SSH. Defaults to the URL host - which hangs when that host needs Tailscale SSH re-auth. Use an ssh-config alias (like `spark`) or a destination that works over the tailnet, e.g. `aditya@100.122.96.76`.")
+                field("Deploy host (optional)", text: optionalText(directOptionalTextBinding(binding, \.deployHost)), prompt: "ssh alias, e.g. gpu", monospaced: true)
+                Text("Used only by Update to push the agent over SSH. Defaults to the URL host - which hangs when that host needs Tailscale SSH re-auth. Use an ssh-config alias or a tailnet destination such as `user@100.64.1.2`.")
                     .font(.system(size: 10))
                     .foregroundStyle(theme.sub)
                     .fixedSize(horizontal: false, vertical: true)
@@ -477,6 +477,7 @@ struct GatewaySettingsSection: View {
                 name: trimmedName,
                 baseURL: direct.baseURL,
                 remotePort: direct.remotePort,
+                deployHost: direct.deployHost,
                 enabled: draft.enabled
             )
         }

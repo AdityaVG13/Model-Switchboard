@@ -7,24 +7,24 @@ import ModelSwitchboardCore
 /// alias), falling back to the URL host. The URL host hangs forever when the
 /// remote sshd is Tailscale SSH (interactive re-auth BatchMode cannot pass).
 @Test @MainActor func directDeployTargetPrefersExplicitDeployHost() throws {
-    let config = GatewayConfig.direct(name: "Spark", baseURL: "http://dgx-spark.tail1234.ts.net:8877")
+    let config = GatewayConfig.direct(name: "Lab", baseURL: "http://host.example.ts.net:8877")
     var withHost = config
     if case .direct(var payload) = withHost.connection {
-        payload.deployHost = "spark"
+        payload.deployHost = "gpu"
         withHost.connection = .direct(payload)
     }
-    #expect(GatewayHub.agentDeployTarget(for: config)?.sshHost == "dgx-spark.tail1234.ts.net")
-    #expect(GatewayHub.agentDeployTarget(for: withHost)?.sshHost == "spark")
+    #expect(GatewayHub.agentDeployTarget(for: config)?.sshHost == "host.example.ts.net")
+    #expect(GatewayHub.agentDeployTarget(for: withHost)?.sshHost == "gpu")
     // user@host form - away-from-home, the tailnet IP destination is what works.
     var withUserHost = config
     if case .direct(var payload) = withUserHost.connection {
-        payload.deployHost = "aditya@100.122.96.76"
+        payload.deployHost = "user@100.64.1.2"
         withUserHost.connection = .direct(payload)
     }
     let target = try #require(GatewayHub.agentDeployTarget(for: withUserHost))
-    #expect(target.sshUser == "aditya")
-    #expect(target.sshHost == "100.122.96.76")
-    #expect(target.destination == "aditya@100.122.96.76")
+    #expect(target.sshUser == "user")
+    #expect(target.sshHost == "100.64.1.2")
+    #expect(target.destination == "user@100.64.1.2")
 }
 
 /// Unresponsive ssh (interactive prompt BatchMode cannot answer) must be

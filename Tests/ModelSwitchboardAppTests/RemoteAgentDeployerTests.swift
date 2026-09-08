@@ -207,7 +207,7 @@ func makeSources() throws -> (
 
     Token file: /tmp/token
     """
-    #expect(RemoteAgentDeployer.extractAuthToken(from: human) == "human-token-0123456789ab")
+    #expect(RemoteAgentDeployer.extractAuthToken(from: human) == nil)
 }
 
 @Test func deployRequiresBundledResources() async throws {

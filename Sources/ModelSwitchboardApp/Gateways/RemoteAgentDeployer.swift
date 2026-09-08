@@ -143,8 +143,7 @@ actor RemoteAgentDeployer {
         return !value.isEmpty && value.unicodeScalars.allSatisfy { allowed.contains($0) }
     }
 
-    /// Prefer a machine-readable `AUTH_TOKEN=` line; fall back to the human
-    /// "Paste this bearer token" block the installer prints for Tailscale.
+    /// Machine-readable `AUTH_TOKEN=` line only (installer always emits it).
     nonisolated static func extractAuthToken(from output: String) -> String? {
         let lines = output.split(whereSeparator: \.isNewline).map {
             $0.trimmingCharacters(in: .whitespaces)
@@ -154,18 +153,6 @@ actor RemoteAgentDeployer {
                 let value = String(line.dropFirst("AUTH_TOKEN=".count))
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 if !value.isEmpty { return value }
-            }
-        }
-        if let hintIndex = lines.firstIndex(where: {
-            $0.localizedCaseInsensitiveContains("Paste this bearer token")
-        }) {
-            for line in lines.dropFirst(hintIndex + 1) {
-                if line.isEmpty { continue }
-                if line.hasPrefix("[") { break }
-                if line.hasPrefix("Token file:") { break }
-                if line.hasPrefix("modelswitchboard-gateway://") { continue }
-                let candidate = line.trimmingCharacters(in: CharacterSet(charactersIn: "` "))
-                if candidate.count >= 16 { return candidate }
             }
         }
         return nil

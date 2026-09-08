@@ -392,17 +392,17 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
         // A direct gateway carries no ssh fields. Force-update derives an SSH
         // target from the URL hostname without minting a fake SSH gateway.
         let config = GatewayConfig.direct(
-            name: "Spark",
-            baseURL: "http://dgx-spark.tail123.ts.net:8877"
+            name: "Lab",
+            baseURL: "http://host.example.ts.net:8877"
         )
         let deploy = GatewayHub.agentDeployTarget(for: config)
-        #expect(deploy?.sshHost == "dgx-spark.tail123.ts.net")
+        #expect(deploy?.sshHost == "host.example.ts.net")
         hub.upsertGateway(config, token: "tok")
         defer { hub.removeGateway(id: config.id) }
 
         await hub.forceUpdateGateway(id: config.id)
 
-        #expect(deployHosts == ["dgx-spark.tail123.ts.net"])
+        #expect(deployHosts == ["host.example.ts.net"])
         #expect(sawTailscale == true)
     }
 }

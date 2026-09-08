@@ -38,7 +38,7 @@ public struct GatewayConfig: Codable, Identifiable, Equatable, Sendable {
         case ssh(SSH)
 
         public struct Direct: Equatable, Sendable {
-            /// Controller base URL, e.g. `http://spark.local:8877`.
+            /// Controller base URL, e.g. `http://gpu.example:8877`.
             public var baseURL: String
             /// Port the agent listens on at the remote host's loopback.
             /// Mirrored in `baseURL`'s port; kept as a field because the
@@ -52,8 +52,12 @@ public struct GatewayConfig: Codable, Identifiable, Equatable, Sendable {
 
             public init(baseURL: String, remotePort: Int = 8877, deployHost: String? = nil) {
                 self.baseURL = baseURL
-                self.remotePort = remotePort
-                self.deployHost = deployHost
+                if let urlPort = URL(string: baseURL)?.port {
+                    self.remotePort = urlPort
+                } else {
+                    self.remotePort = remotePort
+                }
+                self.deployHost = GatewayConfig.normalizedDeployHost(deployHost)
             }
         }
 
@@ -143,13 +147,14 @@ public struct GatewayConfig: Codable, Identifiable, Equatable, Sendable {
         name: String,
         baseURL: String,
         remotePort: Int = 8877,
+        deployHost: String? = nil,
         enabled: Bool = true
     ) -> GatewayConfig {
         GatewayConfig(
             id: id,
             name: name,
             enabled: enabled,
-            connection: .direct(.init(baseURL: baseURL, remotePort: remotePort))
+            connection: .direct(.init(baseURL: baseURL, remotePort: remotePort, deployHost: deployHost))
         )
     }
 
@@ -183,6 +188,19 @@ public struct GatewayConfig: Codable, Identifiable, Equatable, Sendable {
 
     public static func looksLikeSSHOption(_ value: String) -> Bool {
         value.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("-")
+    }
+
+    /// Parse `user@host` or bare host at the boundary. `user@host@extra`,
+    /// `user@`, and `@host` are unrepresentable (nil).
+    public static func normalizedDeployHost(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let parts = trimmed.split(separator: "@", omittingEmptySubsequences: false).map(String.init)
+        if parts.contains(where: \.isEmpty) { return nil }
+        if parts.count == 1 { return parts[0] }
+        if parts.count == 2 { return "\(parts[0])@\(parts[1])" }
+        return nil
     }
 
     /// Human-readable connection summary for list rows.
@@ -278,25 +296,26 @@ public struct GatewayConfig: Codable, Identifiable, Equatable, Sendable {
 public struct GatewayContext: Equatable, Sendable {
     public let id: String
     public let name: String
-    public let isLocal: Bool
+    public var isLocal: Bool { id == Self.localID }
 
-    public init(id: String, name: String, isLocal: Bool) {
+    public static let localID = "local"
+
+    public init(id: String, name: String) {
         self.id = id
         self.name = name
-        self.isLocal = isLocal
     }
 
-    public static let local = GatewayContext(id: "local", name: "This Mac", isLocal: true)
+    public static let local = GatewayContext(id: localID, name: "This Mac")
 
     public init(config: GatewayConfig) {
-        self.init(id: config.id, name: config.name, isLocal: false)
+        self.init(id: config.id, name: config.name)
     }
 }
 
 /// Parses pairing codes printed by `model-switchboard-agent link` on the
 /// remote host. The `mode` query token is the single kind signal on the wire:
-/// - SSH tunnel: `modelswitchboard-gateway://user@host?name=spark&agent_port=8877&mode=ssh`
-/// - Direct (e.g. Tailscale MagicDNS): `modelswitchboard-gateway://spark.tail1234.ts.net?name=spark&agent_port=8877&mode=direct`
+/// - SSH tunnel: `modelswitchboard-gateway://user@host?name=gpu&agent_port=8877&mode=ssh`
+/// - Direct (e.g. Tailscale MagicDNS): `modelswitchboard-gateway://host.example.ts.net?name=gpu&agent_port=8877&mode=direct`
 /// The kind is never re-derived from the URL shape (user@host presence); the
 /// only legacy fallback is a missing `mode` on links printed before the token
 /// existed, which default to `.ssh` here at the boundary.

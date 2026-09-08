@@ -4,7 +4,7 @@ import ModelSwitchboardCore
 import ModelSwitchboardTestSupport
 @testable import ModelSwitchboardApp
 
-private let remoteContext = GatewayContext(id: "gw-test", name: "Spark", isLocal: false)
+private let remoteContext = GatewayContext(id: "gw-test", name: "Spark")
 
 @MainActor
 private func makeRemoteStore(

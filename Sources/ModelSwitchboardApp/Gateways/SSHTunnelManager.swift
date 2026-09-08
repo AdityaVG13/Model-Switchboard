@@ -20,14 +20,20 @@ actor SSHTunnelManager {
     }
 
     struct Configuration: Equatable, Sendable {
-        var destination: String
+        var sshUser: String
+        var sshHost: String
         var sshPort: Int
         var remotePort: Int
         var identityFile: String?
         var identityAgent: String?
 
+        var destination: String {
+            sshUser.isEmpty ? sshHost : "\(sshUser)@\(sshHost)"
+        }
+
         init(ssh: GatewayConfig.Connection.SSH) {
-            destination = ssh.destination
+            sshUser = ssh.sshUser
+            sshHost = ssh.sshHost
             sshPort = ssh.sshPort
             remotePort = ssh.remotePort
             identityFile = ssh.identityFile
@@ -41,19 +47,23 @@ actor SSHTunnelManager {
             identityFile: String? = nil,
             identityAgent: String? = nil
         ) {
-            self.destination = destination
+            let parsed = GatewayConfig.normalizedDeployHost(destination)
+            if let parsed, let at = parsed.firstIndex(of: "@") {
+                sshUser = String(parsed[..<at])
+                sshHost = String(parsed[parsed.index(after: at)...])
+            } else {
+                sshUser = ""
+                sshHost = parsed ?? destination
+            }
             self.sshPort = sshPort
             self.remotePort = remotePort
             self.identityFile = identityFile
             self.identityAgent = identityAgent
         }
 
-        /// True when the destination would be parsed as an ssh option.
         var isUnsafeDestination: Bool {
-            if GatewayConfig.looksLikeSSHOption(destination) { return true }
-            return destination.split(separator: "@").contains {
-                GatewayConfig.looksLikeSSHOption(String($0))
-            }
+            GatewayConfig.looksLikeSSHOption(sshHost)
+                || (!sshUser.isEmpty && GatewayConfig.looksLikeSSHOption(sshUser))
         }
     }
 
@@ -522,7 +532,7 @@ actor SSHTunnelManager {
         if lowered.contains("tailscale ssh requires")
             || lowered.contains("to authenticate, visit https://login.tailscale.com")
         {
-            return "Tailscale SSH needs re-auth for this host. Run `tailscale up` (or connect once) in Terminal, or set a Deploy host - an ssh-config alias like `spark` - on the gateway in Settings."
+            return "Tailscale SSH needs re-auth for this host. Run `tailscale up` (or connect once) in Terminal, or set a Deploy host - an ssh-config alias - on the gateway in Settings."
         }
         if lowered.contains("permission denied") {
             return "SSH auth failed. BatchMode needs a passphrase-less key or one loaded in an agent - run ssh-add, or set an identity file/agent for this gateway."
