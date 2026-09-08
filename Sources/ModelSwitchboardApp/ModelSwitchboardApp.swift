@@ -37,12 +37,16 @@ struct ModelSwitchboardApp: App {
     private static func loadAndMigrateAuthToken() -> String {
         let defaults = UserDefaults.standard
         let legacyKey = "controllerAuthToken"
+        let keychain = KeychainTokenStorage.shared.load() ?? ""
         if let oldToken = defaults.string(forKey: legacyKey), !oldToken.isEmpty {
-            KeychainTokenStorage.shared.save(oldToken)
             defaults.removeObject(forKey: legacyKey)
+            if !keychain.isEmpty {
+                return keychain
+            }
+            KeychainTokenStorage.shared.save(oldToken)
             return oldToken
         }
-        return KeychainTokenStorage.shared.load() ?? ""
+        return keychain
     }
 
     var body: some Scene {

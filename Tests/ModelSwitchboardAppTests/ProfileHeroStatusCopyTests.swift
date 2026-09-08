@@ -1,17 +1,18 @@
 import Testing
+import ModelSwitchboardCore
 @testable import ModelSwitchboardApp
 
 @Test func profileHeroStatusCopy() {
-    let cases: [(ready: Bool, running: Bool, pending: String?, gateway: String?, expected: String)] = [
-        (false, true, nil, nil, "WARMING"),
-        (true, true, nil, "Spark", "ACTIVE ON SPARK"),
-        (false, false, nil, "Spark", "STARTING ON SPARK"),
-        (true, true, "STARTING", "Spark", "STARTING ON SPARK"),
+    let cases: [(ModelProfileStatus.Lifecycle, String?, String?, String)] = [
+        (.starting, nil, nil, "WARMING"),
+        (.running, nil, "Spark", "ACTIVE ON SPARK"),
+        (.stopped, nil, "Spark", "STOPPED ON SPARK"),
+        (.running, "STARTING", "Spark", "STARTING ON SPARK"),
     ]
     for value in cases {
         #expect(ProfileHeroStatusCopy.label(
-            ready: value.ready, running: value.running,
-            pending: value.pending, gatewayName: value.gateway
-        ) == value.expected)
+            lifecycle: value.0,
+            pending: value.1, gatewayName: value.2
+        ) == value.3)
     }
 }

@@ -160,7 +160,12 @@ final class RemoteHostMetricsMonitor {
             )
         } catch {
             let message = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
-            let unsupported = message.contains("404") || message.lowercased().contains("not found")
+            let unsupported: Bool
+            if case .httpError(let status, _) = error as? ControllerClientError {
+                unsupported = status == 404
+            } else {
+                unsupported = false
+            }
             var entry = target.previous
             entry.error = unsupported
                 ? "This remote agent does not expose host metrics yet (needs upgrade for GPU/VRAM)."

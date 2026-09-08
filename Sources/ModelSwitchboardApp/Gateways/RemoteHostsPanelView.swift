@@ -218,9 +218,10 @@ struct RemoteHostsPanelView: View {
                 if let tailnet = HostMetricsPresentation.tailnetLabel(metrics) {
                     HStack(spacing: 4) {
                         Circle()
-                            .fill(tailnet.label.contains("OFF")
+                            .fill(metrics?.tailscale?.online == false
                                 ? DashboardTheme.stopRed
-                                : (tailnet.label.contains("WARN") ? DashboardTheme.pendingOrange : DashboardTheme.runningGreen))
+                                : (!(metrics?.tailscale?.health ?? []).isEmpty
+                                    ? DashboardTheme.pendingOrange : DashboardTheme.runningGreen))
                             .frame(width: 6, height: 6)
                         Text(tailnet.label)
                             .font(.system(size: 9.5, weight: .semibold))

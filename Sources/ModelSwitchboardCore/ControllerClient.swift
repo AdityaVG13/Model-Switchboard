@@ -4,6 +4,7 @@ public enum ControllerClientError: LocalizedError {
     case invalidBaseURL(String)
     case invalidResponse
     case serverError(String)
+    case httpError(status: Int, body: String)
 
     public var errorDescription: String? {
         switch self {
@@ -13,6 +14,8 @@ public enum ControllerClientError: LocalizedError {
             return "Invalid controller response"
         case .serverError(let value):
             return value
+        case .httpError(_, let body):
+            return body
         }
     }
 }
@@ -154,7 +157,7 @@ public struct ControllerClient: Sendable {
         }
         guard (200..<300).contains(http.statusCode) else {
             let message = String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
-            throw ControllerClientError.serverError(message)
+            throw ControllerClientError.httpError(status: http.statusCode, body: message)
         }
     }
 

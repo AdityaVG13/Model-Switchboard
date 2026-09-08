@@ -89,14 +89,14 @@ private func sparkMetrics(
         uptimeSeconds: 3 * 86400 + 4 * 3600 + 5 * 60,
         storage: HostStorageMetrics(usedMB: 422_296.6, totalMB: 1_875_335.2, percent: 22.5, source: "statvfs"),
         network: HostNetworkMetrics(rxKbps: 1240.5, txKbps: 310.2, source: "proc"),
-        tailscale: TailnetHealth(online: true, backendState: "Running", ipv4: "100.122.96.76", dnsName: nil, health: [])
+        tailscale: TailnetHealth(online: true, backendState: "Running", ipv4: "100.64.1.2", dnsName: nil, health: [])
     )
     #expect(HostMetricsPresentation.uptimeLabel(metrics) == "up 3d 4h")
     #expect(HostMetricsPresentation.storageLabel(metrics) == "412.4/1831.4 GB")
     #expect(HostMetricsPresentation.networkLabel(metrics) == "↓ 1.2 · ↑ 0.3 MB/s")
     let tailnet = HostMetricsPresentation.tailnetLabel(metrics)
     #expect(tailnet?.label == "TAILNET OK")
-    #expect(tailnet?.detail == "100.122.96.76")
+    #expect(tailnet?.detail == "100.64.1.2")
 
     // Offline + warning states surface, not hide.
     let offline = HostMetricsPayload(

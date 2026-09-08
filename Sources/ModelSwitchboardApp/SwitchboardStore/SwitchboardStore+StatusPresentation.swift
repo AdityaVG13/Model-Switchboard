@@ -54,10 +54,13 @@ extension SwitchboardStore {
         if let pending = pendingLabel(for: profile.profile) {
             return .pending(pending)
         }
-        if profile.running && statusFreshness(relativeTo: now) != .fresh {
+        if profile.lifecycle.isActive && statusFreshness(relativeTo: now) != .fresh {
             return .stale
         }
-        return profile.running ? .running : .notRunning
+        switch profile.lifecycle {
+        case .running, .readyUnowned, .starting: return .running
+        case .stopped: return .notRunning
+        }
     }
 
     func isBusy(profile: String) -> Bool {

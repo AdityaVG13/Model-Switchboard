@@ -4,26 +4,25 @@ import ModelSwitchboardCore
 
 
 enum ProfileHeroStatusCopy {
-    /// Board/hero status line for local or remote profiles.
+    /// Board/hero status line. Switches the named lifecycle, not the wire
+    /// booleans: stopped is STOPPED, not STARTING.
     static func label(
-        ready: Bool,
-        running: Bool,
+        lifecycle: ModelProfileStatus.Lifecycle,
         pending: String?,
         gatewayName: String?
     ) -> String {
-        if let gatewayName {
-            let host = gatewayName.uppercased()
-            if let pending {
-                return "\(pending.uppercased()) ON \(host)"
+        let core: String = {
+            if let pending { return pending.uppercased() }
+            switch lifecycle {
+            case .running, .readyUnowned: return "ACTIVE"
+            case .starting: return "WARMING"
+            case .stopped: return "STOPPED"
             }
-            if ready { return "ACTIVE ON \(host)" }
-            if running { return "WARMING ON \(host)" }
-            return "STARTING ON \(host)"
+        }()
+        if let gatewayName {
+            return "\(core) ON \(gatewayName.uppercased())"
         }
-        if let pending { return pending }
-        if ready { return "ACTIVE" }
-        if running { return "WARMING" }
-        return "STARTING"
+        return core
     }
 }
 
@@ -314,8 +313,7 @@ struct ActiveProfileHeroView: View {
     private var statusLabel: String {
         let gatewayName: String? = if case .remote(let name) = context { name } else { nil }
         return ProfileHeroStatusCopy.label(
-            ready: profile.ready,
-            running: profile.running,
+            lifecycle: profile.lifecycle,
             pending: store.pendingLabel(for: profile.profile),
             gatewayName: gatewayName
         )

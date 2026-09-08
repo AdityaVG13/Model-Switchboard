@@ -17,7 +17,7 @@ import ModelSwitchboardCore
       "storage": {"used_mb": 422296.6, "total_mb": 1875335.2, "percent": 22.5, "source": "statvfs"},
       "network": {"rx_kbps": 1240.5, "tx_kbps": 310.2, "source": "proc"},
       "tailscale": {"online": true, "backend_state": "Running",
-                    "ipv4": "100.122.96.76", "dns_name": "dgx-spark.tail01763b.ts.net",
+                    "ipv4": "100.64.1.2", "dns_name": "gpu.example.ts.net",
                     "health": []},
       "agent_version": "1.2.0"
     }
@@ -27,7 +27,7 @@ import ModelSwitchboardCore
     #expect(payload.storage?.percent == 22.5)
     #expect(payload.network?.rxKbps == 1240.5)
     #expect(payload.tailscale?.online == true)
-    #expect(payload.tailscale?.ipv4 == "100.122.96.76")
+    #expect(payload.tailscale?.ipv4 == "100.64.1.2")
     #expect(payload.processes.first?.name == "vllm")
 }
 
