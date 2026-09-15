@@ -36,6 +36,26 @@ private func makeStore(
 }
 
 @MainActor
+@Test func unreachableRefreshUsesRecoveringCadenceInsteadOfIdle() async {
+    let store = SwitchboardStore(
+        controllerBaseURL: ControllerEndpointDefaults.baseURLString,
+        features: .base,
+        autoStartRefresh: false,
+        controllerClientFactory: { _, _ in
+            throw URLError(.cannotFindHost)
+        },
+        cachedStateLoader: { nil }
+    )
+
+    await store.refresh()
+
+    #expect(store.isRecoveringFromTransportFailure)
+    #expect(store.autoRefreshPolicy.mode == .recovering)
+    #expect(store.autoRefreshPolicy.interval == AutoRefreshPolicy.recoveringInterval)
+    #expect(store.lastError?.localizedCaseInsensitiveContains("Tailscale") == true)
+}
+
+@MainActor
 @Test func staleRunningStateIsHiddenFromLiveCounts() {
     let store = makeStore()
     let now = Date(timeIntervalSince1970: 200)
@@ -65,6 +85,78 @@ private func makeStore(
     #expect(store.statusFreshness(relativeTo: now) == .cached)
     #expect(store.profileBadgeState(for: status, relativeTo: now) == .stale)
     #expect(store.menuBarHelp(relativeTo: now).localizedCaseInsensitiveContains("cached"))
+}
+
+@MainActor
+@Test func discoveryListenerDoesNotShowAsReadyOrHero() {
+    let store = makeStore()
+    let now = Date(timeIntervalSince1970: 200)
+    let discovered = ModelFixtures.profileStatus(
+        profile: "discovered-8000",
+        displayName: "Found Listener",
+        running: true,
+        ready: true,
+        origin: .discovery
+    )
+    store.statuses = [
+        ModelFixtures.profileStatus(profile: "a", running: false, ready: false),
+        ModelFixtures.profileStatus(profile: "b", running: false, ready: false),
+        discovered,
+    ]
+    store.lastUpdated = now
+    store.refreshState = .refreshed
+
+    #expect(store.summary.totalProfiles == 2)
+    #expect(store.displayedReadyProfiles(relativeTo: now) == 0)
+    #expect(Set(store.sortedStatuses.map(\.profile)) == ["a", "b"])
+    #expect(MenuBarContentView.isDisplayedRunning(discovered, in: store, relativeTo: now) == false)
+}
+
+@MainActor
+@Test func lastActiveAndReopenIgnoreHiddenDiscoveryListeners() {
+    let namespacedKey = "modelswitchboard.last-active-profiles.last-active-test"
+    let defaults = UserDefaults.standard
+    defaults.removeObject(forKey: namespacedKey)
+    defer { defaults.removeObject(forKey: namespacedKey) }
+
+    let store = SwitchboardStore(
+        controllerBaseURL: "http://127.0.0.1:8877",
+        features: .plus,
+        gateway: GatewayContext(id: "last-active-test", name: "Spark"),
+        autoStartRefresh: false
+    )
+    let discovered = ModelFixtures.profileStatus(
+        profile: "discovered-8000",
+        running: true,
+        ready: true,
+        origin: .discovery
+    )
+    store.statuses = [
+        ModelFixtures.profileStatus(profile: "a", running: false, ready: false),
+        discovered,
+    ]
+    store.rememberLastActiveProfiles(from: store.statuses)
+    #expect(store.lastActiveProfiles.isEmpty)
+    #expect(!store.canReopenLastActive)
+
+    store.statuses = [
+        ModelFixtures.profileStatus(profile: "a", running: false, ready: false),
+        ModelFixtures.profileStatus(
+            profile: "discovered-8000",
+            running: false,
+            ready: false,
+            origin: .discovery
+        ),
+    ]
+    store.lastActiveProfiles = ["discovered-8000"]
+    #expect(!store.canReopenLastActive)
+
+    store.statuses = [
+        ModelFixtures.profileStatus(profile: "a", running: false, ready: false),
+        discovered,
+    ]
+    store.lastActiveProfiles = ["a"]
+    #expect(store.canReopenLastActive)
 }
 
 @MainActor

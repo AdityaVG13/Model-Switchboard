@@ -190,3 +190,25 @@ import ModelSwitchboardTestSupport
     )
     #expect(unspecified.isBoardVisible)
 }
+
+@Test func boardHidesSyntheticDiscoveryEvenWhenReady() {
+    let discovered = ModelFixtures.profileStatus(
+        profile: "discovered-8000",
+        running: true,
+        ready: true,
+        origin: .discovery
+    )
+    #expect(discovered.isSyntheticDiscoveryProfile)
+    #expect(!discovered.isBoardVisible)
+
+    let listening = ModelFixtures.profileStatus(
+        profile: "listener",
+        pid: nil,
+        running: false,
+        ready: true,
+        rssMB: nil,
+        origin: .listening
+    )
+    #expect(listening.isSyntheticDiscoveryProfile)
+    #expect(!listening.isBoardVisible)
+}

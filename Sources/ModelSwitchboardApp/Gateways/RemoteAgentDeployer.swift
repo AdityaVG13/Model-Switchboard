@@ -174,22 +174,11 @@ actor RemoteAgentDeployer {
         remoteCommand: String,
         stdin: Data
     ) async throws -> String {
-        var arguments: [String] = [
-            "-o", "BatchMode=yes",
-            "-o", "ConnectTimeout=10",
-        ]
-        if ssh.sshPort != 22 {
-            arguments += ["-p", String(ssh.sshPort)]
-        }
-        if let identityFile = ssh.identityFile, !identityFile.isEmpty {
-            arguments += ["-i", NSString(string: identityFile).expandingTildeInPath]
-        }
-        if let identityAgent = ssh.identityAgent, !identityAgent.isEmpty {
-            arguments += ["-o", "IdentityAgent=\(identityAgent)"]
-        }
-        // `--` terminates options so a crafted destination cannot inject
-        // `-oProxyCommand=...` (or similar) ahead of the remote command.
-        arguments += ["--", ssh.destination, remoteCommand]
+        let arguments = SSHInvocation.arguments(
+            to: SSHInvocation.Target(ssh),
+            extraOptions: ["-o", "ConnectTimeout=10"],
+            remoteCommand: remoteCommand
+        )
 
         let process = Process()
         process.executableURL = executableURL

@@ -12,12 +12,13 @@ public struct ProfileRuntimeCounts: Equatable, Sendable {
     }
 
     public init(statuses: [ModelProfileStatus]) {
-        // Board census: same set as SwitchboardStore sortedStatuses (visible file-backed rows).
-        let fileBacked = statuses.filter { !$0.isSyntheticDiscoveryProfile && $0.isBoardVisible }
-        total = fileBacked.count
+        // Board census: same set as SwitchboardStore.sortedStatuses.
+        // `isBoardVisible` already excludes synthetic discovery/listening rows.
+        let visible = statuses.filter(\.isBoardVisible)
+        total = visible.count
         var runningCount = 0
         var readyCount = 0
-        for status in fileBacked {
+        for status in visible {
             if status.running { runningCount += 1 }
             if status.ready { readyCount += 1 }
         }

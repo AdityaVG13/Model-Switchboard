@@ -8,9 +8,11 @@ extension SwitchboardStore {
         !lastActiveProfiles.isEmpty &&
         // Only offer reopen when those profiles still exist in this store
         // (avoids a dead "Reopen Last Active" after profiles were removed).
-        lastActiveProfiles.contains { name in statuses.contains { $0.profile == name } } &&
+        lastActiveProfiles.contains { name in
+            sortedStatuses.contains { $0.profile == name }
+        } &&
         !pendingGlobalActions.contains(.reopenLastActive) &&
-        !statuses.contains(where: \.running) &&
+        !sortedStatuses.contains(where: \.running) &&
         pendingProfileActions.isEmpty
     }
 
@@ -93,9 +95,10 @@ extension SwitchboardStore {
         for error: Error,
         actionName: String? = nil,
         status: ModelProfileStatus? = nil,
-        diagnostic: ProfileDiagnostic? = nil
+        diagnostic: ProfileDiagnostic? = nil,
+        isLocal: Bool = false
     ) -> String {
-        if let mapped = mapTransportError(error) {
+        if let mapped = mapTransportError(error, isLocal: isLocal) {
             return mapped
         }
         guard isTimeout(error) else { return error.localizedDescription }
@@ -121,12 +124,14 @@ extension SwitchboardStore {
         profile: String? = nil
     ) {
         if case .blocked = refreshState { return }
+        isRecoveringFromTransportFailure = Self.isTransientReachabilityFailure(error)
         refreshState = .failed(
             message: Self.userFacingErrorDescription(
                 for: error,
                 actionName: actionName,
                 status: profile.flatMap(statusForProfile),
-                diagnostic: profile.flatMap(diagnosticForProfile)
+                diagnostic: profile.flatMap(diagnosticForProfile),
+                isLocal: gateway.isLocal
             )
         )
     }
@@ -135,14 +140,8 @@ extension SwitchboardStore {
     /// Code-based only: NSError domain+code (URLError, POSIX, ATS -1022/-1200)
     /// walked through the underlying-error chain. Never sniffs
     /// localizedDescription text.
-    static func mapTransportError(_ error: Error) -> String? {
-        let nsError = error as NSError
-        var chain: [NSError] = [nsError]
-        var current: NSError? = nsError
-        while let next = current?.userInfo[NSUnderlyingErrorKey] as? NSError {
-            chain.append(next)
-            current = next
-        }
+    static func mapTransportError(_ error: Error, isLocal: Bool = false) -> String? {
+        let chain = nsErrorChain(error)
 
         // NSURLErrorAppTransportSecurityRequiresSecureConnection == -1022
         // NSURLErrorSecureConnectionFailed == -1200 (previously matched via the
@@ -163,9 +162,9 @@ extension SwitchboardStore {
                 case .notConnectedToInternet:
                     return "No network route to the gateway."
                 case .cannotFindHost, .dnsLookupFailed:
-                    return "Gateway host not found. Check MagicDNS / hostname."
+                    return "Gateway host not found. Check Tailscale / MagicDNS."
                 case .cannotConnectToHost:
-                    return "Gateway refused the connection. Is the agent running?"
+                    return connectionRefusedCopy(isLocal: isLocal)
                 case .networkConnectionLost:
                     return "Connection to the gateway was lost."
                 case .userAuthenticationRequired, .userCancelledAuthentication:
@@ -177,7 +176,7 @@ extension SwitchboardStore {
                 // POSIX socket codes surfacing from lower layers (tunnel, runner).
                 switch entry.code {
                 case Int(ECONNREFUSED):
-                    return "Gateway refused the connection. Is the agent running?"
+                    return connectionRefusedCopy(isLocal: isLocal)
                 case Int(ENETUNREACH), Int(EHOSTUNREACH):
                     return "No network route to the gateway."
                 case Int(ECONNRESET), Int(ENOTCONN):
@@ -188,6 +187,49 @@ extension SwitchboardStore {
             }
         }
         return nil
+    }
+
+    /// DNS / refused / no-route failures clear once Tailscale or the local
+    /// LaunchAgent is up. Auth and ATS are not in this set.
+    static func isTransientReachabilityFailure(_ error: Error) -> Bool {
+        if isTimeout(error) { return true }
+        for entry in nsErrorChain(error) {
+            if entry.domain == NSURLErrorDomain {
+                switch URLError.Code(rawValue: entry.code) {
+                case .notConnectedToInternet, .cannotFindHost, .dnsLookupFailed,
+                     .cannotConnectToHost, .networkConnectionLost:
+                    return true
+                default:
+                    break
+                }
+            } else if entry.domain == NSPOSIXErrorDomain {
+                switch entry.code {
+                case Int(ECONNREFUSED), Int(ENETUNREACH), Int(EHOSTUNREACH),
+                     Int(ECONNRESET), Int(ENOTCONN), Int(ETIMEDOUT):
+                    return true
+                default:
+                    break
+                }
+            }
+        }
+        return false
+    }
+
+    private static func connectionRefusedCopy(isLocal: Bool) -> String {
+        isLocal
+            ? "Local controller refused the connection. It may still be starting."
+            : "Gateway refused the connection. Is the agent running?"
+    }
+
+    private static func nsErrorChain(_ error: Error) -> [NSError] {
+        let nsError = error as NSError
+        var chain: [NSError] = [nsError]
+        var current: NSError? = nsError
+        while let next = current?.userInfo[NSUnderlyingErrorKey] as? NSError {
+            chain.append(next)
+            current = next
+        }
+        return chain
     }
 
     static func isTimeout(_ error: Error) -> Bool {

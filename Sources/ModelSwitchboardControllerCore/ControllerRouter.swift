@@ -1,39 +1,13 @@
 import Foundation
 
-public struct ControllerHTTPRequest: Sendable, Equatable {
-  public let method: String
-  public let target: String
-  public let headers: [String: String]
-  public let body: Data
-
-  public init(method: String, target: String, headers: [String: String] = [:], body: Data = Data())
-  {
-    self.method = method.uppercased()
-    self.target = target
-    self.headers = Dictionary(uniqueKeysWithValues: headers.map { ($0.key.lowercased(), $0.value) })
-    self.body = body
-  }
-
-  public var path: String {
-    URLComponents(string: target)?.path.nonEmpty ?? "/"
-  }
-}
-
-public struct ControllerHTTPResponse: Sendable, Equatable {
-  public let status: Int
-  public let headers: [String: String]
-  public let body: Data
-
-  public init(
-    status: Int, headers: [String: String] = ["Content-Type": "application/json"], body: Data
-  ) {
-    self.status = status
-    self.headers = headers
-    self.body = body
-  }
-}
-
 public final class ControllerRouter: @unchecked Sendable {
+  private struct RouteKey: Hashable {
+    let method: String
+    let path: String
+  }
+
+  private typealias Route = (ControllerHTTPRequest) throws -> ControllerHTTPResponse
+
   private let service: ControllerService
   private let authToken: String?
 
@@ -47,53 +21,64 @@ public final class ControllerRouter: @unchecked Sendable {
       if request.path.hasPrefix("/api/"), !authorized(request) {
         return try error(status: 401, code: "unauthorized", message: "unauthorized")
       }
-      switch (request.method, request.path) {
-      case ("GET", "/api/status"):
+      guard let route = routes[RouteKey(method: request.method, path: request.path)] else {
+        return try error(status: 404, code: "not_found", message: "not found")
+      }
+      return try route(request)
+    } catch RouterError.invalidJSON {
+      return (try? error(status: 400, code: "invalid_json", message: "invalid JSON")) ?? fallback()
+    } catch let controllerError as ControllerError {
+      return mapped(controllerError)
+    } catch {
+      return
+        (try? self.error(status: 500, code: "internal_error", message: "internal server error"))
+        ?? fallback()
+    }
+  }
+
+  private var routes: [RouteKey: Route] {
+    [
+      RouteKey(method: "GET", path: "/api/status"): { [self] _ in
         let payload = try service.statusPayload()
         try? service.writeStatusCache(payload)
         return try response(payload)
-      case ("GET", "/api/doctor"):
-        return try response(service.doctor.report())
-      case ("GET", "/api/benchmark/status"):
-        return try response(service.benchmarks.status())
-      case ("GET", "/api/integrations"):
-        return try json([
+      },
+      RouteKey(method: "GET", path: "/api/doctor"): { [self] _ in
+        try response(service.doctor.report())
+      },
+      RouteKey(method: "GET", path: "/api/benchmark/status"): { [self] _ in
+        try response(service.benchmarks.status())
+      },
+      RouteKey(method: "GET", path: "/api/integrations"): { [self] _ in
+        try json([
           "integrations": try jsonObjects(service.integrationStatus()),
           "profiles_dir": service.configuration.profilesDirectory.path,
           "controller_root": service.configuration.root.path,
         ])
-      case ("POST", "/api/start"):
-        let payload = try requestObject(request)
-        try service.start(try requiredString(payload, key: "profile"))
-        return try response(service.actionResponse())
-      case ("POST", "/api/stop"):
-        let payload = try requestObject(request)
-        try service.stop(try requiredString(payload, key: "profile"))
-        return try response(service.actionResponse())
-      case ("POST", "/api/restart"):
-        let payload = try requestObject(request)
-        try service.restart(try requiredString(payload, key: "profile"))
-        return try response(service.actionResponse())
-      case ("POST", "/api/switch"):
-        let payload = try requestObject(request)
-        try service.switchProfile(try requiredString(payload, key: "profile"))
-        return try response(service.actionResponse())
-      case ("POST", "/api/stop-all"):
+      },
+      RouteKey(method: "POST", path: "/api/start"): profileAction(service.start),
+      RouteKey(method: "POST", path: "/api/stop"): profileAction(service.stop),
+      RouteKey(method: "POST", path: "/api/restart"): profileAction(service.restart),
+      RouteKey(method: "POST", path: "/api/switch"): profileAction(service.switchProfile),
+      RouteKey(method: "POST", path: "/api/stop-all"): { [self] request in
         _ = try requestObject(request)
         try service.stopAll()
         return try response(service.actionResponse())
-      case ("POST", "/api/config/profiles-dir"):
+      },
+      RouteKey(method: "POST", path: "/api/config/profiles-dir"): { [self] request in
         let payload = try requestObject(request)
         return try response(
           service.setProfilesDirectory(try requiredString(payload, key: "profiles_dir")))
-      case ("POST", "/api/integrations/run"):
+      },
+      RouteKey(method: "POST", path: "/api/integrations/run"): { [self] request in
         let payload = try requestObject(request)
         try service.runIntegration(
           try requiredString(payload, key: "integration"),
           action: payload["action"] as? String ?? "sync"
         )
         return try response(service.actionResponse())
-      case ("POST", "/api/benchmark/start"):
+      },
+      RouteKey(method: "POST", path: "/api/benchmark/start"): { [self] request in
         let payload = try requestObject(request)
         let selected = try optionalStrings(payload, key: "profiles")
         _ = try service.benchmarks.start(
@@ -103,45 +88,37 @@ public final class ControllerRouter: @unchecked Sendable {
           keepRunning: JSONSupport.boolValue(payload["keep_running"]) ?? false
         )
         return try response(service.actionResponse())
-      default:
-        return try error(status: 404, code: "not_found", message: "not found")
-      }
-    } catch RouterError.invalidJSON {
-      return (try? error(status: 400, code: "invalid_json", message: "invalid JSON")) ?? fallback()
-    } catch let controllerError as ControllerError {
-      switch controllerError {
-      case .profileNotFound:
-        return (try? error(status: 404, code: "profile_not_found", message: "profile not found"))
-          ?? fallback()
-      case .profileConflict:
-        return
-          (try? error(status: 409, code: "profile_conflict", message: controllerError.description))
-          ?? fallback()
-      case .usage:
-        return (try? error(status: 400, code: "usage_error", message: "invalid request"))
-          ?? fallback()
-      case .invalidConfiguration:
-        return (try? error(status: 400, code: "invalid_configuration", message: "invalid request"))
-          ?? fallback()
-      case .invalidProfile:
-        return (try? error(status: 400, code: "invalid_profile", message: "invalid request"))
-          ?? fallback()
-      case .unsupported:
-        return
-          (try? error(status: 400, code: "unsupported_action", message: controllerError.description))
-          ?? fallback()
-      case .operationFailed:
-        return (
-          try? error(
-            status: 500, code: "internal_error", message: controllerError.description)
-        )
-          ?? fallback()
-      }
-    } catch {
-      return
-        (try? self.error(status: 500, code: "internal_error", message: "internal server error"))
-        ?? fallback()
+      },
+    ]
+  }
+
+  private func profileAction(_ run: @escaping (String) throws -> Void) -> Route {
+    { [self] request in
+      let payload = try requestObject(request)
+      try run(try requiredString(payload, key: "profile"))
+      return try response(service.actionResponse())
     }
+  }
+
+  private func mapped(_ error: ControllerError) -> ControllerHTTPResponse {
+    let mapped: ControllerHTTPResponse?
+    switch error {
+    case .profileNotFound:
+      mapped = try? self.error(status: 404, code: "profile_not_found", message: "profile not found")
+    case .profileConflict:
+      mapped = try? self.error(status: 409, code: "profile_conflict", message: error.description)
+    case .usage:
+      mapped = try? self.error(status: 400, code: "usage_error", message: "invalid request")
+    case .invalidConfiguration:
+      mapped = try? self.error(status: 400, code: "invalid_configuration", message: "invalid request")
+    case .invalidProfile:
+      mapped = try? self.error(status: 400, code: "invalid_profile", message: "invalid request")
+    case .unsupported:
+      mapped = try? self.error(status: 400, code: "unsupported_action", message: error.description)
+    case .operationFailed:
+      mapped = try? self.error(status: 500, code: "internal_error", message: error.description)
+    }
+    return mapped ?? fallback()
   }
 
   private func authorized(_ request: ControllerHTTPRequest) -> Bool {
@@ -217,7 +194,3 @@ public final class ControllerRouter: @unchecked Sendable {
 }
 
 private enum RouterError: Error { case invalidJSON }
-
-extension String {
-  fileprivate var nonEmpty: String? { isEmpty ? nil : self }
-}

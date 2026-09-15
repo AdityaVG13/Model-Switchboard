@@ -227,20 +227,19 @@ struct SettingsView: View {
     private var connectionGroup: some View {
         settingsGroup("CONNECTION") {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Controller base URL")
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(theme.label)
-                TextField(defaultControllerBaseURL, text: $controllerBaseURL)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 11.5, design: .monospaced))
-                    .foregroundStyle(theme.fieldFg)
-                Text("Bearer token (optional)")
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(theme.label)
-                SecureField("Required for --unsafe-bind controllers", text: $controllerAuthToken)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 11.5, design: .monospaced))
-                    .foregroundStyle(theme.fieldFg)
+                SettingsTextField(
+                    label: "Controller base URL",
+                    text: $controllerBaseURL,
+                    prompt: defaultControllerBaseURL,
+                    monospaced: true,
+                    theme: theme
+                )
+                SettingsSecureField(
+                    label: "Bearer token (optional)",
+                    text: $controllerAuthToken,
+                    prompt: "Required for --unsafe-bind controllers",
+                    theme: theme
+                )
                 HStack(spacing: 10) {
                     settingsLinkButton("Use Default") {
                         controllerBaseURL = defaultControllerBaseURL
@@ -291,13 +290,13 @@ struct SettingsView: View {
     private var controllerGroup: some View {
         settingsGroup("CONTROLLER") {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Profiles folder")
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(theme.label)
-                TextField("~/model-profiles", text: $profilesDirectoryDraft)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 11.5, design: .monospaced))
-                    .foregroundStyle(theme.fieldFg)
+                SettingsTextField(
+                    label: "Profiles folder",
+                    text: $profilesDirectoryDraft,
+                    prompt: "~/model-profiles",
+                    monospaced: true,
+                    theme: theme
+                )
                 HStack(spacing: 10) {
                     settingsLinkButton("Save Profiles Folder", emphasized: true) {
                         Task { await setProfilesDirectory(profilesDirectoryDraft) }
@@ -327,9 +326,9 @@ struct SettingsView: View {
                 settingsLinkButton(
                     isRunningControllerDoctor ? "Running Controller Doctor\u{2026}" : "Run Controller Doctor",
                     emphasized: true,
-                    disabled: isRunningControllerDoctor,
                     action: runControllerDoctor
                 )
+                .disabled(isRunningControllerDoctor)
 
                 if profileDiagnostics.isEmpty {
                     settingsFootnote("No profile errors or warnings on the latest controller refresh.", color: DashboardTheme.runningGreen)
@@ -393,106 +392,51 @@ struct SettingsView: View {
         .background(theme.hoverBg, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
-    // MARK: - Building blocks
+    // MARK: - Building blocks (adapters over SettingsChrome)
 
     private func settingsGroup(_ label: String, @ViewBuilder content: () -> some View) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            DashboardSectionLabel(text: label, theme: theme)
-                .padding(.horizontal, 4)
-            VStack(alignment: .leading, spacing: 0) {
-                content()
-            }
-            .background(theme.cellBg, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        }
+        SettingsGroup(title: label, theme: theme) { content() }
     }
 
     private func settingsRow(_ label: String, @ViewBuilder trailing: () -> some View) -> some View {
-        HStack {
-            Text(label)
-                .font(.system(size: 12.5))
-                .foregroundStyle(theme.label)
-            Spacer()
-            trailing()
-        }
-        .padding(EdgeInsets(top: 9, leading: 12, bottom: 9, trailing: 12))
+        SettingsRow(label: label, theme: theme) { trailing() }
     }
 
     private var groupDivider: some View {
-        theme.line
-            .frame(height: 1)
-            .padding(.horizontal, 12)
+        SettingsDivider(theme: theme)
     }
 
     private func segmented(options: [String], labels: [String], selection: Binding<String>) -> some View {
-        HStack(spacing: 2) {
-            ForEach(Array(zip(options, labels)), id: \.0) { option, label in
-                let isOn = selection.wrappedValue == option
-                Button {
-                    selection.wrappedValue = option
-                } label: {
-                    Text(label)
-                        .font(.system(size: 11, weight: isOn ? .semibold : .regular))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 5)
-                        .frame(minHeight: 24)
-                        .background(
-                            isOn ? theme.tabOnBg : Color.clear,
-                            in: RoundedRectangle(cornerRadius: 5, style: .continuous)
-                        )
-                        .foregroundStyle(isOn ? theme.tabOnFg : theme.tabOffFg)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(QuietCraftPressStyle())
-                .accessibilityLabel(label)
-                .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
-            }
-        }
-        .padding(2)
-        .background(theme.btnBg, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-        .accessibilityElement(children: .contain)
+        SettingsSegmentedControl(
+            options: options,
+            label: { option in
+                labels[options.firstIndex(of: option) ?? 0]
+            },
+            selection: selection,
+            theme: theme
+        )
     }
 
     private func toggleRow(_ label: String, subtitle: String, isOn: Binding<Bool>, disabled: Bool = false) -> some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(label)
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(theme.label)
-                Text(subtitle)
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(theme.sub)
-            }
-            Spacer()
-            Toggle("", isOn: isOn)
-                .toggleStyle(.switch)
-                .controlSize(.small)
-                .labelsHidden()
-                .tint(accent)
-                .disabled(disabled)
-                .accessibilityLabel(label)
-        }
+        SettingsToggleRow(
+            label: label,
+            subtitle: subtitle,
+            isOn: isOn,
+            disabled: disabled,
+            theme: theme,
+            accent: accent
+        )
     }
 
     private func settingsLinkButton(
         _ title: String,
         emphasized: Bool = false,
-        disabled: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.system(size: 11.5, weight: emphasized ? .semibold : .regular))
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(QuietCraftPressStyle())
-        .foregroundStyle(disabled ? theme.faint : (emphasized ? accent : theme.btnFg))
-        .disabled(disabled)
+        SettingsLinkButton(title: title, emphasized: emphasized, theme: theme, accent: accent, action: action)
     }
 
     private func settingsFootnote(_ text: String, color: Color) -> some View {
-        Text(text)
-            .font(.system(size: 10.5))
-            .foregroundStyle(color)
-            .fixedSize(horizontal: false, vertical: true)
+        SettingsFootnote(text: text, color: color)
     }
 }

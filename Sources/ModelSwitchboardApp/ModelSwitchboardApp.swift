@@ -110,9 +110,14 @@ struct ModelSwitchboardApp: App {
                 statusItem?.button?.toolTip = hub.menuBarHelp
                 // Bootstrap diagnostics concern the local LaunchAgent only;
                 // remote gateway stores must never inherit them.
-                store.applyBootstrapDiagnostic(
-                    await ControllerServiceManager.shared.ensureRegistered()
-                )
+                let diagnostic = await ControllerServiceManager.shared.ensureRegistered()
+                store.applyBootstrapDiagnostic(diagnostic)
+                // Auto-refresh already fired from store init, often before the
+                // LaunchAgent is listening after a crash/reboot. Poll again
+                // once registration has had a chance to bring the port up.
+                if diagnostic == nil {
+                    await store.refresh()
+                }
             }
             .onChange(of: hub.menuBarHelp) { _, newValue in
                 statusItem?.button?.toolTip = newValue

@@ -40,6 +40,33 @@ import ModelSwitchboardTestSupport
     #expect(policy.interval == AutoRefreshPolicy.activeRuntimeInterval)
 }
 
+@Test func autoRefreshPolicyUsesRecoveringCadenceForUnreachableHosts() {
+    let payload = ModelFixtures.statusPayload(
+        statuses: [
+            ModelFixtures.profileStatus(
+                profile: "idle",
+                displayName: "Idle",
+                pid: nil,
+                running: false,
+                ready: false,
+                rssMB: nil
+            )
+        ]
+    )
+
+    let recovering = AutoRefreshPolicy(payload: payload, isRecovering: true)
+    let pendingWins = AutoRefreshPolicy(
+        payload: payload,
+        hasPendingActions: true,
+        isRecovering: true
+    )
+
+    #expect(recovering.mode == .recovering)
+    #expect(recovering.interval == AutoRefreshPolicy.recoveringInterval)
+    #expect(pendingWins.mode == .pendingAction)
+    #expect(pendingWins.interval == AutoRefreshPolicy.pendingActionInterval)
+}
+
 @Test func autoRefreshPolicyPrioritizesBenchmarksAndPendingActions() {
     let payload = ModelFixtures.statusPayload(
         statuses: [

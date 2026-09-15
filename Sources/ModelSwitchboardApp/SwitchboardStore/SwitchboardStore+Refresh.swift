@@ -61,6 +61,7 @@ extension SwitchboardStore {
             if let report = try? await doctorTask {
                 apply(doctorReport: report)
             }
+            isRecoveringFromTransportFailure = false
             refreshState = .refreshed
             lastUpdated = Date()
         } catch {
@@ -73,11 +74,15 @@ extension SwitchboardStore {
                 // re-derived from message text. Otherwise the fallback is
                 // recorded as the structured .failedShowingCached provenance.
                 if case .blocked = previousState { return }
+                isRecoveringFromTransportFailure = Self.isTransientReachabilityFailure(error)
                 refreshState = .failedShowingCached(message: "Controller unavailable. Showing cached state.")
                 return
             }
             if case .blocked = previousState { return }
-            refreshState = .failed(message: Self.userFacingErrorDescription(for: error))
+            isRecoveringFromTransportFailure = Self.isTransientReachabilityFailure(error)
+            refreshState = .failed(
+                message: Self.userFacingErrorDescription(for: error, isLocal: gateway.isLocal)
+            )
         }
     }
 
@@ -98,6 +103,7 @@ extension SwitchboardStore {
 
     func applyBootstrapDiagnostic(_ message: String?) {
         if let message {
+            isRecoveringFromTransportFailure = false
             refreshState = .blocked(message: message)
         } else if case .blocked = refreshState {
             // Clearing the sticky diagnostic leaves any transient failure intact.
@@ -111,6 +117,7 @@ extension SwitchboardStore {
         statuses = []
         lastUpdated = nil
         refreshState = .idle
+        isRecoveringFromTransportFailure = false
         needsRefreshAgain = false
     }
 }

@@ -411,30 +411,24 @@ actor SSHTunnelManager {
     // MARK: - Arguments
 
     nonisolated func tunnelArguments() -> [String] {
-        var arguments: [String] = [
-            "-N",
-            "-o", "BatchMode=yes",
-            "-o", "ExitOnForwardFailure=yes",
-            "-o", "ConnectTimeout=8",
-            "-o", "ServerAliveInterval=15",
-            "-o", "ServerAliveCountMax=2",
-            "-o", "ControlMaster=auto",
-            "-S", controlSocketPath(),
-            "-L", "127.0.0.1:\(localPort):127.0.0.1:\(configuration.remotePort)",
-        ]
-        if configuration.sshPort != 22 {
-            arguments += ["-p", String(configuration.sshPort)]
-        }
-        if let identityFile = configuration.identityFile, !identityFile.isEmpty {
-            arguments += ["-i", NSString(string: identityFile).expandingTildeInPath]
-        }
-        if let identityAgent = configuration.identityAgent, !identityAgent.isEmpty {
-            arguments += ["-o", "IdentityAgent=\(identityAgent)"]
-        }
-        // End-of-options: destinations from settings / pairing codes must not
-        // be parsed as ssh flags (e.g. `-oProxyCommand=...`).
-        arguments += ["--", configuration.destination]
-        return arguments
+        SSHInvocation.arguments(
+            to: SSHInvocation.Target(
+                destination: configuration.destination,
+                sshPort: configuration.sshPort,
+                identityFile: configuration.identityFile,
+                identityAgent: configuration.identityAgent
+            ),
+            prefix: [
+                "-N",
+                "-o", "ExitOnForwardFailure=yes",
+                "-o", "ConnectTimeout=8",
+                "-o", "ServerAliveInterval=15",
+                "-o", "ServerAliveCountMax=2",
+                "-o", "ControlMaster=auto",
+                "-S", controlSocketPath(),
+                "-L", "127.0.0.1:\(localPort):127.0.0.1:\(configuration.remotePort)",
+            ]
+        )
     }
 
     nonisolated private func controlSocketPath() -> String {

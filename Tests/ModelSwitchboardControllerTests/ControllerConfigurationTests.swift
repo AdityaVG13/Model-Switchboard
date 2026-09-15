@@ -4,6 +4,11 @@ import ModelSwitchboardCore
 
 @testable import ModelSwitchboardControllerCore
 
+@Test func controllerErrorUnknownProfileCopyIsStable() {
+  #expect(ControllerError.profileNotFound("alpha").description == "Unknown profile: alpha")
+  #expect(ControllerError.usage("missing --id").description == "missing --id")
+}
+
 @Test func nativeControllerConfigurationEnforcesBindSecurity() throws {
   let root = URL(fileURLWithPath: "/tmp/controller")
   let loopback = try ControllerConfiguration(root: root)

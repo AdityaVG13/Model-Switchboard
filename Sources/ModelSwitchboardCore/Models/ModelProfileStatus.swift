@@ -86,7 +86,13 @@ public struct ModelProfileStatus: Codable, Identifiable, Equatable, Sendable {
     /// Board rows: hide stale flat configs unless the endpoint is still live.
     /// Launch-folder / port claims stay visible so operators can see runners
     /// whose weights are temporarily missing.
+    /// Discovery/listening listeners stay off the board: they are not
+    /// file-backed, so promoting them to ACTIVE would disagree with the
+    /// ready census (`ProfileRuntimeCounts`).
     public var isBoardVisible: Bool {
+        if isSyntheticDiscoveryProfile {
+            return false
+        }
         if !isLaunchable {
             if isLaunchFolderClaim {
                 return true

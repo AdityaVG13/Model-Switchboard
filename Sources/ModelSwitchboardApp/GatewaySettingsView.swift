@@ -28,16 +28,14 @@ struct GatewaySettingsSection: View {
     @State private var renamingGatewayID: String?
     @State private var renameDraft = ""
     @State private var profilesDirectoryDraft = ""
+    @AppStorage(DisplayPrivacy.defaultsKey) private var hideHostInfo = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             DashboardSectionLabel(text: "REMOTE GATEWAYS", theme: theme)
                 .padding(EdgeInsets(top: 2, leading: 4, bottom: 6, trailing: 4))
 
-            Toggle(isOn: Binding(
-                get: { DisplayPrivacy.isHostInfoHidden },
-                set: { DisplayPrivacy.isHostInfoHidden = $0 }
-            )) {
+            Toggle(isOn: $hideHostInfo) {
                 Text("Hide hosts and addresses")
                     .font(.system(size: 10.5))
             }
@@ -51,10 +49,10 @@ struct GatewaySettingsSection: View {
                     gatewayList
                 }
                 if let draft {
-                    divider
+                    SettingsDivider(theme: theme)
                     editor(for: draft)
                 } else {
-                    divider
+                    SettingsDivider(theme: theme)
                     addButton
                 }
             }
@@ -116,7 +114,7 @@ struct GatewaySettingsSection: View {
                                 .accessibilityLabel("Rename \(runtime.name)")
                             }
                         }
-                        Text(DisplayPrivacy.connectionSummary(runtime.config.endpointSummary))
+                        Text(DisplayPrivacy.connectionSummary(runtime.config.endpointSummary, hidden: hideHostInfo))
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundStyle(theme.sub)
                             .lineLimit(1)
@@ -257,16 +255,15 @@ struct GatewaySettingsSection: View {
                     .font(.system(size: 12.5))
                     .foregroundStyle(theme.label)
                 Spacer(minLength: 0)
-                HStack(spacing: 2) {
-                    connectionKindChip("SSH tunnel", kind: .ssh, isOn: binding.wrappedValue.kind == .ssh) {
-                        switchKind(&binding.wrappedValue, to: .ssh)
-                    }
-                    connectionKindChip("Direct URL", kind: .direct, isOn: binding.wrappedValue.kind == .direct) {
-                        switchKind(&binding.wrappedValue, to: .direct)
-                    }
-                }
-                .padding(2)
-                .background(theme.btnBg, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                SettingsSegmentedControl(
+                    options: [GatewayKind.ssh, .direct],
+                    label: { $0 == .ssh ? "SSH tunnel" : "Direct URL" },
+                    selection: Binding(
+                        get: { binding.wrappedValue.kind },
+                        set: { switchKind(&binding.wrappedValue, to: $0) }
+                    ),
+                    theme: theme
+                )
             }
 
             switch binding.wrappedValue.connection {
@@ -279,7 +276,7 @@ struct GatewaySettingsSection: View {
                 }
                 field(
                     "Identity file (optional)",
-                    text: optionalText(sshOptionalTextBinding(binding, \.identityFile)),
+                    text: SettingsChrome.optionalString(sshOptionalTextBinding(binding, \.identityFile)),
                     prompt: "~/.ssh/id_ed25519",
                     monospaced: true
                 )
@@ -295,7 +292,7 @@ struct GatewaySettingsSection: View {
                     .font(.system(size: 10))
                     .foregroundStyle(theme.sub)
                     .fixedSize(horizontal: false, vertical: true)
-                field("Deploy host (optional)", text: optionalText(directOptionalTextBinding(binding, \.deployHost)), prompt: "ssh alias, e.g. gpu", monospaced: true)
+                field("Deploy host (optional)", text: SettingsChrome.optionalString(directOptionalTextBinding(binding, \.deployHost)), prompt: "ssh alias, e.g. gpu", monospaced: true)
                 Text("Used only by Update to push the agent over SSH. Defaults to the URL host - which hangs when that host needs Tailscale SSH re-auth. Use an ssh-config alias or a tailnet destination such as `user@100.64.1.2`.")
                     .font(.system(size: 10))
                     .foregroundStyle(theme.sub)
@@ -356,15 +353,12 @@ struct GatewaySettingsSection: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("Bearer token")
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(theme.label)
-                SecureField(
-                    tokenFieldPrompt,
-                    text: $draftToken
+                SettingsSecureField(
+                    label: "Bearer token",
+                    text: $draftToken,
+                    prompt: tokenFieldPrompt,
+                    theme: theme
                 )
-                .textFieldStyle(.roundedBorder)
-                .font(.system(size: 11.5, design: .monospaced))
                 Text(tokenFieldHelp)
                     .font(.system(size: 10))
                     .foregroundStyle(theme.sub)
@@ -671,30 +665,6 @@ struct GatewaySettingsSection: View {
         .opacity(disabled ? 0.5 : 1)
     }
 
-    private func connectionKindChip(
-        _ title: String,
-        kind: GatewayKind,
-        isOn: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        return Button(action: action) {
-            Text(title)
-                .font(.system(size: 11, weight: isOn ? .semibold : .regular))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .frame(minHeight: 24)
-                .background(
-                    isOn ? theme.tabOnBg : Color.clear,
-                    in: RoundedRectangle(cornerRadius: 5, style: .continuous)
-                )
-                .foregroundStyle(isOn ? theme.tabOnFg : theme.tabOffFg)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(QuietCraftPressStyle())
-        .accessibilityLabel(title)
-        .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
-    }
-
     /// Rendered outside the SSH-only controls so a Tailscale install that
     /// converts the gateway to direct-URL kind keeps its status visible.
     @ViewBuilder
@@ -786,11 +756,7 @@ struct GatewaySettingsSection: View {
         deployWithTailscale = false
     }
 
-    // MARK: - Small helpers (visually matching SettingsView)
-
-    private var divider: some View {
-        theme.line.frame(height: 1).padding(.horizontal, 10)
-    }
+    // MARK: - Building blocks (adapters over SettingsChrome)
 
     private func field(
         _ label: String,
@@ -798,55 +764,18 @@ struct GatewaySettingsSection: View {
         prompt: String,
         monospaced: Bool = false
     ) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label)
-                .font(.system(size: 12.5))
-                .foregroundStyle(theme.label)
-            TextField(prompt, text: text)
-                .textFieldStyle(.roundedBorder)
-                .font(.system(size: 11.5, design: monospaced ? .monospaced : .default))
-                .foregroundStyle(theme.fieldFg)
-        }
+        SettingsTextField(label: label, text: text, prompt: prompt, monospaced: monospaced, theme: theme)
     }
 
     private func numberField(_ label: String, value: Binding<Int>) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label)
-                .font(.system(size: 12.5))
-                .foregroundStyle(theme.label)
-            TextField(
-                "",
-                text: Binding(
-                    get: { String(value.wrappedValue) },
-                    set: { value.wrappedValue = Int($0) ?? value.wrappedValue }
-                )
-            )
-            .textFieldStyle(.roundedBorder)
-            .font(.system(size: 11.5, design: .monospaced))
-            .foregroundStyle(theme.fieldFg)
-            .frame(width: 90)
-        }
-    }
-
-    private func optionalText(_ binding: Binding<String?>) -> Binding<String> {
-        Binding(
-            get: { binding.wrappedValue ?? "" },
-            set: { binding.wrappedValue = $0.isEmpty ? nil : $0 }
-        )
+        SettingsNumberField(label: label, value: value, theme: theme)
     }
 
     private func linkButton(
         _ title: String,
         emphasized: Bool = false,
-        color: Color? = nil,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.system(size: 11.5, weight: emphasized ? .semibold : .regular))
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(QuietCraftPressStyle())
-        .foregroundStyle(color ?? (emphasized ? accent : theme.btnFg))
+        SettingsLinkButton(title: title, emphasized: emphasized, theme: theme, accent: accent, action: action)
     }
 }

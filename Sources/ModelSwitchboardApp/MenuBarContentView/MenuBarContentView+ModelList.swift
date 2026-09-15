@@ -41,7 +41,8 @@ extension MenuBarContentView {
         in store: SwitchboardStore,
         relativeTo now: Date = .now
     ) -> Bool {
-        store.profileBadgeState(for: status, relativeTo: now) == .running
+        guard status.isBoardVisible else { return false }
+        return store.profileBadgeState(for: status, relativeTo: now) == .running
     }
 
     /// Legacy mlx / llama.cpp classification for tests and older call sites.

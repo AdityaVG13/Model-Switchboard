@@ -24,6 +24,23 @@ enum ProfileHeroStatusCopy {
         }
         return core
     }
+
+    /// Runtime + reachable endpoint, with the same host mask as list rows.
+    static func endpointSubtitle(
+        runtimeLabel: String,
+        url: String?,
+        host: String,
+        port: String,
+        hidden: Bool
+    ) -> String {
+        let endpoint: String
+        if let url, !url.isEmpty {
+            endpoint = DisplayPrivacy.url(url, hidden: hidden)
+        } else {
+            endpoint = DisplayPrivacy.hostPort(host, port: port, hidden: hidden)
+        }
+        return "\(runtimeLabel) · \(endpoint)"
+    }
 }
 
 /// Hover highlight for list rows (SwiftUI has no `style-hover`; track it manually).
@@ -53,6 +70,7 @@ struct ProfileListRowView: View {
     var onOpenBenchmarks: (() -> Void)? = nil
     let theme: DashboardTheme
     let accent: Color
+    @AppStorage(DisplayPrivacy.defaultsKey) private var hideHostInfo = false
 
     private var isDisplayedRunning: Bool {
         MenuBarContentView.isDisplayedRunning(profile, in: store)
@@ -115,7 +133,10 @@ struct ProfileListRowView: View {
     }
 
     private var subtitle: String {
-        var parts = [profile.runtimeLabel ?? profile.runtime, DisplayPrivacy.hostPort(profile.host, port: profile.port)]
+        var parts = [
+            profile.runtimeLabel ?? profile.runtime,
+            DisplayPrivacy.hostPort(profile.host, port: profile.port, hidden: hideHostInfo),
+        ]
         if let pending {
             parts.append(pending.lowercased() + "…")
         } else if let memory = HostMetricsPresentation.profileMemoryLabel(
@@ -157,9 +178,9 @@ struct ProfileListRowView: View {
         let servedModel = profile.serverIDs.first ?? profile.serverModelID
         guard let url = reachableEndpointURL else {
             let why = endpointUnavailableHint ?? "not reachable from this Mac"
-            return "\(servedModel) · \(DisplayPrivacy.hostPort(profile.host, port: profile.port)) (\(why))"
+            return "\(servedModel) · \(DisplayPrivacy.hostPort(profile.host, port: profile.port, hidden: hideHostInfo)) (\(why))"
         }
-        return "\(servedModel) · \(DisplayPrivacy.url(url))"
+        return "\(servedModel) · \(DisplayPrivacy.url(url, hidden: hideHostInfo))"
     }
 
     @ViewBuilder
@@ -305,6 +326,7 @@ struct ActiveProfileHeroView: View {
     var onOpenBenchmarks: (() -> Void)? = nil
     let theme: DashboardTheme
     let accent: Color
+    @AppStorage(DisplayPrivacy.defaultsKey) private var hideHostInfo = false
 
     private var isBusy: Bool {
         store.isBusy(profile: profile.profile)
@@ -320,13 +342,18 @@ struct ActiveProfileHeroView: View {
     }
 
     private var subtitle: String {
-        switch context {
-        case .local:
-            return "\(profile.runtimeLabel ?? profile.runtime) · \(profile.baseURL)"
-        case .remote:
-            let endpoint = reachableEndpointURL ?? "\(profile.host):\(profile.port)"
-            return "\(profile.runtimeLabel ?? profile.runtime) · \(endpoint)"
-        }
+        ProfileHeroStatusCopy.endpointSubtitle(
+            runtimeLabel: profile.runtimeLabel ?? profile.runtime,
+            url: {
+                switch context {
+                case .local: return profile.baseURL
+                case .remote: return reachableEndpointURL
+                }
+            }(),
+            host: profile.host,
+            port: profile.port,
+            hidden: hideHostInfo
+        )
     }
 
     private var canBenchmark: Bool {

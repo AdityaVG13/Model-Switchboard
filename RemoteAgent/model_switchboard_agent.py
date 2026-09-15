@@ -101,7 +101,7 @@ from discovery import (  # noqa: E402
     status_dict_from_discovery,
 )
 
-AGENT_VERSION = "1.2.0"
+AGENT_VERSION = "2.0.0"
 
 MINIMUM_TOKEN_BYTES = 16
 
@@ -2124,71 +2124,27 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
 
     def _route(self, method: str, path: str) -> Callable[[dict[str, Any]], dict[str, Any]] | None:
         service = self.service
-        if method == "GET":
-            if path == "/api/status":
-                return lambda _: service.status_payload()
-            if path == "/api/ports":
-                return lambda _: service.ports_payload()
-            if path == "/api/doctor":
-                return lambda _: service.doctor_report()
-            if path == "/api/benchmark/status":
-                return lambda _: service.benchmark_status()
-            if path == "/api/host/metrics":
-                return lambda _: host_metrics_payload()
-            if path == "/api/integrations":
-                return lambda _: {
-                    "integrations": [],
-                    "profiles_dir": str(service.configuration.profiles_directory),
-                    "controller_root": str(service.configuration.root),
-                }
-            return None
-        if method == "POST":
-            if path == "/api/start":
-                return self._profile_action(service.start)
-            if path == "/api/stop":
-                return self._stop_action(service)
-            if path == "/api/restart":
-                return self._profile_action(service.restart)
-            if path == "/api/switch":
-                return self._profile_action(service.switch_profile)
-            if path == "/api/stop-all":
-                return self._stop_all_action(service)
-            if path == "/api/integrations/run":
-                def run_integration(payload: dict[str, Any]) -> dict[str, Any]:
-                    service.run_integration(
-                        self._required_string(payload, "integration"),
-                        payload.get("action", "sync"),
-                    )
-                    return service.action_response()
-                return run_integration
-            if path == "/api/config/profiles-dir":
-                def set_profiles_dir(payload: dict[str, Any]) -> dict[str, Any]:
-                    return service.set_profiles_directory(
-                        self._required_string(payload, "profiles_dir")
-                    )
-                return set_profiles_dir
-            if path == "/api/benchmark/start":
-                def benchmark_start(payload: dict[str, Any]) -> dict[str, Any]:
-                    selected = payload.get("profiles")
-                    if selected is not None and not isinstance(selected, list):
-                        raise UsageError("profiles must be a list of strings")
-                    names: list[str] | None = None
-                    if selected is not None:
-                        names = []
-                        for item in selected:
-                            if not isinstance(item, str) or not item:
-                                raise UsageError("profiles must be a list of strings")
-                            names.append(item)
-                    service.start_benchmark(
-                        profiles=names,
-                        suite=str(payload.get("suite") or "quick"),
-                        allow_concurrent=bool(payload.get("allow_concurrent")),
-                        keep_running=bool(payload.get("keep_running")),
-                    )
-                    return service.action_response()
-                return benchmark_start
-            return None
-        return None
+        routes: dict[tuple[str, str], Callable[[dict[str, Any]], dict[str, Any]]] = {
+            ("GET", "/api/status"): lambda _: service.status_payload(),
+            ("GET", "/api/ports"): lambda _: service.ports_payload(),
+            ("GET", "/api/doctor"): lambda _: service.doctor_report(),
+            ("GET", "/api/benchmark/status"): lambda _: service.benchmark_status(),
+            ("GET", "/api/host/metrics"): lambda _: host_metrics_payload(),
+            ("GET", "/api/integrations"): lambda _: {
+                "integrations": [],
+                "profiles_dir": str(service.configuration.profiles_directory),
+                "controller_root": str(service.configuration.root),
+            },
+            ("POST", "/api/start"): self._profile_action(service.start),
+            ("POST", "/api/stop"): self._stop_action(service),
+            ("POST", "/api/restart"): self._profile_action(service.restart),
+            ("POST", "/api/switch"): self._profile_action(service.switch_profile),
+            ("POST", "/api/stop-all"): self._stop_all_action(service),
+            ("POST", "/api/integrations/run"): self._run_integration_action(service),
+            ("POST", "/api/config/profiles-dir"): self._set_profiles_dir_action(service),
+            ("POST", "/api/benchmark/start"): self._benchmark_start_action(service),
+        }
+        return routes.get((method, path))
 
     def _profile_action(
         self, action: Callable[[str], None]
@@ -2213,6 +2169,49 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
         def handle(payload: dict[str, Any]) -> dict[str, Any]:
             force = bool(payload.get("force"))
             service.stop_all(force=force)
+            return service.action_response()
+        return handle
+
+    def _run_integration_action(
+        self, service: "AgentService"
+    ) -> Callable[[dict[str, Any]], dict[str, Any]]:
+        def handle(payload: dict[str, Any]) -> dict[str, Any]:
+            service.run_integration(
+                self._required_string(payload, "integration"),
+                payload.get("action", "sync"),
+            )
+            return service.action_response()
+        return handle
+
+    def _set_profiles_dir_action(
+        self, service: "AgentService"
+    ) -> Callable[[dict[str, Any]], dict[str, Any]]:
+        def handle(payload: dict[str, Any]) -> dict[str, Any]:
+            return service.set_profiles_directory(
+                self._required_string(payload, "profiles_dir")
+            )
+        return handle
+
+    def _benchmark_start_action(
+        self, service: "AgentService"
+    ) -> Callable[[dict[str, Any]], dict[str, Any]]:
+        def handle(payload: dict[str, Any]) -> dict[str, Any]:
+            selected = payload.get("profiles")
+            if selected is not None and not isinstance(selected, list):
+                raise UsageError("profiles must be a list of strings")
+            names: list[str] | None = None
+            if selected is not None:
+                names = []
+                for item in selected:
+                    if not isinstance(item, str) or not item:
+                        raise UsageError("profiles must be a list of strings")
+                    names.append(item)
+            service.start_benchmark(
+                profiles=names,
+                suite=str(payload.get("suite") or "quick"),
+                allow_concurrent=bool(payload.get("allow_concurrent")),
+                keep_running=bool(payload.get("keep_running")),
+            )
             return service.action_response()
         return handle
 

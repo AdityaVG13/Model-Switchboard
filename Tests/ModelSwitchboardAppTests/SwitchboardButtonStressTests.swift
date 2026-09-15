@@ -169,6 +169,25 @@ import ModelSwitchboardTestSupport
 }
 
 @MainActor
+@Test func localConnectionRefusedDoesNotBlameTheRemoteAgent() {
+    let message = SwitchboardStore.userFacingErrorDescription(
+        for: URLError(.cannotConnectToHost),
+        isLocal: true
+    )
+    #expect(message.contains("Local controller"))
+    #expect(!message.localizedCaseInsensitiveContains("agent"))
+}
+
+@MainActor
+@Test func magicDNSHostLookupFailureMentionsTailscale() {
+    let message = SwitchboardStore.userFacingErrorDescription(for: URLError(.cannotFindHost))
+    #expect(message.localizedCaseInsensitiveContains("Tailscale"))
+    #expect(SwitchboardStore.isTransientReachabilityFailure(URLError(.cannotFindHost)))
+    #expect(SwitchboardStore.isTransientReachabilityFailure(URLError(.cannotConnectToHost)))
+    #expect(!SwitchboardStore.isTransientReachabilityFailure(URLError(.userAuthenticationRequired)))
+}
+
+@MainActor
 @Test func failedBenchmarkStartDoesNotArmCooldown() async {
     let defaults = UserDefaults.standard
     let previousBenchmarkStartedAt = defaults.object(forKey: "modelswitchboard.last-benchmark-started-at")

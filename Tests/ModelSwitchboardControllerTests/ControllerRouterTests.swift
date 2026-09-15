@@ -4,6 +4,18 @@ import Testing
 
 @testable import ModelSwitchboardControllerCore
 
+@Test func httpRequestNormalizesMethodHeadersAndEmptyPath() {
+  let request = ControllerHTTPRequest(
+    method: "get",
+    target: "/api/status?cache=false",
+    headers: ["Authorization": "Bearer x"]
+  )
+  #expect(request.method == "GET")
+  #expect(request.path == "/api/status")
+  #expect(request.headers["authorization"] == "Bearer x")
+  #expect(ControllerHTTPRequest(method: "GET", target: "").path == "/")
+}
+
 @Test func frozenControllerContractContainsAllNativeCases() throws {
   let repositoryRoot = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()

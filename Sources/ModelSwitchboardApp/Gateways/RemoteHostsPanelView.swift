@@ -12,6 +12,7 @@ struct RemoteHostsPanelView: View {
     @State private var renamingGatewayID: String?
     @State private var renameDraft = ""
     @State private var renameError: String?
+    @AppStorage(DisplayPrivacy.defaultsKey) private var hideHostInfo = false
 
     var body: some View {
         ScrollView(.vertical) {
@@ -227,7 +228,7 @@ struct RemoteHostsPanelView: View {
                             .font(.system(size: 9.5, weight: .semibold))
                             .kerning(0.5)
                             .foregroundStyle(theme.sub)
-                        if let detail = tailnet.detail, !DisplayPrivacy.isHostInfoHidden {
+                        if let detail = tailnet.detail, !hideHostInfo {
                             Text(detail)
                                 .font(.system(size: 9.5))
                                 .foregroundStyle(theme.faint)
@@ -425,9 +426,9 @@ struct RemoteHostsPanelView: View {
 
     private func subtitle(runtime: GatewayRuntime, metrics: HostMetricsPayload?) -> String {
         if let host = metrics?.host, !host.isEmpty {
-            return DisplayPrivacy.host(host)
+            return DisplayPrivacy.host(host, hidden: hideHostInfo)
         }
-        return DisplayPrivacy.connectionSummary(runtime.config.endpointSummary)
+        return DisplayPrivacy.connectionSummary(runtime.config.endpointSummary, hidden: hideHostInfo)
     }
 
     private func statusColor(runtime: GatewayRuntime, entry: RemoteHostMetricsMonitor.Entry) -> Color {

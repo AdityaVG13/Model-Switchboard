@@ -135,6 +135,10 @@ final class SwitchboardStore {
     var controllerRoot: String?
     /// Refresh lifecycle + single error slot (see `RefreshState`).
     var refreshState: RefreshState = .idle
+    /// Last refresh/action failed on DNS / connection refused / no route. Drives
+    /// the recovering auto-refresh cadence so a post-reboot Tailscale or
+    /// LaunchAgent delay does not sit on the idle 10-minute interval.
+    var isRecoveringFromTransportFailure = false
     /// Coalesce overlapping refresh() calls into one follow-up instead of dropping them.
     var needsRefreshAgain = false
     var isRunningControllerDoctor = false
@@ -234,7 +238,8 @@ final class SwitchboardStore {
     var autoRefreshPolicy: AutoRefreshPolicy {
         AutoRefreshPolicy(
             payload: currentPayload,
-            hasPendingActions: hasPendingActions
+            hasPendingActions: hasPendingActions,
+            isRecovering: isRecoveringFromTransportFailure
         )
     }
 

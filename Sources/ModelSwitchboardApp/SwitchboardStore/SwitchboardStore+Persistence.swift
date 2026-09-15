@@ -83,7 +83,7 @@ extension SwitchboardStore {
 
     func rememberLastActiveProfiles(from sourceStatuses: [ModelProfileStatus]) {
         let runningProfiles = sourceStatuses
-            .filter(\.running)
+            .filter { $0.running && $0.isBoardVisible }
             .map(\.profile)
         guard !runningProfiles.isEmpty else { return }
 

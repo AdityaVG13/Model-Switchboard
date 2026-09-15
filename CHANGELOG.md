@@ -3,21 +3,39 @@
 All notable changes to this project are documented in this file.
 
 ## [Unreleased]
+
+## [2.0.0] - 2026-09-15
+
 ### Added
 
+- **Remote gateways** in Base/Plus: named sections for launching, monitoring, and stopping other hosts; ready-count and Stop Everything aggregate them.
+- Stdlib-only Python agent (`RemoteAgent/`) implementing the controller contract, with vLLM/llama.cpp/SGLang/TGI templates, `START_COMMAND`, and cross-implementation `ControllerClient` conformance coverage.
+- Settings-driven SSH deployment without remote downloads; `modelswitchboard-gateway://` pairing via `link`; `curl | bash` fallback.
+- App-managed SSH tunnels using the user's own keys (`BatchMode`), with jittered reconnect backoff, classified failure messages, and automatic same-port forwarding of running models' endpoints.
+- Tailscale `--tailscale` tailnet-only binds and `mode=direct` MagicDNS pairing without tunnels.
+- Per-gateway bearer tokens in the keychain; non-loopback agent binds outside a tailnet require `--unsafe-bind` plus a ≥16-byte token, mirroring the local controller.
+- Profile discovery: remote default `~/model-profiles/`; `link` scans `$HOME` for `.env`/`.json`, confirms/pastes and persists a path (`--profiles-dir` / `MODEL_SWITCHBOARD_PROFILES_DIR`); matching Mac `--profiles-dir` + `config.json` support.
+- Each remote shows a separate **Update** control (dashboard, Remote Hosts, and Settings). It pushes the bundled agent over SSH and refreshes models. The DIRECT/SSH chip is status only. Settings empty state accepts a pairing paste for any host.
 - Screen-share privacy: a "Hide hosts and addresses" toggle in Settings → Remote Gateways masks hostnames, tailnet names, IPs, SSH destinations, and the host part of endpoint URLs across the dashboard, Remote Hosts panel, and Settings (ports, paths, model names, and metrics stay visible; endpoint copy keeps working). For demos, streams, and shared screens.
-- sparkDash-derived host visibility for every remote gateway (agent 1.2.0): uptime on the gateway header, storage and network rate readouts, tailnet self-health (online state, backend state, warning reasons - catches the "healthy on LAN but off-tailnet" blind spot), and GPU process names next to running models.
+- sparkDash-derived host visibility for every remote gateway (bundled agent 2.0.0): uptime on the gateway header, storage and network rate readouts, tailnet self-health (online state, backend state, warning reasons - catches the "healthy on LAN but off-tailnet" blind spot), and GPU process names next to running models.
 - Live LLM serving rates on model rows and the Remote Hosts panel: decode/prefill tok/s from llama.cpp `/slots`, vLLM Prometheus `/metrics`, and sglang `/server_info` counters, diffed over time so idle reads 0; plus KV-cache usage and request queue depth for vLLM. Loopback-only unless `ALLOW_REMOTE_HEALTHCHECK`, same SSRF posture as health probes; every probe failure degrades to a hidden label, never an error.
+
+### Changed
+
+- App and bundled remote-agent version is 2.0.0 so existing 1.x agents show Update.
 
 ### Fixed
 
+- After a Mac crash/reboot, DIRECT Tailscale gateways and the local controller no longer sit on `DIRECT · ERROR` / connection-refused until Force Update: DNS and connection-refused failures retry every 3s (not the idle 10 minutes), MagicDNS copy mentions Tailscale, local refused copy no longer blames a remote agent, and the local store refreshes again once the LaunchAgent is registered.
+- Discovered (unmanaged) listeners no longer render as ACTIVE while the ready count only includes file-backed profiles. Reopen Last Active and SSH port forwards ignore those hidden rows too.
+- The "Hide hosts and addresses" toggle now updates the dashboard and Remote Hosts live (AppStorage), and ACTIVE hero cards mask hosts the same way list rows already did.
 - Gateway agent updates can no longer hang forever on "Pushing agent…": each deploy step is killed at a 120s deadline with a pointed message, and Tailscale SSH re-auth prompts ("To authenticate, visit https://login.tailscale.com/…") are classified into remediation instead of stalling BatchMode ssh silently.
 - DIRECT gateways accept an explicit **Deploy host** (e.g. an ssh-config alias like `spark`) used by Update to push the agent - the MagicDNS URL host hangs when the remote sshd is Tailscale SSH; a Tailscale install converting an SSH gateway now carries the proven host over.
 - Unnamed port-claim folders (no MODEL*/REQUEST_MODEL/SERVER_MODEL_ID hint) are no longer stuck at "WARMING": their synthetic `port-N` identity is a placeholder, so readiness is proven by the endpoint serving any OpenAI `/v1/models` id, and the row adopts the served id as its visible name (previously "Port 8050" could never count toward the ready tally).
 - A `SERVER_MODEL_ID=` flag in a claim's `flags.env` now reaches the profile (it was silently dropped by the claim scanner's flag whitelist), and a bare `MODEL_FILE=*.gguf` claim reports the `llama.cpp` runtime family instead of Unknown.
 - Local `start-model-mac.sh` health-wait and `SERVER_ARGS_JSON` parse through the bundled Swift controller instead of `jq`, so LaunchAgent PATH (no Homebrew) can still start models.
 - Activate on a remote agent no longer walks claims and live-probes every listener just to decide which managed profiles to stop; idle siblings skip `STOP_COMMAND`, and a failed sibling stop cannot abort `start()`.
-- GB10 / DGX Spark VRAM chips no longer report host RAM used as VRAM (the `34/122 GB` lie). When nvidia-smi framebuffer is N/A, used is the compute-apps GPU-memory sum (SparkDash's `25.4/121.7 GB`) and total is the unified DRAM pool.
+- GB10 / DGX Spark VRAM chips no longer report host RAM used as VRAM. When nvidia-smi framebuffer is N/A, used is the compute-apps GPU-memory sum and total is the unified DRAM pool.
 - Remote agent discovery no longer imports the agent module (cycle broken via `agent_core.py`); installer, embed, and SSH deploy push the third file.
 - Gateway configs no longer project empty SSH/URL fields for the inactive kind. Deploy and SSH tunnels take `Connection.SSH` instead of minting a fake SSH gateway from a Direct URL.
 - Remote gateway refresh no longer sticks on `DIRECT · ERROR` / "Request timed out" when the agent is healthy: the Mac client allows longer status/doctor HTTP deadlines, and the remote agent skips probing internal vLLM EngineCore/worker ports that were serializing `/api/status` for ~15s.
@@ -28,19 +46,6 @@ All notable changes to this project are documented in this file.
 - Remote agent stop now reaps zombie/defunct model processes, treats them as not running, force-kills after a longer vLLM-friendly wait, and exposes `stop --force` / `kill-all`.
 - Tailscale agent binds require a bearer token by default (`--allow-unauthenticated` opt-out); installer generates and prints the token.
 - Watchdog no longer auto-starts a model after agent reboot from a leftover `active-profile` file (session-supervised crash recovery only).
-
-
-### Added
-- **Remote gateways** in Base/Plus: named sections for launching, monitoring, and stopping other hosts; ready-count and Stop Everything aggregate them.
-- Stdlib-only Python agent (`RemoteAgent/`) implementing the controller contract, with vLLM/llama.cpp/SGLang/TGI templates, `START_COMMAND`, and cross-implementation `ControllerClient` conformance coverage.
-- Settings-driven SSH deployment without remote downloads; `modelswitchboard-gateway://` pairing via `link`; `curl | bash` fallback.
-- App-managed SSH tunnels using the user's own keys (`BatchMode`), with jittered reconnect backoff, classified failure messages, and automatic same-port forwarding of running models' endpoints.
-- Tailscale `--tailscale` tailnet-only binds and `mode=direct` MagicDNS pairing without tunnels.
-- Per-gateway bearer tokens in the keychain; non-loopback agent binds outside a tailnet require `--unsafe-bind` plus a ≥16-byte token, mirroring the local controller.
-- Profile discovery: remote default `~/model-profiles/`; `link` scans `$HOME` for `.env`/`.json`, confirms/pastes and persists a path (`--profiles-dir` / `MODEL_SWITCHBOARD_PROFILES_DIR`); matching Mac `--profiles-dir` + `config.json` support.
-- Each remote shows a separate **Update** control (dashboard, Remote Hosts, and Settings). It pushes the bundled agent over SSH and refreshes models. The DIRECT/SSH chip is status only. Settings empty state accepts a pairing paste for any host.
-
-### Fixed
 - Keychain token saves now update existing items; previously edits to a saved controller token were silently discarded (`SecItemAdd` duplicate). Token edits are debounced, not saved per keystroke.
 - Remote gateway thermos follow-ups: token-only gateway edits sync the live store; direct/Tailscale rows no longer advertise dead loopback rewrites; SSH destinations are option-terminated and reject leading `-`; ControlMaster sockets are per-tunnel-instance; embedded RemoteAgent files are verified at pack time.
 

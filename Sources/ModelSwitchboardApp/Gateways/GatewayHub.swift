@@ -318,7 +318,7 @@ final class GatewayHub {
                 else { return }
                 let runningPorts = Set(
                     runtime.store.statuses
-                        .filter { $0.running || $0.ready }
+                        .filter { ($0.running || $0.ready) && $0.isBoardVisible }
                         .compactMap { Int($0.port) }
                 )
                 let forwarded = await tunnel.syncForwards(remotePorts: runningPorts)
