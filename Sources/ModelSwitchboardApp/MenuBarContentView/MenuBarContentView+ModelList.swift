@@ -309,16 +309,44 @@ extension MenuBarContentView {
 
 
     var localEmptyMessage: String {
-        if !store.sortedStatuses.isEmpty {
+        Self.localEmptyCopy(
+            hasVisibleStatuses: !store.sortedStatuses.isEmpty,
+            hasRemoteGateways: hub.hasRemoteGateways,
+            lastError: store.lastError,
+            profilesDirectory: store.profilesDirectory,
+            isRecovering: store.isRecoveringFromTransportFailure
+        )
+    }
+
+    /// First-run / empty-board copy. A healthy controller with no profiles is not
+    /// a connection failure.
+    static func localEmptyCopy(
+        hasVisibleStatuses: Bool,
+        hasRemoteGateways: Bool,
+        lastError: String?,
+        profilesDirectory: String?,
+        isRecovering: Bool = false
+    ) -> String {
+        if hasVisibleStatuses {
             return "No models match this filter."
         }
-        if hub.hasRemoteGateways {
-            if store.lastError != nil {
+        if hasRemoteGateways {
+            if lastError != nil {
                 return "This Mac controller is offline. Remote gateways below still work."
             }
             return "No local model profiles. Remote gateways are listed below."
         }
-        return "No model profiles reported yet. Check the controller connection in Settings."
+        if lastError != nil {
+            if isRecovering {
+                return "The local controller is still starting."
+            }
+            return "No model profiles reported yet. Check the controller connection in Settings."
+        }
+        let dir = profilesDirectory?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !dir.isEmpty {
+            return "No model profiles in \(dir). Copy an example from the examples folder into that folder, fill in your model path, and Refresh."
+        }
+        return "No model profiles yet. Open Settings → Open Profiles Folder, copy an example, fill in your model path, then Refresh."
     }
 
     func profileRow(_ profile: ModelProfileStatus) -> some View {

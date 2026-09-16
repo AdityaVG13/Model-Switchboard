@@ -125,3 +125,66 @@ import ModelSwitchboardTestSupport
 
     #expect(MenuBarContentView.isDisplayedRunning(status, in: store, relativeTo: now) == false)
 }
+
+@MainActor
+@Test func localEmptyCopyDistinguishesMissingProfilesFromConnectionFailure() {
+    #expect(
+        MenuBarContentView.localEmptyCopy(
+            hasVisibleStatuses: false,
+            hasRemoteGateways: false,
+            lastError: nil,
+            profilesDirectory: nil
+        ).localizedCaseInsensitiveContains("open profiles folder")
+    )
+    #expect(
+        MenuBarContentView.localEmptyCopy(
+            hasVisibleStatuses: false,
+            hasRemoteGateways: false,
+            lastError: nil,
+            profilesDirectory: "/tmp/model-profiles"
+        ).contains("/tmp/model-profiles")
+    )
+    #expect(
+        MenuBarContentView.localEmptyCopy(
+            hasVisibleStatuses: false,
+            hasRemoteGateways: false,
+            lastError: "Local controller refused the connection.",
+            profilesDirectory: nil
+        ).localizedCaseInsensitiveContains("controller connection")
+    )
+    #expect(
+        !MenuBarContentView.localEmptyCopy(
+            hasVisibleStatuses: false,
+            hasRemoteGateways: false,
+            lastError: nil,
+            profilesDirectory: nil
+        ).localizedCaseInsensitiveContains("controller connection")
+    )
+    #expect(
+        MenuBarContentView.localEmptyCopy(
+            hasVisibleStatuses: false,
+            hasRemoteGateways: false,
+            lastError: "Local controller refused the connection.",
+            profilesDirectory: nil,
+            isRecovering: true
+        ).localizedCaseInsensitiveContains("still starting")
+    )
+}
+
+@MainActor
+@Test func openProfilesFolderFallsBackToCanonicalPathBeforeFirstStatus() {
+    let store = SwitchboardStore(
+        controllerBaseURL: "http://127.0.0.1:8877",
+        features: .base,
+        autoStartRefresh: false,
+        cachedStateLoader: { nil }
+    )
+    #expect(store.profilesDirectory == nil)
+    #expect(
+        store.profilesDirectoryToReveal.path.hasSuffix(
+            "Library/Application Support/ModelSwitchboard/Controller/model-profiles"
+        )
+    )
+    store.profilesDirectory = "/tmp/custom-model-profiles"
+    #expect(store.profilesDirectoryToReveal.path == "/tmp/custom-model-profiles")
+}

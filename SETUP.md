@@ -1,9 +1,10 @@
 # Model Switchboard (Setup & Reference)
 
-Everything you need beyond the README's quickstart. This is also what the app's **Help** button opens.
+Everything you need beyond the README's quickstart. The in-app **Help** panel is a short version of the first-launch path; this file is the full reference.
 
 ## Table of contents
 
+- [First launch](#first-launch)
 - [The operating model](#the-operating-model)
 - [One central folder](#one-central-folder)
 - [Accepted profile formats](#accepted-profile-formats)
@@ -22,6 +23,18 @@ Everything you need beyond the README's quickstart. This is also what the app's 
 - [Known limitations](#known-limitations)
 
 ---
+
+## First launch
+
+A GitHub Releases DMG (or `Scripts/install.sh`) already embeds the local controller. Do not clone this repo or run `Controller/install-model-switchboard-controller.sh` unless you are developing from source.
+
+1. Drag the app to Applications (or `~/Applications` from `install.sh`) and open the menu bar extra.
+2. First launch registers a LaunchAgent. If the board shows a connection error, enable Model Switchboard in **System Settings → General → Login Items & Extensions**, then Quit and reopen.
+3. Profiles live in `~/Library/Application Support/ModelSwitchboard/Controller/model-profiles`. The board is empty until you add `.env` / `.json` files there (not in the `examples/` subfolder).
+4. Copy a template from `examples/`, fill in paths that exist on this Mac, Refresh, then **Activate**.
+5. Optional remote GPU host: **Settings → Remote Gateways**. Paste a `modelswitchboard-gateway://` code, or enter `user` + `host` and **Install Agent on Host**. Remote default profiles folder is `~/model-profiles` *on that host*, not the Mac Application Support path.
+
+Source checkouts that install only the controller (no app bundle) still use `<controller-root>/model-profiles`. See [Controller/README.md](Controller/README.md).
 
 ## The operating model
 
@@ -52,9 +65,11 @@ This repo includes one generic reference implementation under `Controller/`. Use
 
 Adapter layout:
 
-- `<adapter-root>/model-profiles`
+- Distributed app: `~/Library/Application Support/ModelSwitchboard/Controller/model-profiles`
+- Source controller checkout: `<adapter-root>/model-profiles`
+- Remote agent: `~/model-profiles` on the host (override with `--profiles-dir` / Settings)
 
-That folder is the source of truth. Add one manifest per model.
+That folder is the source of truth. Add one manifest per model. Keep `examples/` as templates; the controller only loads `.env` / `.json` files in the folder itself.
 
 ## Accepted profile formats
 

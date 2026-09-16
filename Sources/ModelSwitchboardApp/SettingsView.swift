@@ -293,7 +293,7 @@ struct SettingsView: View {
                 SettingsTextField(
                     label: "Profiles folder",
                     text: $profilesDirectoryDraft,
-                    prompt: "~/model-profiles",
+                    prompt: "~/Library/Application Support/ModelSwitchboard/Controller/model-profiles",
                     monospaced: true,
                     theme: theme
                 )
@@ -312,7 +312,7 @@ struct SettingsView: View {
                 )
                 if profilesDirectory == nil || profilesDirectory?.isEmpty == true {
                     settingsFootnote(
-                        "No profile folder reported yet. Start the controller and reconnect, or save a path above.",
+                        "No profile folder reported yet. Open Profiles Folder still opens the default Application Support path.",
                         color: DashboardTheme.pendingOrange
                     )
                 }

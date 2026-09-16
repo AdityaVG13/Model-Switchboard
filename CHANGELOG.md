@@ -14,6 +14,7 @@ All notable changes to this project are documented in this file.
 - Gateway Update via `bash -s` no longer installs leftover `$HOME/agent_core.py` over the just-pushed modules, no longer hangs on a post-install `link` HOME scan, waits until the agent answers (HTTP 200/401) after systemd restart, best-effort enables lingering so the unit survives logout/reboot, and does not paint Update as done when refresh still fails.
 - Local controller profile scan treats an unreadable profiles directory as empty instead of 500ing `/api/status`.
 - Remote `start`/`restart`/`activate` of a `discovered-N` name no longer aliases onto a port-N launch claim; SwiftBar and Stop Everything ignore the same hidden discovery rows; Settings/Update no longer dump raw `localizedDescription` for non-deploy errors; LaunchAgent profile migration treats an unlistable folder as empty.
+- First-run empty board no longer says "check the controller connection" when the embedded controller is up and there are simply no profiles yet; Open Profiles Folder falls back to the Application Support path instead of doing nothing before the first status payload; Help and Settings use that path instead of a remote `~/model-profiles` placeholder.
 
 ## [2.0.0] - 2026-09-15
 

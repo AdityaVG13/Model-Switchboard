@@ -44,8 +44,9 @@ extension SwitchboardStore {
     }
 
     func openProfilesDirectory() {
-        guard let profilesDirectory else { return }
-        revealInFinder(URL(fileURLWithPath: profilesDirectory))
+        let url = profilesDirectoryToReveal
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        revealInFinder(url)
     }
 
     func openControllerRoot() {
@@ -72,6 +73,21 @@ extension SwitchboardStore {
         var isDirectory: ObjCBool = false
         return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
             && isDirectory.boolValue
+    }
+
+    /// Live folder if the controller has reported one; otherwise the embedded
+    /// controller's Application Support path so first-run Open Profiles Folder
+    /// is not a no-op while status is still coming up.
+    var profilesDirectoryToReveal: URL {
+        let trimmed = profilesDirectory?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !trimmed.isEmpty {
+            return URL(fileURLWithPath: trimmed, isDirectory: true)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(
+                "Library/Application Support/ModelSwitchboard/Controller/model-profiles",
+                isDirectory: true
+            )
     }
 
     var resolvedControllerRoot: String? {

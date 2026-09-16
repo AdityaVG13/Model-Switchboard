@@ -179,17 +179,17 @@ Agent-facing CLI entrypoints: `model-switchboardctl capabilities`, `robot-docs g
 
 ## Quickstart
 
-*Model Switchboard is the control surface. It does not run models itself.* You need a controller that knows how to launch and health-check models.
+*Model Switchboard is the control surface. It does not run models itself.* A downloaded app already embeds the local controller. You still need model weights and a runtime (`llama-server`, MLX, Ollama, …) on the machine that will serve them.
 
-**1. Install the reference controller:**
+**1. Open the menu bar icon.** First launch registers the embedded controller. If macOS asks, allow Model Switchboard in **System Settings → General → Login Items & Extensions**.
 
-```bash
-./Controller/install-model-switchboard-controller.sh
+**2. Add a profile.** The board starts empty on purpose. Open **Settings → Open Profiles Folder**. That folder is:
+
+```text
+~/Library/Application Support/ModelSwitchboard/Controller/model-profiles
 ```
 
-The controller exposes its API at `http://127.0.0.1:8877` under a per-user LaunchAgent. Use `--root`, `--host`, `--port`, `--no-start`, or `--verify` when installing a dedicated controller checkout.
-
-**2. Drop a profile manifest** into the controller's `model-profiles/` folder *(the exact path is shown in `Settings`).* With the reference controller in this repo, that is `Controller/model-profiles/`. With a dedicated controller root, it is `<controller-root>/model-profiles/`. A minimal `llama.cpp` example:
+Copy a file from the `examples/` subfolder into that folder, rename it, and replace every placeholder (`MODEL_PATH`, `MODEL_DIR`, `SERVER_BIN`) with paths that exist on *this* Mac. A minimal `llama.cpp` example:
 
 ```env
 DISPLAY_NAME=Qwen 3.5 35B Local
@@ -200,25 +200,28 @@ REQUEST_MODEL=qwen35-local
 SERVER_MODEL_ID=qwen35-local
 ```
 
-**3. Open the menu bar icon.** Your profile appears. Click **`Activate`**.
+**3. Refresh, then click `Activate`.** Every other model stops. The one you picked comes up at an OpenAI-compatible endpoint.
 
 Every profile must resolve to a unique endpoint. Reusing the same `HOST:PORT` or `BASE_URL` across two profiles is a configuration error. The controller doctor will flag it.
+
+**Optional: a remote GPU box.** Settings → Remote Gateways → paste a `modelswitchboard-gateway://` pairing code, or enter `user` + `host` and click **Install Agent on Host**. See [RemoteAgent/README.md](RemoteAgent/README.md).
 
 > Using your own runtime or launcher? Any OpenAI-compatible endpoint works. The controller has adapters and tags for MLX, Ollama, vLLM, SGLang, TGI, llama-cpp-python, rVLLM MLX, vLLM-MLX, DDTree MLX, TurboQuant, Mistral.rs, MLC-LLM, LightLLM, FastChat, OpenLLM, Nexa, ExLlamaV2, Aphrodite, LMDeploy, LiteLLM, external endpoints, and generic binaries. See [runtime support](Controller/RUNTIME_SUPPORT.md).
 
 <details>
-<summary><strong>I already downloaded the app; set up the controller for me</strong></summary>
+<summary><strong>I already downloaded the app; create profiles for the runtimes I have</strong></summary>
 
 <br/>
 
-Paste this prompt into your favorite AI agent to wire the controller up against the runtimes you actually have installed:
+Paste this prompt into your favorite AI agent:
 
 ```text
-I already downloaded Model Switchboard on my Mac.
-Set up the reference controller for me, create working model profiles for the runtimes I actually have installed, and make the configuration portable instead of hardcoding your own assumptions.
+I already downloaded Model Switchboard on my Mac. The local controller is already embedded; do not clone the repo or run Controller/install-model-switchboard-controller.sh unless I ask.
+Create working model profiles for the runtimes I actually have installed, and make the configuration portable instead of hardcoding your own assumptions.
 Rules:
 - This is macOS-only, and that is intentional.
 - Do not hardcode Homebrew paths, repo-local build paths, or personal directories unless you first verify they exist on this machine.
+- Put profiles in ~/Library/Application Support/ModelSwitchboard/Controller/model-profiles (not ~/model-profiles unless I already saved that path in Settings). Copy from the examples/ subfolder; leave examples/ itself as templates.
 - Prefer profile-driven config:
   - `MODEL_PATH` or `MODEL_FILE` with `MODEL_ROOT` for llama.cpp
   - `MODEL_DIR` or `MODEL_REPO` for MLX
@@ -226,7 +229,6 @@ Rules:
   - A named `RUNTIME` plus `START_COMMAND` or `SERVER_BIN` for launchers without a native adapter yet
   - JSON profiles for structured values; `.env` profiles are declarative key/value files, not shell scripts
 - Use the controller contract and profile format documented in this repo's `SETUP.md`.
-- Put profiles in the controller's `model-profiles` directory.
 - Verify that each profile can be started, health-checked, and stopped cleanly.
 - If something is missing, inspect the machine and ask me only the minimum necessary question.
 End state:
@@ -274,11 +276,11 @@ See **[CHANGELOG.md](CHANGELOG.md)** for release-by-release detail and **[Releas
 
 Deeper material:
 
-> **[SETUP.md](SETUP.md)**: profile formats, supported runtimes, health checks, controller API contract, build-from-source flow, release pipeline, Raycast power-user notes, troubleshooting, and known limitations.
+> **[SETUP.md](SETUP.md)**: first-launch path, profile formats, supported runtimes, health checks, controller API contract, build-from-source flow, release pipeline, Raycast power-user notes, troubleshooting, and known limitations.
 > **[Controller/RUNTIME_SUPPORT.md](Controller/RUNTIME_SUPPORT.md)**: canonical runtime table, launch modes, profile templates, readiness modes.
 > **[CHANGELOG.md](CHANGELOG.md)**: release-by-release changes and distribution hardening notes.
 
-*The app's **Help** button opens the same doc.*
+*The app's **Help** button is a short in-app version of the first-launch path. This repo's SETUP.md is the full reference.*
 
 ---
 

@@ -15,8 +15,8 @@ struct HelpView: View {
                 section(
                     title: "Quick Start",
                     bullets: [
-                        "Install the local controller service first. \(features.appDisplayName) assumes a controller is serving status and actions at `\(ControllerEndpointDefaults.baseURLString)` by default.",
-                        "Put model launch profiles in the controller's `model-profiles` directory. Settings shows the live path reported by the controller and can open that folder in Finder.",
+                        "\(features.appDisplayName) already embeds the local controller. The first launch registers it; if macOS asks, allow it in System Settings → General → Login Items & Extensions.",
+                        "The board starts empty. Open Settings → Open Profiles Folder, copy a file from `examples/` into that folder, fill in your model path (not a placeholder), then Refresh.",
                         "Use `Start` to spawn a model, `Activate` to switch your primary endpoint (stopping others), and hold `Stop All` / `Stop Everything` to shut down running models before closing the lid or leaving the machine on battery."
                     ]
                 )
@@ -52,7 +52,8 @@ struct HelpView: View {
                 section(
                     title: "Troubleshooting",
                     bullets: [
-                        "If the board shows stale data, hit `Refresh` or `Reconnect` after confirming the controller service is listening on the expected port.",
+                        "If the board shows a connection error on first launch, enable Model Switchboard in System Settings → General → Login Items & Extensions, then Quit and reopen.",
+                        "If the board shows stale data, hit `Refresh` or Settings → Reconnect after confirming the controller service is listening on the expected port.",
                         "If buttons do nothing, inspect the controller log first. The menu bar app only reflects controller success or failure.",
                         "If a profile keeps flapping between running and not running, the launch command is unstable. Fix the launcher instead of repeatedly forcing restart from the UI."
                     ]
@@ -126,7 +127,7 @@ struct HelpView: View {
     private var powerUserBullets: [String] {
         var bullets = [
             "Raycast users can add the repo's `Integrations/Raycast/Script Commands` folder directly in Raycast for keyboard-first actions.",
-            "The bundled `Scripts/model-switchboardctl` CLI exposes controller actions like `status`, `activate`, `stop-all`, and `open-profiles` without touching the menu bar.",
+            "`model-switchboardctl` (from a source `Scripts/install.sh`) exposes `status`, `activate`, `stop-all`, and `open-profiles` without touching the menu bar.",
         ]
         if features.supportsBenchmarks {
             bullets.append("Benchmark controls live in the Plus edition, and results are viewable directly in the in-app Benchmarks panel.")
