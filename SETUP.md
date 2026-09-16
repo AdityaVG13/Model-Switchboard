@@ -479,9 +479,20 @@ Run `MSW_VERIFY_UI=0 ./Scripts/verify-installed-app.sh` to execute lifecycle/API
 The widget target (`ModelSwitchboardWidget`) is real. It is embedded at `Contents/PlugIns/ModelSwitchboardWidget.appex` and wired through `project.yml`. Local installs from `./Scripts/install.sh` ad-hoc sign the bundle (`codesign --sign -`). Ad-hoc-signed widget extensions are not reliably registered by WidgetKit's gallery. The widget begins to register once the app is installed from a Developer ID-signed, notarized DMG (the GitHub Release build). To verify on a local build:
 
 ```bash
-pluginkit -a "$HOME/Applications/Model Switchboard.app/Contents/PlugIns/ModelSwitchboardWidget.appex"
+APP="${MSW_APP_PATH:-}"
+if [ -z "$APP" ]; then
+  for candidate in \
+    "/Applications/Model Switchboard Plus.app" \
+    "/Applications/Model Switchboard.app" \
+    "$HOME/Applications/Model Switchboard Plus.app" \
+    "$HOME/Applications/Model Switchboard.app"
+  do
+    [ -d "$candidate" ] && APP="$candidate" && break
+  done
+fi
+pluginkit -a "$APP/Contents/PlugIns/ModelSwitchboardWidget.appex"
 killall chronod cfprefsd 2>/dev/null || true
-open -a "Model Switchboard"
+open -a "$APP"
 ```
 
 Then wait ~60 seconds and check the Widget gallery. Results vary across macOS versions.

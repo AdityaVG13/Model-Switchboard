@@ -135,14 +135,16 @@ enum ModelSwitchboardControllerMain {
       try printJSONObject([
         "health": service.doctor.healthPayload(),
         "profiles": ["names": try service.profiles.load().keys.sorted()],
-        "commands": ["status", "doctor", "capabilities"],
+        "commands": ["status", "doctor", "capabilities", "triage", "robot-docs"],
       ])
     case "capabilities":
       try printJSONObject([
         "schema_version": "1", "tool": "ModelSwitchboardController", "native": true,
         "commands": [
-          "status", "list", "start", "stop", "restart", "switch", "benchmark", "doctor",
-          "integrations", "run-integration", "stop-all", "serve",
+          "serve", "serve-web", "status", "list", "start", "stop", "restart", "switch", "activate",
+          "stop-all", "integrations", "run-integration", "doctor", "diagnose", "health", "triage",
+          "capabilities", "benchmark", "benchmark-worker", "profile-exports", "swiftbar",
+          "robot-docs",
         ],
       ])
     case "robot-docs", "docs":

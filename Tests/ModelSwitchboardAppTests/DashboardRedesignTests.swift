@@ -188,3 +188,25 @@ import ModelSwitchboardTestSupport
     store.profilesDirectory = "/tmp/custom-model-profiles"
     #expect(store.profilesDirectoryToReveal.path == "/tmp/custom-model-profiles")
 }
+
+@MainActor
+@Test func openControllerRootAndExamplesFallBackBeforeFirstStatus() {
+    let store = SwitchboardStore(
+        controllerBaseURL: "http://127.0.0.1:8877",
+        features: .base,
+        autoStartRefresh: false,
+        cachedStateLoader: { nil }
+    )
+    #expect(
+        store.controllerRootToReveal.path.hasSuffix(
+            "Library/Application Support/ModelSwitchboard/Controller"
+        )
+    )
+    #expect(
+        store.exampleProfilesDirectoryToReveal.path.hasSuffix(
+            "Library/Application Support/ModelSwitchboard/Controller/model-profiles/examples"
+        )
+    )
+    store.profilesDirectory = "/tmp/custom-model-profiles"
+    #expect(store.exampleProfilesDirectoryToReveal.path == "/tmp/custom-model-profiles/examples")
+}

@@ -111,16 +111,11 @@ struct HelpView: View {
                     .padding(8)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(theme.hoverBg, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-
-                Button("Open Example Profiles", action: openExampleProfilesDirectory)
-                    .buttonStyle(QuietCraftPressStyle())
-                    .foregroundStyle(accent)
-            } else {
-                Text("The controller root is not available yet, so the bundled example-profile folder cannot be resolved.")
-                    .font(.footnote)
-                    .foregroundStyle(DashboardTheme.pendingOrange)
-                    .fixedSize(horizontal: false, vertical: true)
             }
+
+            Button("Open Example Profiles", action: openExampleProfilesDirectory)
+                .buttonStyle(QuietCraftPressStyle())
+                .foregroundStyle(accent)
         }
     }
 

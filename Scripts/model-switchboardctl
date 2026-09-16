@@ -18,8 +18,10 @@ CONTROLLER_BIN="${MODEL_SWITCHBOARD_CONTROLLER_BIN:-}"
 if [ -z "$CONTROLLER_BIN" ]; then
   for candidate in \
     "$SCRIPT_DIR/../Controller/bin/ModelSwitchboardController" \
-    "$HOME/Applications/Model Switchboard.app/Contents/Resources/ModelSwitchboardController" \
-    "$HOME/Applications/Model Switchboard Plus.app/Contents/Resources/ModelSwitchboardController"
+    "/Applications/Model Switchboard Plus.app/Contents/Resources/ModelSwitchboardController" \
+    "/Applications/Model Switchboard.app/Contents/Resources/ModelSwitchboardController" \
+    "$HOME/Applications/Model Switchboard Plus.app/Contents/Resources/ModelSwitchboardController" \
+    "$HOME/Applications/Model Switchboard.app/Contents/Resources/ModelSwitchboardController"
   do
     if [ -x "$candidate" ]; then CONTROLLER_BIN="$candidate"; break; fi
   done
@@ -82,7 +84,7 @@ extract_path() {
 }
 
 completions() {
-  local commands='status summary profiles-dir controller-root capabilities triage doctor start stop restart switch bench bench-all stop-all open-app open-profiles'
+  local commands='status summary profiles-dir controller-root capabilities robot-docs triage doctor start stop restart switch bench bench-all stop-all open-app open-profiles'
   case "${1:-}" in
     bash)
       cat <<EOF
@@ -106,7 +108,7 @@ print_capabilities() {
   "contract_version": "1.0",
   "default_probe": "model-switchboardctl triage",
   "native_controller": true,
-  "commands": ["status", "summary", "profiles-dir", "controller-root", "capabilities", "triage", "doctor", "start", "stop", "restart", "switch", "bench", "bench-all", "stop-all"]
+  "commands": ["status", "summary", "profiles-dir", "controller-root", "capabilities", "robot-docs", "triage", "doctor", "start", "stop", "restart", "switch", "bench", "bench-all", "stop-all", "open-app", "open-profiles"]
 }
 JSON
 }
@@ -145,8 +147,20 @@ shift || true
 case "$command" in
   help|-h|--help) usage ;;
   status|summary) api "$CONTROLLER_URL/api/status"; printf '\n' ;;
-  profiles-dir) extract_path profiles_dir ;;
-  controller-root) extract_path controller_root ;;
+  profiles-dir)
+    if dir="$(extract_path profiles_dir 2>/dev/null)" && [ -n "${dir:-}" ]; then
+      printf '%s\n' "$dir"
+    else
+      printf '%s\n' "$CONTROLLER_ROOT/model-profiles"
+    fi
+    ;;
+  controller-root)
+    if root="$(extract_path controller_root 2>/dev/null)" && [ -n "${root:-}" ]; then
+      printf '%s\n' "$root"
+    else
+      printf '%s\n' "$CONTROLLER_ROOT"
+    fi
+    ;;
   capabilities) print_capabilities ;;
   robot-docs) print_robot_docs "${1:-guide}" ;;
   triage|doctor|diagnose|health) native "$command" "$@" ;;
@@ -171,8 +185,17 @@ case "$command" in
     json_action '/api/benchmark/start' "{\"profiles\":[\"$profile\"],\"suite\":\"quick\"}"
     ;;
   bench-all) json_action '/api/benchmark/start' '{"suite":"quick"}' ;;
-  open-app) open -a 'Model Switchboard' ;;
-  open-profiles) open "$(extract_path profiles_dir)" ;;
+  open-app)
+    open -a 'Model Switchboard Plus' 2>/dev/null || open -a 'Model Switchboard'
+    ;;
+  open-profiles)
+    dir="$(extract_path profiles_dir 2>/dev/null || true)"
+    if [ -z "${dir:-}" ]; then
+      dir="$CONTROLLER_ROOT/model-profiles"
+    fi
+    mkdir -p "$dir"
+    open "$dir"
+    ;;
   completions) completions "${1:-}" ;;
   *)
     printf 'error: unknown command: %s\n' "$command" >&2

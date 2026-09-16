@@ -6,7 +6,6 @@ struct SettingsView: View {
     @Binding var controllerBaseURL: String
     @Binding var controllerAuthToken: String
     let profilesDirectory: String?
-    let controllerRoot: String?
     let doctorReport: DoctorReport?
     let profileDiagnostics: [ProfileDiagnostic]
     let isRunningControllerDoctor: Bool
@@ -302,9 +301,7 @@ struct SettingsView: View {
                         Task { await setProfilesDirectory(profilesDirectoryDraft) }
                     }
                     settingsLinkButton("Open Profiles Folder", action: openProfilesDirectory)
-                    if let controllerRoot, !controllerRoot.isEmpty {
-                        settingsLinkButton("Open Controller Root", action: openControllerRoot)
-                    }
+                    settingsLinkButton("Open Controller Root", action: openControllerRoot)
                 }
                 settingsFootnote(
                     "Editable here; persisted in the controller config.json. The controller hot-reloads the folder without a restart.",

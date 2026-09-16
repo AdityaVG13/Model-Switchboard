@@ -15,6 +15,8 @@ All notable changes to this project are documented in this file.
 - Local controller profile scan treats an unreadable profiles directory as empty instead of 500ing `/api/status`.
 - Remote `start`/`restart`/`activate` of a `discovered-N` name no longer aliases onto a port-N launch claim; SwiftBar and Stop Everything ignore the same hidden discovery rows; Settings/Update no longer dump raw `localizedDescription` for non-deploy errors; LaunchAgent profile migration treats an unlistable folder as empty.
 - First-run empty board no longer says "check the controller connection" when the embedded controller is up and there are simply no profiles yet; Open Profiles Folder falls back to the Application Support path instead of doing nothing before the first status payload; Help and Settings use that path instead of a remote `~/model-profiles` placeholder.
+- Open Controller Root and Open Example Profiles no longer no-op before the controller folder exists; Open Profiles Folder seeds bundled `examples/` when bootstrap has not copied them yet; Help always offers Open Example Profiles instead of "controller root is not available yet".
+- `model-switchboardctl` finds the controller in `/Applications` as well as `~/Applications`, prefers Plus when both editions are installed, opens Plus (falling back to Base), and `profiles-dir` / `open-profiles` / `controller-root` fall back to Application Support when the controller is not answering yet. `capabilities` lists `open-app`, `open-profiles`, and `robot-docs`. The native controller `capabilities` contract matches the commands it actually accepts.
 
 ## [2.0.0] - 2026-09-15
 

@@ -46,17 +46,26 @@ extension SwitchboardStore {
     func openProfilesDirectory() {
         let url = profilesDirectoryToReveal
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        seedBundledExampleProfilesIfNeeded(in: url)
         revealInFinder(url)
     }
 
     func openControllerRoot() {
-        guard let target = resolvedControllerRoot else { return }
-        revealInFinder(URL(fileURLWithPath: target))
+        let url = controllerRootToReveal
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        revealInFinder(url)
     }
 
     func openExampleProfilesDirectory() {
-        guard let target = resolvedExampleProfilesDirectory else { return }
-        revealInFinder(URL(fileURLWithPath: target))
+        let profiles = profilesDirectoryToReveal
+        try? FileManager.default.createDirectory(at: profiles, withIntermediateDirectories: true)
+        seedBundledExampleProfilesIfNeeded(in: profiles)
+        let examples = exampleProfilesDirectoryToReveal
+        if FileManager.default.fileExists(atPath: examples.path) {
+            revealInFinder(examples)
+        } else {
+            revealInFinder(profiles)
+        }
     }
 
     /// Reveals a folder in Finder and brings Finder to the front. `NSWorkspace.open(_:)`
@@ -75,6 +84,21 @@ extension SwitchboardStore {
             && isDirectory.boolValue
     }
 
+    /// First-run Finder open should include the example templates the docs tell
+    /// people to copy. Bootstrap usually seeds them; this covers the race
+    /// where Open Profiles Folder runs before the LaunchAgent copy finishes.
+    private func seedBundledExampleProfilesIfNeeded(in profiles: URL) {
+        let examples = profiles.appendingPathComponent("examples", isDirectory: true)
+        let fileManager = FileManager.default
+        guard !fileManager.fileExists(atPath: examples.path) else { return }
+        guard
+            let bundled = Bundle.main.resourceURL?
+                .appendingPathComponent("ControllerSupport/model-profiles/examples", isDirectory: true),
+            fileManager.fileExists(atPath: bundled.path)
+        else { return }
+        try? fileManager.copyItem(at: bundled, to: examples)
+    }
+
     /// Live folder if the controller has reported one; otherwise the embedded
     /// controller's Application Support path so first-run Open Profiles Folder
     /// is not a no-op while status is still coming up.
@@ -90,13 +114,23 @@ extension SwitchboardStore {
             )
     }
 
+    var controllerRootToReveal: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(
+                "Library/Application Support/ModelSwitchboard/Controller",
+                isDirectory: true
+            )
+    }
+
+    var exampleProfilesDirectoryToReveal: URL {
+        profilesDirectoryToReveal.appendingPathComponent("examples", isDirectory: true)
+    }
+
     var resolvedControllerRoot: String? {
         // Only ever reveal the canonical, app-owned controller root. Trusting an arbitrary
         // value reported by the running controller (which may be a stray/dev install with the
         // same launch-agent label) is how a second, unexpected folder can surface.
-        let canonicalRoot = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/ModelSwitchboard/Controller")
-            .path
+        let canonicalRoot = controllerRootToReveal.path
         guard FileManager.default.fileExists(atPath: canonicalRoot) else { return nil }
         return canonicalRoot
     }

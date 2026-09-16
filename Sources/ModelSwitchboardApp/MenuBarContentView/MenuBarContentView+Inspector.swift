@@ -55,7 +55,6 @@ extension MenuBarContentView {
                 controllerBaseURL: $controllerBaseURL,
                 controllerAuthToken: $controllerAuthToken,
                 profilesDirectory: store.profilesDirectory,
-                controllerRoot: store.resolvedControllerRoot,
                 doctorReport: store.doctorReport,
                 profileDiagnostics: store.diagnosticsNeedingAttention,
                 isRunningControllerDoctor: store.isRunningControllerDoctor,
@@ -97,7 +96,7 @@ extension MenuBarContentView {
             )
         case .help:
             HelpView(
-                exampleProfilesDirectory: store.resolvedExampleProfilesDirectory,
+                exampleProfilesDirectory: store.exampleProfilesDirectoryToReveal.path,
                 openExampleProfilesDirectory: store.openExampleProfilesDirectory,
                 theme: theme,
                 accent: accent
