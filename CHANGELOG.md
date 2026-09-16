@@ -4,22 +4,7 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
-### Fixed
-
-- `/api/status` no longer 500s when a numeric uid dir such as `/run/user/126` looks like a port-claim folder: unreadable `flags.env` is skipped instead of crashing the scan, OS runtime mounts (`/run`, `/proc`, …) are not admitted as scan roots, `is_dir()` permission errors on hinted cmdlines are treated as absent, and MODEL_* existence checks use the same OSError-safe helpers.
-- Dashboard, widget, and host-metrics chips share one user-facing error mapper, so none of them paint raw `{"error":"internal_error",...}` JSON; local 500/DNS copy names the local controller instead of a remote agent or Tailscale; sticky LaunchAgent/SSH bootstrap diagnostics keep the 3s recovering cadence instead of dropping to idle 10-minute polling.
-- Reopen Last Active, Stop All verification, auto-benchmark, loopback probes, SSH forwards, and the widget list all use the same board-visible set (stale names and hidden discovery listeners are not started, waited on, or shown as ready).
-- SSH Update no longer treats remote file `Permission denied` as BatchMode auth failure, GUI ssh inherits the login `SSH_AUTH_SOCK`, generic SSH copy no longer says "tunnel" for a deploy file-copy step, and a bare "timeout" in ssh stderr is no longer classified as a connection timeout.
-- Local controller `operationFailed` responses no longer leak command stderr into the HTTP `message` field.
-- Gateway Update via `bash -s` no longer installs leftover `$HOME/agent_core.py` over the just-pushed modules, no longer hangs on a post-install `link` HOME scan, waits until the agent answers (HTTP 200/401) after systemd restart, best-effort enables lingering so the unit survives logout/reboot, and does not paint Update as done when refresh still fails.
-- Local controller profile scan treats an unreadable profiles directory as empty instead of 500ing `/api/status`.
-- Remote `start`/`restart`/`activate` of a `discovered-N` name no longer aliases onto a port-N launch claim; SwiftBar and Stop Everything ignore the same hidden discovery rows; Settings/Update no longer dump raw `localizedDescription` for non-deploy errors; LaunchAgent profile migration treats an unlistable folder as empty.
-- First-run empty board no longer says "check the controller connection" when the embedded controller is up and there are simply no profiles yet; Open Profiles Folder falls back to the Application Support path instead of doing nothing before the first status payload; Help and Settings use that path instead of a remote `~/model-profiles` placeholder.
-- Open Controller Root and Open Example Profiles no longer no-op before the controller folder exists; Open Profiles Folder seeds bundled `examples/` when bootstrap has not copied them yet; Help always offers Open Example Profiles instead of "controller root is not available yet".
-- `model-switchboardctl` finds the controller in `/Applications` as well as `~/Applications`, prefers Plus when both editions are installed, opens Plus (falling back to Base), and `profiles-dir` / `open-profiles` / `controller-root` fall back to Application Support when the controller is not answering yet. `capabilities` lists `open-app`, `open-profiles`, and `robot-docs`. The native controller `capabilities` contract matches the commands it actually accepts.
-- LaunchAgent registration is no longer one-shot per process: after Login Items approval, opening the menu (or a recovering refresh) re-checks the agent, waits if macOS has enabled it, and drops the sticky diagnostic instead of requiring Quit and reopen. Registration and Login Items failures use a stable Settings sentence instead of Apple's `localizedDescription`.
-
-## [2.0.0] - 2026-09-15
+## [2.0.0] - 2026-09-16
 
 ### Added
 
@@ -41,6 +26,18 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 
+- `/api/status` no longer 500s when a numeric uid dir such as `/run/user/126` looks like a port-claim folder: unreadable `flags.env` is skipped instead of crashing the scan, OS runtime mounts (`/run`, `/proc`, …) are not admitted as scan roots, `is_dir()` permission errors on hinted cmdlines are treated as absent, and MODEL_* existence checks use the same OSError-safe helpers.
+- Dashboard, widget, and host-metrics chips share one user-facing error mapper, so none of them paint raw `{"error":"internal_error",...}` JSON; local 500/DNS copy names the local controller instead of a remote agent or Tailscale; sticky LaunchAgent/SSH bootstrap diagnostics keep the 3s recovering cadence instead of dropping to idle 10-minute polling.
+- Reopen Last Active, Stop All verification, auto-benchmark, loopback probes, SSH forwards, and the widget list all use the same board-visible set (stale names and hidden discovery listeners are not started, waited on, or shown as ready).
+- SSH Update no longer treats remote file `Permission denied` as BatchMode auth failure, GUI ssh inherits the login `SSH_AUTH_SOCK`, generic SSH copy no longer says "tunnel" for a deploy file-copy step, and a bare "timeout" in ssh stderr is no longer classified as a connection timeout.
+- Local controller `operationFailed` responses no longer leak command stderr into the HTTP `message` field.
+- Gateway Update via `bash -s` no longer installs leftover `$HOME/agent_core.py` over the just-pushed modules, no longer hangs on a post-install `link` HOME scan, waits until the agent answers (HTTP 200/401) after systemd restart, best-effort enables lingering so the unit survives logout/reboot, and does not paint Update as done when refresh still fails.
+- Local controller profile scan treats an unreadable profiles directory as empty instead of 500ing `/api/status`.
+- Remote `start`/`restart`/`activate` of a `discovered-N` name no longer aliases onto a port-N launch claim; SwiftBar and Stop Everything ignore the same hidden discovery rows; Settings/Update no longer dump raw `localizedDescription` for non-deploy errors; LaunchAgent profile migration treats an unlistable folder as empty.
+- First-run empty board no longer says "check the controller connection" when the embedded controller is up and there are simply no profiles yet; Open Profiles Folder falls back to the Application Support path instead of doing nothing before the first status payload; Help and Settings use that path instead of a remote `~/model-profiles` placeholder.
+- Open Controller Root and Open Example Profiles no longer no-op before the controller folder exists; Open Profiles Folder seeds bundled `examples/` when bootstrap has not copied them yet; Help always offers Open Example Profiles instead of "controller root is not available yet".
+- `model-switchboardctl` finds the controller in `/Applications` as well as `~/Applications`, prefers Plus when both editions are installed, opens Plus (falling back to Base), and `profiles-dir` / `open-profiles` / `controller-root` fall back to Application Support when the controller is not answering yet. `capabilities` lists `open-app`, `open-profiles`, and `robot-docs`. The native controller `capabilities` contract matches the commands it actually accepts.
+- LaunchAgent registration is no longer one-shot per process: after Login Items approval, opening the menu (or a recovering refresh) re-checks the agent, waits if macOS has enabled it, and drops the sticky diagnostic instead of requiring Quit and reopen. Registration and Login Items failures use a stable Settings sentence instead of Apple's `localizedDescription`.
 - After a Mac crash/reboot, DIRECT Tailscale gateways and the local controller no longer sit on `DIRECT · ERROR` / connection-refused until Force Update: DNS and connection-refused failures retry every 3s (not the idle 10 minutes), MagicDNS copy mentions Tailscale, local refused copy no longer blames a remote agent, and the local store refreshes again once the LaunchAgent is registered.
 - Discovered (unmanaged) listeners no longer render as ACTIVE while the ready count only includes file-backed profiles. Reopen Last Active and SSH port forwards ignore those hidden rows too.
 - The "Hide hosts and addresses" toggle now updates the dashboard and Remote Hosts live (AppStorage), and ACTIVE hero cards mask hosts the same way list rows already did.

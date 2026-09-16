@@ -114,7 +114,16 @@ final class GatewayHub {
     ) {
         self.localStore = localStore
         self.defaults = defaults
-        self.remoteStoreFactory = remoteStoreFactory ?? Self.makeRemoteStore
+        if let remoteStoreFactory {
+            self.remoteStoreFactory = remoteStoreFactory
+        } else {
+            // Closure instead of `?? Self.makeRemoteStore`: storing that
+            // static method as a value tripped GitHub Actions' Swift as a
+            // nonisolated call to a MainActor function.
+            self.remoteStoreFactory = { config, baseURL, token in
+                GatewayHub.makeRemoteStore(config: config, baseURL: baseURL, token: token)
+            }
+        }
         self.tokenStorageFactory = tokenStorageFactory
         self.sshExecutableURL = sshExecutableURL
         self.deployAgent = deployAgent ?? { ssh, useTailscale, profilesDirectory in

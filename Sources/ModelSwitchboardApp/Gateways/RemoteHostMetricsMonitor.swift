@@ -2,31 +2,33 @@ import Foundation
 import Observation
 import ModelSwitchboardCore
 
+/// Snapshot of one gateway's last metrics poll. File-level so GitHub Actions'
+/// Swift accepts it as `Sendable` without a nested `nonisolated struct`.
+struct RemoteHostMetricsEntry: Equatable, Sendable {
+    var metrics: HostMetricsPayload?
+    var error: String?
+    var updatedAt: Date?
+    var unsupported: Bool = false
+}
+
+/// Work item prepared on MainActor, executed off it in a task group.
+private struct RemoteHostMetricsPollTarget: Sendable {
+    let id: String
+    let previous: RemoteHostMetricsEntry
+    /// Ready HTTP client for this gateway; nil when only an immediate result applies.
+    let client: ControllerClient?
+    /// Tunnel / client-build failure applied without network I/O.
+    let immediateError: String?
+    /// Match pre-parallel tunnel path: set error but leave `updatedAt` unchanged.
+    let preserveUpdatedAt: Bool
+}
+
 /// Polls each enabled remote gateway for `GET /api/host/metrics`.
 /// Older agents that lack the route degrade to a clear "unsupported" error.
 @MainActor
 @Observable
 final class RemoteHostMetricsMonitor {
-    /// Snapshot of one gateway's last metrics poll. `nonisolated` + `Sendable` so
-    /// concurrent fetch tasks can carry previous/next values off the MainActor.
-    nonisolated struct Entry: Equatable, Sendable {
-        var metrics: HostMetricsPayload?
-        var error: String?
-        var updatedAt: Date?
-        var unsupported: Bool = false
-    }
-
-    /// Work item prepared on MainActor, executed off it in a task group.
-    private nonisolated struct PollTarget: Sendable {
-        let id: String
-        let previous: Entry
-        /// Ready HTTP client for this gateway; nil when only an immediate result applies.
-        let client: ControllerClient?
-        /// Tunnel / client-build failure applied without network I/O.
-        let immediateError: String?
-        /// Match pre-parallel tunnel path: set error but leave `updatedAt` unchanged.
-        let preserveUpdatedAt: Bool
-    }
+    typealias Entry = RemoteHostMetricsEntry
 
     private(set) var entries: [String: Entry] = [:]
 
@@ -72,7 +74,7 @@ final class RemoteHostMetricsMonitor {
 
         // Snapshot MainActor-only state (tunnel, client factory, prior entry) then
         // fan out independent HTTP fetches. Wall time ≈ max(RTT) not sum(RTT).
-        var targets: [PollTarget] = []
+        var targets: [RemoteHostMetricsPollTarget] = []
         targets.reserveCapacity(runtimes.count)
         for runtime in runtimes {
             let previous = entries[runtime.id] ?? Entry()
@@ -85,7 +87,7 @@ final class RemoteHostMetricsMonitor {
                 case .failed(let message): tunnelError = message
                 }
                 targets.append(
-                    PollTarget(
+                    RemoteHostMetricsPollTarget(
                         id: runtime.id,
                         previous: previous,
                         client: nil,
@@ -98,7 +100,7 @@ final class RemoteHostMetricsMonitor {
             do {
                 let client = try runtime.store.client
                 targets.append(
-                    PollTarget(
+                    RemoteHostMetricsPollTarget(
                         id: runtime.id,
                         previous: previous,
                         client: client,
@@ -109,7 +111,7 @@ final class RemoteHostMetricsMonitor {
             } catch {
                 let message = SwitchboardStore.userFacingErrorDescription(for: error)
                 targets.append(
-                    PollTarget(
+                    RemoteHostMetricsPollTarget(
                         id: runtime.id,
                         previous: previous,
                         client: nil,
@@ -120,10 +122,13 @@ final class RemoteHostMetricsMonitor {
             }
         }
 
-        let results = await withTaskGroup(of: (String, Entry).self, returning: [(String, Entry)].self) { group in
+        let results = await withTaskGroup(
+            of: (String, Entry).self,
+            returning: [(String, Entry)].self
+        ) { group in
             for target in targets {
                 group.addTask {
-                    await Self.resolveEntry(target: target)
+                    await resolveHostMetricsEntry(target: target)
                 }
             }
             var collected: [(String, Entry)] = []
@@ -138,42 +143,44 @@ final class RemoteHostMetricsMonitor {
             entries[id] = entry
         }
     }
+}
 
-    /// Runs per-gateway work without MainActor isolation (safe inside `TaskGroup`).
-    private nonisolated static func resolveEntry(target: PollTarget) async -> (String, Entry) {
-        if let immediate = target.immediateError {
-            var entry = target.previous
-            entry.error = immediate
-            if !target.preserveUpdatedAt {
-                entry.updatedAt = Date()
-            }
-            return (target.id, entry)
-        }
-        guard let client = target.client else {
-            return (target.id, target.previous)
-        }
-        do {
-            let metrics = try await client.fetchHostMetrics()
-            return (
-                target.id,
-                Entry(metrics: metrics, error: nil, updatedAt: Date(), unsupported: false)
-            )
-        } catch {
-            let message = SwitchboardStore.userFacingErrorDescription(for: error)
-            let unsupported: Bool
-            if case .httpError(let status, _) = error as? ControllerClientError {
-                unsupported = status == 404
-            } else {
-                unsupported = false
-            }
-            var entry = target.previous
-            entry.error = unsupported
-                ? "This remote agent does not expose host metrics yet (needs upgrade for GPU/VRAM)."
-                : message
-            entry.unsupported = unsupported
+/// Runs per-gateway work without MainActor isolation (safe inside `TaskGroup`).
+private func resolveHostMetricsEntry(
+    target: RemoteHostMetricsPollTarget
+) async -> (String, RemoteHostMetricsEntry) {
+    if let immediate = target.immediateError {
+        var entry = target.previous
+        entry.error = immediate
+        if !target.preserveUpdatedAt {
             entry.updatedAt = Date()
-            // Keep last good metrics when a transient poll fails.
-            return (target.id, entry)
         }
+        return (target.id, entry)
+    }
+    guard let client = target.client else {
+        return (target.id, target.previous)
+    }
+    do {
+        let metrics = try await client.fetchHostMetrics()
+        return (
+            target.id,
+            RemoteHostMetricsEntry(metrics: metrics, error: nil, updatedAt: Date(), unsupported: false)
+        )
+    } catch {
+        let message = SwitchboardStore.userFacingErrorDescription(for: error)
+        let unsupported: Bool
+        if case .httpError(let status, _) = error as? ControllerClientError {
+            unsupported = status == 404
+        } else {
+            unsupported = false
+        }
+        var entry = target.previous
+        entry.error = unsupported
+            ? "This remote agent does not expose host metrics yet (needs upgrade for GPU/VRAM)."
+            : message
+        entry.unsupported = unsupported
+        entry.updatedAt = Date()
+        // Keep last good metrics when a transient poll fails.
+        return (target.id, entry)
     }
 }
