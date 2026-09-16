@@ -4,6 +4,36 @@ import ModelSwitchboardCore
 import ModelSwitchboardTestSupport
 @testable import ModelSwitchboardApp
 
+private func payload(
+    host: String? = nil,
+    collectedAt: String? = nil,
+    cpuPercent: Double? = nil,
+    memory: HostMemoryMetrics? = nil,
+    gpus: [HostGPUMetrics] = [],
+    gpuSource: GPUSource? = nil,
+    processes: [HostGPUProcess] = [],
+    agentVersion: String? = nil,
+    uptimeSeconds: Double? = nil,
+    storage: HostStorageMetrics? = nil,
+    network: HostNetworkMetrics? = nil,
+    tailscale: TailnetHealth? = nil
+) -> HostMetricsPayload {
+    HostMetricsPayload(
+        host: host,
+        collectedAt: collectedAt,
+        cpuPercent: cpuPercent,
+        memory: memory,
+        gpus: gpus,
+        gpuSource: gpuSource,
+        processes: processes,
+        agentVersion: agentVersion,
+        uptimeSeconds: uptimeSeconds,
+        storage: storage,
+        network: network,
+        tailscale: tailscale
+    )
+}
+
 private func sparkMetrics(
     gpuUtil: Double = 42,
     vramUsed: Double = 55296,
@@ -11,7 +41,7 @@ private func sparkMetrics(
     processPID: Int? = 4242,
     processVRAM: Double? = 54000
 ) -> HostMetricsPayload {
-    HostMetricsPayload(
+    payload(
         host: "spark",
         collectedAt: "2026-08-03T17:00:00Z",
         cpuPercent: 18,
@@ -28,7 +58,11 @@ private func sparkMetrics(
         ],
         gpuSource: .nvidiaSmi,
         processes: processPID.map { [HostGPUProcess(pid: $0, vramMB: processVRAM)] } ?? [],
-        agentVersion: "1.1.2"
+        agentVersion: "1.1.2",
+        uptimeSeconds: nil,
+        storage: nil,
+        network: nil,
+        tailscale: nil
     )
 }
 
@@ -94,8 +128,17 @@ private func sparkMetrics(
         dnsName: nil,
         health: []
     )
-    let metrics = HostMetricsPayload(
-        uptimeSeconds: 3 * 86400 + 4 * 3600 + 5 * 60,
+    let uptime: Double = 3 * 86400 + 4 * 3600 + 5 * 60
+    let metrics = payload(
+        host: nil,
+        collectedAt: nil,
+        cpuPercent: nil,
+        memory: nil,
+        gpus: [],
+        gpuSource: nil,
+        processes: [],
+        agentVersion: nil,
+        uptimeSeconds: uptime,
         storage: storage,
         network: network,
         tailscale: healthyTailnet
@@ -107,7 +150,18 @@ private func sparkMetrics(
     #expect(tailnet?.label == "TAILNET OK")
     #expect(tailnet?.detail == "100.64.1.2")
 
-    let offline = HostMetricsPayload(
+    let offline = payload(
+        host: nil,
+        collectedAt: nil,
+        cpuPercent: nil,
+        memory: nil,
+        gpus: [],
+        gpuSource: nil,
+        processes: [],
+        agentVersion: nil,
+        uptimeSeconds: nil,
+        storage: nil,
+        network: nil,
         tailscale: TailnetHealth(
             online: false,
             backendState: "NeedsLogin",
@@ -118,7 +172,18 @@ private func sparkMetrics(
     )
     #expect(HostMetricsPresentation.tailnetLabel(offline)?.label == "TAILNET OFF")
 
-    let warned = HostMetricsPayload(
+    let warned = payload(
+        host: nil,
+        collectedAt: nil,
+        cpuPercent: nil,
+        memory: nil,
+        gpus: [],
+        gpuSource: nil,
+        processes: [],
+        agentVersion: nil,
+        uptimeSeconds: nil,
+        storage: nil,
+        network: nil,
         tailscale: TailnetHealth(
             online: true,
             backendState: "Running",
@@ -130,7 +195,24 @@ private func sparkMetrics(
     #expect(HostMetricsPresentation.tailnetLabel(warned)?.label == "TAILNET WARN")
 
     #expect(HostMetricsPresentation.uptimeLabel(nil) == nil)
-    #expect(HostMetricsPresentation.tailnetLabel(HostMetricsPayload()) == nil)
+    #expect(
+        HostMetricsPresentation.tailnetLabel(
+            payload(
+                host: nil,
+                collectedAt: nil,
+                cpuPercent: nil,
+                memory: nil,
+                gpus: [],
+                gpuSource: nil,
+                processes: [],
+                agentVersion: nil,
+                uptimeSeconds: nil,
+                storage: nil,
+                network: nil,
+                tailscale: nil
+            )
+        ) == nil
+    )
 }
 
 @MainActor
