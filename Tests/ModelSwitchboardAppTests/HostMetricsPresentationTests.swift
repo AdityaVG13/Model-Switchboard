@@ -5,18 +5,18 @@ import ModelSwitchboardTestSupport
 @testable import ModelSwitchboardApp
 
 private func payload(
-    host: String? = nil,
-    collectedAt: String? = nil,
-    cpuPercent: Double? = nil,
-    memory: HostMemoryMetrics? = nil,
-    gpus: [HostGPUMetrics] = [],
-    gpuSource: GPUSource? = nil,
-    processes: [HostGPUProcess] = [],
-    agentVersion: String? = nil,
-    uptimeSeconds: Double? = nil,
-    storage: HostStorageMetrics? = nil,
-    network: HostNetworkMetrics? = nil,
-    tailscale: TailnetHealth? = nil
+    host: String?,
+    collectedAt: String?,
+    cpuPercent: Double?,
+    memory: HostMemoryMetrics?,
+    gpus: [HostGPUMetrics],
+    gpuSource: GPUSource?,
+    processes: [HostGPUProcess],
+    agentVersion: String?,
+    uptimeSeconds: Double?,
+    storage: HostStorageMetrics?,
+    network: HostNetworkMetrics?,
+    tailscale: TailnetHealth?
 ) -> HostMetricsPayload {
     HostMetricsPayload(
         host: host,
@@ -118,30 +118,18 @@ private func sparkMetrics(
 }
 
 @MainActor
-@Test func dashPresentationLabels() {
-    let storage = HostStorageMetrics(usedMB: 422_296.6, totalMB: 1_875_335.2, percent: 22.5, source: "statvfs")
-    let network = HostNetworkMetrics(rxKbps: 1240.5, txKbps: 310.2, source: "proc")
-    let healthyTailnet = TailnetHealth(
-        online: true,
-        backendState: "Running",
-        ipv4: "100.64.1.2",
-        dnsName: nil,
-        health: []
-    )
-    let uptime: Double = 3 * 86400 + 4 * 3600 + 5 * 60
-    let metrics = payload(
-        host: nil,
-        collectedAt: nil,
-        cpuPercent: nil,
-        memory: nil,
-        gpus: [],
-        gpuSource: nil,
-        processes: [],
-        agentVersion: nil,
-        uptimeSeconds: uptime,
-        storage: storage,
-        network: network,
-        tailscale: healthyTailnet
+@Test func dashPresentationLabels() throws {
+    let decoder = JSONDecoder()
+    let metrics = try decoder.decode(
+        HostMetricsPayload.self,
+        from: Data(#"""
+        {
+          "uptime_seconds": 273900,
+          "storage": {"used_mb": 422296.6, "total_mb": 1875335.2, "percent": 22.5, "source": "statvfs"},
+          "network": {"rx_kbps": 1240.5, "tx_kbps": 310.2, "source": "proc"},
+          "tailscale": {"online": true, "backend_state": "Running", "ipv4": "100.64.1.2", "health": []}
+        }
+        """#.utf8)
     )
     #expect(HostMetricsPresentation.uptimeLabel(metrics) == "up 3d 4h")
     #expect(HostMetricsPresentation.storageLabel(metrics) == "412.4/1831.4 GB")
@@ -150,69 +138,24 @@ private func sparkMetrics(
     #expect(tailnet?.label == "TAILNET OK")
     #expect(tailnet?.detail == "100.64.1.2")
 
-    let offline = payload(
-        host: nil,
-        collectedAt: nil,
-        cpuPercent: nil,
-        memory: nil,
-        gpus: [],
-        gpuSource: nil,
-        processes: [],
-        agentVersion: nil,
-        uptimeSeconds: nil,
-        storage: nil,
-        network: nil,
-        tailscale: TailnetHealth(
-            online: false,
-            backendState: "NeedsLogin",
-            ipv4: nil,
-            dnsName: nil,
-            health: ["login expired"]
-        )
+    let offline = try decoder.decode(
+        HostMetricsPayload.self,
+        from: Data(#"""
+        {"tailscale": {"online": false, "backend_state": "NeedsLogin", "health": ["login expired"]}}
+        """#.utf8)
     )
     #expect(HostMetricsPresentation.tailnetLabel(offline)?.label == "TAILNET OFF")
 
-    let warned = payload(
-        host: nil,
-        collectedAt: nil,
-        cpuPercent: nil,
-        memory: nil,
-        gpus: [],
-        gpuSource: nil,
-        processes: [],
-        agentVersion: nil,
-        uptimeSeconds: nil,
-        storage: nil,
-        network: nil,
-        tailscale: TailnetHealth(
-            online: true,
-            backendState: "Running",
-            ipv4: nil,
-            dnsName: nil,
-            health: ["derp relay issue"]
-        )
+    let warned = try decoder.decode(
+        HostMetricsPayload.self,
+        from: Data(#"""
+        {"tailscale": {"online": true, "backend_state": "Running", "health": ["derp relay issue"]}}
+        """#.utf8)
     )
     #expect(HostMetricsPresentation.tailnetLabel(warned)?.label == "TAILNET WARN")
 
     #expect(HostMetricsPresentation.uptimeLabel(nil) == nil)
-    #expect(
-        HostMetricsPresentation.tailnetLabel(
-            payload(
-                host: nil,
-                collectedAt: nil,
-                cpuPercent: nil,
-                memory: nil,
-                gpus: [],
-                gpuSource: nil,
-                processes: [],
-                agentVersion: nil,
-                uptimeSeconds: nil,
-                storage: nil,
-                network: nil,
-                tailscale: nil
-            )
-        ) == nil
-    )
+    #expect(HostMetricsPresentation.tailnetLabel(try decoder.decode(HostMetricsPayload.self, from: Data("{}".utf8))) == nil)
 }
 
 @MainActor
