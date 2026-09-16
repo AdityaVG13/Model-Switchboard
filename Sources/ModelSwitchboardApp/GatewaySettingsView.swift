@@ -737,11 +737,15 @@ struct GatewaySettingsSection: View {
                 switch error {
                 case .missingResources:
                     deployState = .failure("This build is missing the bundled agent. Reinstall the app, or use the one-liner instead.")
-                case .sshFailed(let step, let message):
-                    deployState = .failure("Install failed while trying to \(step): \(message)")
+                case .sshFailed:
+                    deployState = .failure(error.userFacingMessage(verb: "Install"))
                 }
             } catch {
-                deployState = .failure("Install failed: \(error.localizedDescription)")
+                deployState = .failure(
+                    UserFacingControllerError.description(for: error, isLocal: false)
+                        .map { "Install failed: \($0)" }
+                        ?? "Install failed."
+                )
             }
         }
     }

@@ -88,7 +88,9 @@ extension MenuBarContentView {
     var hasAnythingToStop: Bool {
         DashboardChromeMetrics.canStopAnything(
             isBusy: hub.isStopEverythingBusy,
-            storesHaveRunning: hub.allStores.contains { $0.statuses.contains(where: \.running) },
+            storesHaveRunning: hub.allStores.contains {
+                $0.statuses.contains { $0.running && $0.isBoardVisible }
+            },
             storesHavePending: hub.allStores.contains { !$0.pendingProfileActions.isEmpty }
         )
     }

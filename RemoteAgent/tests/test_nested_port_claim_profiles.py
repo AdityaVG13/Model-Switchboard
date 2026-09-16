@@ -126,6 +126,29 @@ class NestedPortClaimProfilesTests(unittest.TestCase):
                     os.environ["HOME"] = old_home
             self.assertEqual(claims, [])
 
+    def test_resolve_profile_does_not_alias_discovered_to_claim(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            agent_root = Path(tmp) / "agent"
+            agent_root.mkdir()
+            launch = Path(tmp) / "launch"
+            claim = launch / "8027"
+            claim.mkdir(parents=True)
+            (claim / "flags.env").write_text(
+                "MODEL=/models/demo.gguf\nHOST=127.0.0.1\nPORT=8027\n",
+                encoding="utf-8",
+            )
+            (claim / "launch.sh").write_text("#!/bin/sh\necho demo\n", encoding="utf-8")
+            (claim / "launch.sh").chmod(0o755)
+
+            service = agent.AgentService(
+                agent.AgentConfiguration(root=agent_root, profiles_dir=launch)
+            )
+            self.assertEqual(service.resolve_profile("port-8027").name, "port-8027")
+            with self.assertRaises(agent.ProfileNotFoundError):
+                service.resolve_profile("discovered-8027")
+            with self.assertRaises(agent.ProfileNotFoundError):
+                service.start("discovered-8027")
+
     def test_profile_repository_load_skips_unreadable_directory(self) -> None:
         from unittest.mock import patch
 

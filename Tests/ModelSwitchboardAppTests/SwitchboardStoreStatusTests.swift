@@ -211,6 +211,7 @@ private func makeStore(
     store.considerAutoBenchmarks()
     #expect(!store.autoBenchmarkedProfiles.contains("discovered-8000"))
     #expect(store.loopbackEndpointProbeCandidates.isEmpty)
+    #expect(!store.statuses.contains { $0.running && $0.isBoardVisible })
 }
 
 @MainActor

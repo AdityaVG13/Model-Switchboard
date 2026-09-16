@@ -404,6 +404,13 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
 
         #expect(deployHosts == ["host.example.ts.net"])
         #expect(sawTailscale == true)
+        if let runtime = hub.remoteRuntimes.first(where: { $0.id == config.id }) {
+            if case .failed(let message) = runtime.forceUpdatePhase {
+                #expect(message.contains("not answering"))
+            } else {
+                Issue.record("expected Update to stay failed while the host is down")
+            }
+        }
     }
 }
 

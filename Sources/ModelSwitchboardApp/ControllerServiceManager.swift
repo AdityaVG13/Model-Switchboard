@@ -241,12 +241,12 @@ final class ControllerServiceManager {
     }
 
     private func migrateLegacyProfilesIfNeeded(to destination: URL) throws {
-        let activeProfiles = try profileFiles(in: destination)
+        let activeProfiles = profileFiles(in: destination)
         guard activeProfiles.isEmpty else { return }
 
         for legacyProfiles in legacyProfileDirectories() {
             guard fileManager.fileExists(atPath: legacyProfiles.path) else { continue }
-            let sources = try profileFiles(in: legacyProfiles)
+            let sources = profileFiles(in: legacyProfiles)
             guard !sources.isEmpty else { continue }
             for source in sources {
                 let target = destination.appendingPathComponent(source.lastPathComponent)
@@ -260,9 +260,9 @@ final class ControllerServiceManager {
         }
     }
 
-    private func profileFiles(in directory: URL) throws -> [URL] {
-        try fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-            .filter { ["env", "json"].contains($0.pathExtension.lowercased()) }
+    private func profileFiles(in directory: URL) -> [URL] {
+        (try? fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil))?
+            .filter { ["env", "json"].contains($0.pathExtension.lowercased()) } ?? []
     }
 
     /// Only the last known controller root from status cache -- no machine-specific home layouts.

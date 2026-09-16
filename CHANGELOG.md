@@ -11,6 +11,9 @@ All notable changes to this project are documented in this file.
 - Reopen Last Active, Stop All verification, auto-benchmark, loopback probes, SSH forwards, and the widget list all use the same board-visible set (stale names and hidden discovery listeners are not started, waited on, or shown as ready).
 - SSH Update no longer treats remote file `Permission denied` as BatchMode auth failure, GUI ssh inherits the login `SSH_AUTH_SOCK`, generic SSH copy no longer says "tunnel" for a deploy file-copy step, and a bare "timeout" in ssh stderr is no longer classified as a connection timeout.
 - Local controller `operationFailed` responses no longer leak command stderr into the HTTP `message` field.
+- Gateway Update via `bash -s` no longer installs leftover `$HOME/agent_core.py` over the just-pushed modules, no longer hangs on a post-install `link` HOME scan, waits until the agent answers (HTTP 200/401) after systemd restart, best-effort enables lingering so the unit survives logout/reboot, and does not paint Update as done when refresh still fails.
+- Local controller profile scan treats an unreadable profiles directory as empty instead of 500ing `/api/status`.
+- Remote `start`/`restart`/`activate` of a `discovered-N` name no longer aliases onto a port-N launch claim; SwiftBar and Stop Everything ignore the same hidden discovery rows; Settings/Update no longer dump raw `localizedDescription` for non-deploy errors; LaunchAgent profile migration treats an unlistable folder as empty.
 
 ## [2.0.0] - 2026-09-15
 

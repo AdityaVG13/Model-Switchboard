@@ -439,14 +439,10 @@ final class GatewayHub {
         } catch {
             let message: String
             if let deployError = error as? RemoteAgentDeployer.DeployError {
-                switch deployError {
-                case .missingResources:
-                    message = "This build is missing the bundled agent."
-                case .sshFailed(let step, let detail):
-                    message = "Agent update failed while trying to \(step): \(detail)"
-                }
+                message = deployError.userFacingMessage(verb: "Agent update")
             } else {
-                message = error.localizedDescription
+                message = UserFacingControllerError.description(for: error, isLocal: false)
+                    ?? "Agent update failed."
             }
             if let live = remoteRuntimes.first(where: { $0.id == gatewayID }) {
                 live.forceUpdatePhase = .failed(message)
@@ -482,11 +478,31 @@ final class GatewayHub {
             return
         }
         live.forceUpdatePhase = .updating("Refreshing…")
-        await live.store.refresh()
-        if case .failed = live.forceUpdatePhase {
+        var lastMessage: String?
+        for _ in 0..<8 {
+            if Task.isCancelled { return }
+            await live.store.refresh()
+            switch live.store.refreshState {
+            case .refreshed:
+                live.forceUpdatePhase = .idle
+                return
+            case .failed(let message), .failedShowingCached(let message), .blocked(let message):
+                lastMessage = message
+            default:
+                break
+            }
+            if !live.store.isRecoveringFromTransportFailure {
+                break
+            }
+            try? await Task.sleep(for: .milliseconds(400))
+        }
+        if live.store.refreshState == .refreshed {
+            live.forceUpdatePhase = .idle
             return
         }
-        live.forceUpdatePhase = .idle
+        live.forceUpdatePhase = .failed(
+            "Agent updated, but the host is not answering yet: \(lastMessage ?? "refresh failed")"
+        )
     }
 
     /// SSH target for pushing the bundled agent. SSH gateways deploy as-is;

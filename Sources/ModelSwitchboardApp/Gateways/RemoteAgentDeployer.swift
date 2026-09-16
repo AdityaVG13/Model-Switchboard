@@ -16,6 +16,15 @@ actor RemoteAgentDeployer {
     enum DeployError: Error, Equatable {
         case missingResources
         case sshFailed(step: String, message: String)
+
+        func userFacingMessage(verb: String) -> String {
+            switch self {
+            case .missingResources:
+                return "This build is missing the bundled agent."
+            case .sshFailed(let step, let message):
+                return "\(verb) failed while trying to \(step): \(message)"
+            }
+        }
     }
 
     private static let logger = Logger(subsystem: "io.modelswitchboard.app", category: "agent-deployer")

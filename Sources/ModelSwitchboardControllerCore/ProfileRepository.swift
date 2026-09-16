@@ -105,15 +105,21 @@ public final class ProfileRepository: @unchecked Sendable {
 
   public func load() throws -> [String: ControllerProfile] {
     guard fileManager.fileExists(atPath: directory.path) else { return [:] }
-    let files = try fileManager.contentsOfDirectory(
-      at: directory,
-      includingPropertiesForKeys: nil,
-      options: [.skipsHiddenFiles]
-    ).filter { ["env", "json"].contains($0.pathExtension.lowercased()) }
-      .sorted {
-        $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent)
-          == .orderedAscending
-      }
+    let files: [URL]
+    do {
+      files = try fileManager.contentsOfDirectory(
+        at: directory,
+        includingPropertiesForKeys: nil,
+        options: [.skipsHiddenFiles]
+      ).filter { ["env", "json"].contains($0.pathExtension.lowercased()) }
+        .sorted {
+          $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent)
+            == .orderedAscending
+        }
+    } catch {
+      fputs("[profiles] skipping unreadable directory \(directory.path): \(error)\n", stderr)
+      return [:]
+    }
     var profiles: [String: ControllerProfile] = [:]
     for file in files {
       let name = file.deletingPathExtension().lastPathComponent

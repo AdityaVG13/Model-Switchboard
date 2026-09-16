@@ -271,7 +271,7 @@ enum ModelSwitchboardControllerMain {
       "Stop all | bash=\(executable) param1=stop-all param2=--root param3=\(service.configuration.root.path) terminal=false refresh=true color=red"
     )
     print("---")
-    for item in payload.statuses {
+    for item in payload.statuses.boardVisible {
       let state = item.running ? "RUNNING" : "NOT RUNNING"
       let color = item.ready ? "green" : (item.running ? "orange" : "red")
       print(

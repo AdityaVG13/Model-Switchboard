@@ -483,7 +483,7 @@ def _directory_has_port_claims(directory: Path) -> bool:
     try:
         for path in directory.iterdir():
             try:
-                if not path.is_dir() or not PORT_CLAIM_DIR_RE.fullmatch(path.name):
+                if not path_is_dir(path) or not PORT_CLAIM_DIR_RE.fullmatch(path.name):
                     continue
             except OSError:
                 continue
@@ -832,19 +832,20 @@ class AgentService:
         self._benchmark_running = False
 
     def resolve_profile(self, name: str) -> Profile:
-        """Profiles folder first; then claimed port folders (port-N); never invent."""
+        """Profiles folder first; then claimed port folders (port-N); never invent.
+
+        ``discovered-N`` is a status-only alias for unmanaged listeners. Mapping
+        it onto a port-N claim would let API/CLI start a hidden row.
+        """
         loaded = self.profiles.load()
         if name in loaded:
             return loaded[name]
+        if name.startswith("discovered-"):
+            raise ProfileNotFoundError(name)
         port: int | None = None
         if name.startswith("port-"):
             try:
                 port = int(name.removeprefix("port-"))
-            except ValueError:
-                port = None
-        elif name.startswith("discovered-"):
-            try:
-                port = int(name.removeprefix("discovered-"))
             except ValueError:
                 port = None
         if port is not None:
@@ -1554,8 +1555,7 @@ class AgentService:
     def start(self, name: str) -> None:
         with self._mutation_lock:
             profile = self.resolve_profile(name)
-            # Always key pid files / supervision on the canonical profile name
-            # (claims resolve discovered-N → port-N).
+            # Always key pid files / supervision on the canonical profile name.
             canonical = profile.name
             if not (profile.get("START_COMMAND") or "").strip() and profile.runtime_spec[2] == "external":
                 raise UnsupportedError(
@@ -1792,8 +1792,8 @@ class AgentService:
             },
             "launch_agent": {
                 "plist_path": str(unit),
-                "installed": unit.is_file(),
-                "running": unit.is_file(),
+                "installed": path_is_regular_file(unit),
+                "running": path_is_regular_file(unit),
             },
             "integrations": [],
             "profiles_dir": payload["profiles_dir"],

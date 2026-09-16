@@ -47,6 +47,17 @@ done
 log() { printf '[INFO] %s\n' "$*"; }
 die() { printf '[ERR] %s\n' "$*" >&2; exit 1; }
 
+# `bash -s` (Mac Update / curl|bash) has no script path: $0 is `bash` and
+# PWD is usually $HOME. Adjacent copies would install leftover ~/agent_core.py
+# over the modules the Mac just pushed.
+ran_from_stdin=0
+case "$0" in
+    bash|-bash|sh|-sh|/bin/bash|/bin/sh) ran_from_stdin=1 ;;
+esac
+if [ ! -f "$0" ]; then
+    ran_from_stdin=1
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 AGENT_SOURCE="$SCRIPT_DIR/model_switchboard_agent.py"
 DISCOVERY_SOURCE="$SCRIPT_DIR/discovery.py"
@@ -120,9 +131,11 @@ case "$PROFILES_DIR" in
 esac
 mkdir -p "$PROFILES_DIR"
 
-# Agent source, in order: next to this script (repo checkout), already pushed
-# to the install root (the Mac app deploys it over SSH), or fetched from the
-# repo (curl | bash one-liner with no checkout at all).
+# Agent source, in order:
+#   1. next to this script (a git checkout of install-remote-agent.sh)
+#   2. already pushed to the install root (the Mac app deploys over SSH)
+#   3. fetched from the repo (curl | bash with no checkout)
+# Piped installs skip (1): $PWD leftovers must not clobber a just-pushed tree.
 REPO_RAW_URL="${REPO_RAW_URL:-https://raw.githubusercontent.com/AdityaVG13/Model-Switchboard/main/RemoteAgent}"
 install_agent_module() {
     local name="$1"
@@ -130,7 +143,7 @@ install_agent_module() {
     # SAFETY (cross-process file mutation): never write the live module path
     # in place - a concurrent `model-switchboard-agent` launch could exec a
     # partially-written file. Stage at $name.new, then a single atomic mv.
-    if [ -f "$adjacent" ]; then
+    if [ "$ran_from_stdin" != 1 ] && [ -f "$adjacent" ]; then
         install -m 0644 "$adjacent" "$INSTALL_ROOT/$name.new"
         mv -f "$INSTALL_ROOT/$name.new" "$INSTALL_ROOT/$name"
     elif [ -f "$INSTALL_ROOT/$name" ]; then
@@ -149,7 +162,7 @@ install_agent_module() {
 install_agent_module "agent_core.py" "$CORE_SOURCE"
 install_agent_module "discovery.py" "$DISCOVERY_SOURCE"
 # Same atomic-replace contract as install_agent_module (live-path safety).
-if [ -f "$AGENT_SOURCE" ]; then
+if [ "$ran_from_stdin" != 1 ] && [ -f "$AGENT_SOURCE" ]; then
     install -m 0755 "$AGENT_SOURCE" "$INSTALL_ROOT/model_switchboard_agent.py.new"
     mv -f "$INSTALL_ROOT/model_switchboard_agent.py.new" "$INSTALL_ROOT/model_switchboard_agent.py"
 elif [ -f "$INSTALL_ROOT/model_switchboard_agent.py" ]; then
@@ -240,6 +253,51 @@ log "Launcher: $BIN_PATH"
 
 "$BIN_PATH" --version >/dev/null || die "agent smoke test failed"
 
+# 401/403 mean the process is up and asking for a token. 000/empty means down.
+agent_http_up() {
+    local url="$1"
+    local code
+    code="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 2 --max-time 2 "$url" 2>/dev/null || true)"
+    case "$code" in
+        200|401|403) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+wait_for_agent_http() {
+    command -v curl >/dev/null 2>&1 || return 0
+    local i ts
+    for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+        if agent_http_up "http://127.0.0.1:$PORT/api/status"; then
+            log "Agent is answering on http://127.0.0.1:$PORT"
+            return 0
+        fi
+        if [ "$TAILSCALE" = "1" ]; then
+            ts="$(tailscale ip -4 2>/dev/null | head -1 || true)"
+            if [ -n "$ts" ] && agent_http_up "http://${ts}:$PORT/api/status"; then
+                log "Agent is answering on http://${ts}:$PORT"
+                return 0
+            fi
+        fi
+        sleep 0.5
+    done
+    return 1
+}
+
+# User systemd units die on logout/reboot unless lingering is on. Best-effort
+# only: do not fail Update if polkit/sudo refuses.
+maybe_enable_linger() {
+    command -v loginctl >/dev/null 2>&1 || return 0
+    if loginctl show-user "$USER" -p Linger 2>/dev/null | grep -qx 'Linger=yes'; then
+        return 0
+    fi
+    if loginctl enable-linger "$USER" >/dev/null 2>&1; then
+        log "Enabled lingering for $USER so the agent survives logout/reboot."
+        return 0
+    fi
+    log "Tip: 'loginctl enable-linger $USER' keeps it running after logout."
+}
+
 SERVE_FLAGS="--port $PORT"
 if [ "$TAILSCALE" = "1" ]; then
     SERVE_FLAGS="$SERVE_FLAGS --tailscale"
@@ -284,40 +342,43 @@ EOF
     systemctl --user enable model-switchboard-agent.service
     systemctl --user restart model-switchboard-agent.service
     log "systemd user service enabled and restarted ($SERVE_FLAGS)."
-    log "Tip: 'loginctl enable-linger $USER' keeps it running after logout."
+    maybe_enable_linger
+    if ! wait_for_agent_http; then
+        die "agent service restarted but is not answering on port $PORT"
+    fi
 else
     log "systemd not available; start the agent manually:"
     log "  nohup $BIN_PATH serve $SERVE_FLAGS >/tmp/model-switchboard-agent.log 2>&1 &"
 fi
 
-sleep 1
-if [ "$TAILSCALE" = "0" ] && command -v curl >/dev/null 2>&1; then
-    if curl -fsS "http://127.0.0.1:$PORT/api/status" >/dev/null 2>&1; then
-        log "Agent is answering on http://127.0.0.1:$PORT"
-    else
-        log "Agent not answering yet on port $PORT (fine if you skipped the service)."
-    fi
-fi
-
-log "Next: put one .env/.json per model in $PROFILES_DIR (or re-run link to"
-log "point at a folder that already has them), then pair your Mac:"
-echo
-if [ "$TAILSCALE" = "1" ]; then
-    if [ "$ALLOW_UNAUTH" = "1" ]; then
-        "$BIN_PATH" --port "$PORT" --allow-unauthenticated --yes link --tailscale
-    else
-        "$BIN_PATH" --port "$PORT" --auth-token-file "$AUTH_TOKEN_FILE" --yes link --tailscale
-        echo
-        log "Paste this bearer token into the Mac gateway settings (keychain):"
-        echo
+if [ "$ran_from_stdin" = 1 ]; then
+    # Mac Update already has the gateway. Do not rescan $HOME via `link`
+    # (that walk is how Update hangs after a successful restart).
+    if [ -n "${AUTH_TOKEN_FILE:-}" ] && [ -s "$AUTH_TOKEN_FILE" ]; then
         TOKEN_VALUE="$(cat "$AUTH_TOKEN_FILE")"
-        # Machine-readable line for in-app SSH deploy parsers.
         echo "AUTH_TOKEN=$TOKEN_VALUE"
-        echo
-        echo "  $TOKEN_VALUE"
-        echo
-        log "Token file: $AUTH_TOKEN_FILE"
     fi
 else
-    "$BIN_PATH" --port "$PORT" --yes link
+    log "Next: put one .env/.json per model in $PROFILES_DIR (or re-run link to"
+    log "point at a folder that already has them), then pair your Mac:"
+    echo
+    if [ "$TAILSCALE" = "1" ]; then
+        if [ "$ALLOW_UNAUTH" = "1" ]; then
+            "$BIN_PATH" --port "$PORT" --allow-unauthenticated --yes link --tailscale
+        else
+            "$BIN_PATH" --port "$PORT" --auth-token-file "$AUTH_TOKEN_FILE" --yes link --tailscale
+            echo
+            log "Paste this bearer token into the Mac gateway settings (keychain):"
+            echo
+            TOKEN_VALUE="$(cat "$AUTH_TOKEN_FILE")"
+            # Machine-readable line for in-app SSH deploy parsers.
+            echo "AUTH_TOKEN=$TOKEN_VALUE"
+            echo
+            echo "  $TOKEN_VALUE"
+            echo
+            log "Token file: $AUTH_TOKEN_FILE"
+        fi
+    else
+        "$BIN_PATH" --port "$PORT" --yes link
+    fi
 fi
