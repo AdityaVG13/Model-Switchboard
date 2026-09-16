@@ -124,7 +124,7 @@ public enum UserFacingControllerError {
             }
             return value
         case .invalidBaseURL:
-            return nil
+            return "Controller URL is invalid. Check Settings."
         }
     }
 

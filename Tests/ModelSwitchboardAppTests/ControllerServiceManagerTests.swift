@@ -21,6 +21,9 @@ struct ControllerServiceManagerTests {
         let diagnostic = try #require(await manager.ensureRegistered())
         #expect(diagnostic.localizedCaseInsensitiveContains("missing the embedded controller"))
         #expect(manager.lastDiagnostic == diagnostic)
+        // Repeated calls must keep reporting; a one-shot flag used to hide this
+        // after the first LaunchAgent / Login Items failure.
+        #expect(await manager.ensureRegistered() == diagnostic)
         #expect(await manager.ensureRegistered() == diagnostic)
     }
 }

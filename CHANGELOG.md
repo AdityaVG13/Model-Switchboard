@@ -17,6 +17,7 @@ All notable changes to this project are documented in this file.
 - First-run empty board no longer says "check the controller connection" when the embedded controller is up and there are simply no profiles yet; Open Profiles Folder falls back to the Application Support path instead of doing nothing before the first status payload; Help and Settings use that path instead of a remote `~/model-profiles` placeholder.
 - Open Controller Root and Open Example Profiles no longer no-op before the controller folder exists; Open Profiles Folder seeds bundled `examples/` when bootstrap has not copied them yet; Help always offers Open Example Profiles instead of "controller root is not available yet".
 - `model-switchboardctl` finds the controller in `/Applications` as well as `~/Applications`, prefers Plus when both editions are installed, opens Plus (falling back to Base), and `profiles-dir` / `open-profiles` / `controller-root` fall back to Application Support when the controller is not answering yet. `capabilities` lists `open-app`, `open-profiles`, and `robot-docs`. The native controller `capabilities` contract matches the commands it actually accepts.
+- LaunchAgent registration is no longer one-shot per process: after Login Items approval, opening the menu (or a recovering refresh) re-checks the agent, waits if macOS has enabled it, and drops the sticky diagnostic instead of requiring Quit and reopen. Registration and Login Items failures use a stable Settings sentence instead of Apple's `localizedDescription`.
 
 ## [2.0.0] - 2026-09-15
 

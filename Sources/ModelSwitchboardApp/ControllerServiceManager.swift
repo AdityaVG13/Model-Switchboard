@@ -64,6 +64,7 @@ final class ControllerServiceManager {
     private let bundle: ControllerBundleLayout
     private let fileManager: FileManager
     private var attemptedRegistration = false
+    private var didBootstrap = false
 
     /// Held strongly so the detached fallback `serve` process is not deallocated mid-run
     /// while the LaunchAgent (KeepAlive) or a later relaunch takes long-lived ownership.
@@ -79,12 +80,11 @@ final class ControllerServiceManager {
 
     /// Registers the LaunchAgent and recovers a reachable loopback controller when needed.
     /// Suspends briefly while probing the port so diagnostics are accurate without blocking `App.init`.
+    ///
+    /// Safe to call again after Login Items approval: a previous `requiresApproval`
+    /// or failed `register()` must not stick for the process lifetime.
     @discardableResult
     func ensureRegistered() async -> String? {
-        guard !attemptedRegistration else { return lastDiagnostic }
-        attemptedRegistration = true
-        lastDiagnostic = nil
-
         guard bundledServiceAvailable else {
             let message =
                 "This app build is missing the embedded controller. Reinstall with Scripts/install.sh (or the DMG) so ModelSwitchboardController and its LaunchAgent are present."
@@ -93,10 +93,19 @@ final class ControllerServiceManager {
             return lastDiagnostic
         }
 
+        if await isControllerReachable() {
+            lastDiagnostic = nil
+            return nil
+        }
+
         do {
-            try bootstrapSupportDirectory()
-            await removeLegacyLaunchAgent()
+            if !didBootstrap {
+                try bootstrapSupportDirectory()
+                await removeLegacyLaunchAgent()
+                didBootstrap = true
+            }
             let service = SMAppService.agent(plistName: Self.plistName)
+            let firstAttempt = !attemptedRegistration
             switch service.status {
             case .notRegistered:
                 try service.register()
@@ -105,21 +114,26 @@ final class ControllerServiceManager {
             @unknown default:
                 break
             }
+            attemptedRegistration = true
 
             if service.status == .enabled {
                 await waitForController(timeoutSeconds: 1.5)
-            } else if !(await isControllerReachable()) {
+            } else if firstAttempt {
                 await launchDetachedControllerIfNeeded()
                 await waitForController(timeoutSeconds: 2.0)
             }
 
-            if !(await isControllerReachable()) {
+            if await isControllerReachable() {
+                lastDiagnostic = nil
+            } else {
                 lastDiagnostic = unreachableDiagnostic(for: service.status)
             }
         } catch {
-            let message = "Controller registration failed: \(error.localizedDescription)"
-            Self.logger.error("\(message, privacy: .public)")
-            lastDiagnostic = message
+            Self.logger.error(
+                "Controller registration failed: \(error.localizedDescription, privacy: .public)"
+            )
+            lastDiagnostic =
+                "Could not register the local controller. Enable Model Switchboard in System Settings → General → Login Items & Extensions, then open the menu again."
             if !(await isControllerReachable()) {
                 await launchDetachedControllerIfNeeded()
                 await waitForController(timeoutSeconds: 2.0)

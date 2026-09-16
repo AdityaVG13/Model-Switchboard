@@ -1,10 +1,15 @@
 import Foundation
+import OSLog
 import ServiceManagement
 import ModelSwitchboardCore
 
 @MainActor
 final class LaunchAtLoginManager: ObservableObject {
     static let shared = LaunchAtLoginManager()
+    private static let logger = Logger(
+        subsystem: "io.modelswitchboard.app",
+        category: "login-item"
+    )
 
     @Published private(set) var isEnabled = false
     @Published private(set) var requiresApproval = false
@@ -52,7 +57,11 @@ final class LaunchAtLoginManager: ObservableObject {
             }
             lastError = nil
         } catch {
-            lastError = error.localizedDescription
+            Self.logger.error(
+                "Login item update failed: \(error.localizedDescription, privacy: .public)"
+            )
+            lastError =
+                "Could not update Login Items. Check System Settings → General → Login Items & Extensions."
         }
 
         refresh()

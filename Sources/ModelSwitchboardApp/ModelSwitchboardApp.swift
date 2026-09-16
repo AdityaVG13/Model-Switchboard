@@ -108,16 +108,7 @@ struct ModelSwitchboardApp: App {
             }
             .task {
                 statusItem?.button?.toolTip = hub.menuBarHelp
-                // Bootstrap diagnostics concern the local LaunchAgent only;
-                // remote gateway stores must never inherit them.
-                let diagnostic = await ControllerServiceManager.shared.ensureRegistered()
-                store.applyBootstrapDiagnostic(diagnostic)
-                // Auto-refresh already fired from store init, often before the
-                // LaunchAgent is listening after a crash/reboot. Poll again
-                // once registration has had a chance to bring the port up.
-                if diagnostic == nil {
-                    await store.refresh()
-                }
+                await recoverLocalController()
             }
             .onChange(of: hub.menuBarHelp) { _, newValue in
                 statusItem?.button?.toolTip = newValue
@@ -141,7 +132,35 @@ struct ModelSwitchboardApp: App {
             if presented, let window = MenuBarExtraWindowBackdrop.menuBarExtraWindow(for: statusItem) {
                 MenuBarExtraWindowBackdrop.apply(to: window)
             }
+            // Login Items approval happens outside the app. Re-run registration
+            // when the user opens the menu while local status is still blocked.
+            if presented, localControllerNeedsRecovery {
+                Task { await recoverLocalController() }
+            }
         }
         .menuBarExtraStyle(.window)
+    }
+
+    private var localControllerNeedsRecovery: Bool {
+        if store.isRecoveringFromTransportFailure { return true }
+        switch store.refreshState {
+        case .blocked, .failed, .failedShowingCached:
+            return true
+        case .idle, .refreshing, .refreshed:
+            return false
+        }
+    }
+
+    /// Bootstrap diagnostics concern the local LaunchAgent only;
+    /// remote gateway stores must never inherit them.
+    private func recoverLocalController() async {
+        let diagnostic = await ControllerServiceManager.shared.ensureRegistered()
+        store.applyBootstrapDiagnostic(diagnostic)
+        // Auto-refresh already fired from store init, often before the
+        // LaunchAgent is listening after a crash/reboot. Poll again
+        // once registration has had a chance to bring the port up.
+        if diagnostic == nil {
+            await store.refresh()
+        }
     }
 }

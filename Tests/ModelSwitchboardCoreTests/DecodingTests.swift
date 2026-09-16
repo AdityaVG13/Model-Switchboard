@@ -157,4 +157,10 @@ import ModelSwitchboardTestSupport
     #expect(UserFacingControllerError.isTransient(URLError(.cannotFindHost)))
     #expect(UserFacingControllerError.isTransient(json500))
     #expect(!UserFacingControllerError.isTransient(URLError(.userAuthenticationRequired)))
+
+    let invalidURL = UserFacingControllerError.description(
+        for: ControllerClientError.invalidBaseURL("not a url")
+    )
+    #expect(invalidURL?.localizedCaseInsensitiveContains("invalid") == true)
+    #expect(invalidURL?.contains("{") != true)
 }
