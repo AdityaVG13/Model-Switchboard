@@ -13,9 +13,21 @@ public enum ControllerClientError: LocalizedError {
         case .invalidResponse:
             return "Invalid controller response"
         case .serverError(let value):
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.hasPrefix("{") || trimmed.hasPrefix("[") {
+                return "Controller returned an error."
+            }
             return value
-        case .httpError(_, let body):
-            return body
+        case .httpError(let status, _):
+            // Never paint raw JSON bodies (`{"error":"internal_error"}`) onto
+            // the dashboard, widget, or metrics chips.
+            if status == 401 || status == 403 {
+                return "Gateway rejected the request (auth)."
+            }
+            if (500..<600).contains(status) {
+                return "Controller hit an internal error."
+            }
+            return "Gateway HTTP \(status)."
         }
     }
 }

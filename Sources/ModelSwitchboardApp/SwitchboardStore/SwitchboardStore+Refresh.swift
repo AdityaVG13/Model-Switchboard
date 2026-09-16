@@ -94,7 +94,15 @@ extension SwitchboardStore {
         do {
             let report = try await client.fetchDoctorReport()
             apply(doctorReport: report)
-            refreshState = .refreshed
+            // Doctor success must not wipe a sticky bootstrap block or a
+            // status-refresh failure banner (and must not paint "refreshed"
+            // while the recovering cadence is still trying status).
+            switch refreshState {
+            case .blocked, .failed, .failedShowingCached:
+                break
+            default:
+                refreshState = .refreshed
+            }
         } catch {
             if isBenignCancellation(error) { return }
             recordRefreshFailure(error)
@@ -103,7 +111,10 @@ extension SwitchboardStore {
 
     func applyBootstrapDiagnostic(_ message: String?) {
         if let message {
-            isRecoveringFromTransportFailure = false
+            // Keep the 3s recovering cadence. Clearing it here left local
+            // LaunchAgent / Tailscale DNS failures on the idle 10-minute
+            // poll after the 1.5s bootstrap wait painted `.blocked`.
+            isRecoveringFromTransportFailure = true
             refreshState = .blocked(message: message)
         } else if case .blocked = refreshState {
             // Clearing the sticky diagnostic leaves any transient failure intact.

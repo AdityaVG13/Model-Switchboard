@@ -38,3 +38,12 @@ import ModelSwitchboardCore
     #expect(!arguments.contains(where: { $0.hasPrefix("IdentityAgent=") }))
     #expect(Array(arguments.suffix(2)) == ["--", "a@box"])
 }
+
+@Test func sshAuthSockFallsBackToLaunchctlWhenAppHasNone() {
+    let sock = SSHInvocation.resolvedSSHAuthSock(
+        env: [:],
+        fileExists: { $0 == "/tmp/fake-agent.sock" },
+        launchctlValue: { " /tmp/fake-agent.sock\n" }
+    )
+    #expect(sock == "/tmp/fake-agent.sock")
+}

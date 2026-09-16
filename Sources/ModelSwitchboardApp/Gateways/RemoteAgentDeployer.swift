@@ -183,6 +183,7 @@ actor RemoteAgentDeployer {
         let process = Process()
         process.executableURL = executableURL
         process.arguments = arguments
+        SSHInvocation.applyEnvironment(to: process)
         let stdinPipe = Pipe()
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()

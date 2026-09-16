@@ -107,7 +107,7 @@ final class RemoteHostMetricsMonitor {
                     )
                 )
             } catch {
-                let message = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
+                let message = SwitchboardStore.userFacingErrorDescription(for: error)
                 targets.append(
                     PollTarget(
                         id: runtime.id,
@@ -159,7 +159,7 @@ final class RemoteHostMetricsMonitor {
                 Entry(metrics: metrics, error: nil, updatedAt: Date(), unsupported: false)
             )
         } catch {
-            let message = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
+            let message = SwitchboardStore.userFacingErrorDescription(for: error)
             let unsupported: Bool
             if case .httpError(let status, _) = error as? ControllerClientError {
                 unsupported = status == 404

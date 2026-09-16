@@ -55,7 +55,7 @@ private final class HostMetricsURLProtocol: URLProtocol, @unchecked Sendable {
             let json = #"{"host":"\#(host)","cpu_percent":12.5,"gpus":[],"processes":[]}"#
             body = Data(json.utf8)
         } else {
-            body = Data("HTTP \(status)".utf8)
+            body = Data(#"{"error":"internal_error"}"#.utf8)
         }
         let response = HTTPURLResponse(
             url: url,
@@ -211,6 +211,7 @@ struct RemoteHostMetricsMonitorTests {
             let after = monitor.entry(forGatewayID: runtime.id)
             #expect(after.metrics?.cpuPercent == 12.5, "should keep last good metrics")
             #expect(after.error != nil)
+            #expect(after.error?.contains("{") != true)
             #expect(after.unsupported == false)
         }
     }

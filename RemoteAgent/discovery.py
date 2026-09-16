@@ -31,6 +31,8 @@ from agent_core import (
     listener_pid_from_inventory,
     load_agent_config,
     looks_like_local_fs_path,
+    path_is_dir,
+    path_is_regular_file,
     port_is_listening,
     process_command,
     process_is_alive,
@@ -41,6 +43,31 @@ from agent_core import (
 
 PORT_CLAIM_DIR_RE = re.compile(r"^\d{2,5}$")
 PORT_CLAIM_MARKERS = ("flags.env", "launch.sh", "start.sh", "run.sh", "serve.sh", "ctrl.sh")
+
+
+# Live cmdlines often mention ``/run/user/<uid>/...``. The uid looks like a
+# TCP port, so those paths must never become scan roots or port claims.
+# macOS resolves ``/var/run`` to ``/private/var/run``.
+_OS_RUNTIME_PREFIXES = ("/proc", "/sys", "/dev", "/run", "/var/run", "/private/var/run")
+
+
+def is_os_runtime_path(path: Path) -> bool:
+    """True for kernel/runtime mounts that are not user port-claim trees."""
+    candidates: list[str] = []
+    try:
+        candidates.append(path.as_posix())
+    except (OSError, ValueError):
+        return False
+    try:
+        candidates.append(path.resolve().as_posix())
+    except OSError:
+        pass
+    for text in candidates:
+        if any(text == prefix or text.startswith(prefix + "/") for prefix in _OS_RUNTIME_PREFIXES):
+            return True
+    return False
+
+
 MODEL_SERVER_COMMAND_MARKERS = (
     "llama-server",
     "llama.cpp",
@@ -640,7 +667,9 @@ def roots_hinted_by_commands(commands: list[str | None]) -> list[Path]:
                     resolved = root.resolve()
                 except OSError:
                     continue
-                if resolved not in seen and resolved.is_dir():
+                if resolved in seen or is_os_runtime_path(resolved):
+                    continue
+                if path_is_dir(resolved):
                     seen.add(resolved)
                     found.append(resolved)
     return found
@@ -704,7 +733,7 @@ def scan_port_claim_directories(
             resolved = _normalize_scan_root(root)
         except OSError:
             continue
-        if resolved in primary_set:
+        if resolved in primary_set or is_os_runtime_path(resolved):
             continue
         if path_is_dir(resolved):
             primary_set.add(resolved)
@@ -728,10 +757,12 @@ def scan_port_claim_directories(
     def consider_claim(directory: Path) -> None:
         if len(claims) >= limit:
             return
+        if is_os_runtime_path(directory):
+            return
         name = directory.name
         if not PORT_CLAIM_DIR_RE.fullmatch(name):
             return
-        markers = [m for m in PORT_CLAIM_MARKERS if (directory / m).is_file()]
+        markers = [m for m in PORT_CLAIM_MARKERS if path_is_regular_file(directory / m)]
         if not markers:
             return
         # Directory name is the claim identity / managed port. A mismatched
@@ -740,7 +771,7 @@ def scan_port_claim_directories(
         port = int(name)
         flags: dict[str, str] = {}
         flags_path = directory / "flags.env"
-        if flags_path.is_file():
+        if path_is_regular_file(flags_path):
             flags = parse_loose_env_assignments(flags_path)
         model_hint = (
             flags.get("MODEL")
@@ -771,7 +802,7 @@ def scan_port_claim_directories(
         start_command = ""
         for candidate in ("ctrl.sh", "launch.sh", "start.sh", "run.sh", "serve.sh"):
             script = directory / candidate
-            if script.is_file() and os.access(script, os.X_OK):
+            if path_is_regular_file(script) and os.access(script, os.X_OK):
                 if candidate == "ctrl.sh":
                     start_command = f"{shlex.quote(str(script))} start"
                 else:
@@ -809,6 +840,8 @@ def scan_port_claim_directories(
 
     def walk(directory: Path, depth: int, depth_limit: int) -> None:
         if depth > depth_limit or len(claims) >= limit:
+            return
+        if is_os_runtime_path(directory):
             return
         remaining = depth_limit - depth
         prior = walked_remaining.get(directory)
@@ -1009,10 +1042,10 @@ def profile_from_claim(claim: dict[str, Any]) -> Profile:
         directory = Path(claim_path)
         ctrl = directory / "ctrl.sh"
         launch = directory / "launch.sh"
-        if ctrl.is_file() and os.access(ctrl, os.X_OK):
+        if path_is_regular_file(ctrl) and os.access(ctrl, os.X_OK):
             start = start or f"{shlex.quote(str(ctrl))} start"
             stop = f"{shlex.quote(str(ctrl))} stop"
-        elif launch.is_file() and os.access(launch, os.X_OK):
+        elif path_is_regular_file(launch) and os.access(launch, os.X_OK):
             start = start or shlex.quote(str(launch))
     display = claim.get("display_name") or Path(request_s).name or name
     flags_safe = flags if isinstance(flags, dict) else {}
@@ -1032,7 +1065,7 @@ def profile_from_claim(claim: dict[str, Any]) -> Profile:
     model_dir = str(flags_safe.get("MODEL_DIR") or flags_safe.get("MODEL_REPO") or "")
     if not model_dir and model_raw and not model_file:
         candidate = Path(model_raw).expanduser()
-        if candidate.is_dir() or (
+        if path_is_dir(candidate) or (
             looks_like_local_fs_path(model_raw)
             and not any(model_raw.lower().endswith(s) for s in WEIGHT_SUFFIXES)
         ):

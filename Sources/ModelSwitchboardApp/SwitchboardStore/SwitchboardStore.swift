@@ -226,7 +226,7 @@ final class SwitchboardStore {
         // during a SwiftUI body evaluation does not invalidate the in-flight render.
         let statuses = self.statuses
         if let sortedStatusesCache { return sortedStatusesCache }
-        let sorted = statuses.filter(\.isBoardVisible).sortedForDisplay()
+        let sorted = statuses.boardVisible.sortedForDisplay()
         sortedStatusesCache = sorted
         return sorted
     }
@@ -273,7 +273,8 @@ final class SwitchboardStore {
 
     var loopbackEndpointProbeCandidates: [ModelProfileStatus] {
         statuses.filter { status in
-            status.running &&
+            status.isBoardVisible &&
+                status.running &&
                 status.ready &&
                 status.usesLoopbackEndpoint &&
                 pendingProfileActions[status.profile] == nil

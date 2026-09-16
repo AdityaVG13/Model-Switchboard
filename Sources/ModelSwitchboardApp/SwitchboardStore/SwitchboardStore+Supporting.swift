@@ -3,14 +3,18 @@ import Foundation
 import ModelSwitchboardCore
 
 extension SwitchboardStore {
+    /// Last-active names that still exist as board-visible rows. Ghosts and
+    /// hidden discovery listeners are dropped so Reopen cannot POST `start`
+    /// for names the controller will 404.
+    var reopenableLastActiveProfiles: [String] {
+        lastActiveProfiles.filter { name in
+            sortedStatuses.contains { $0.profile == name }
+        }
+    }
+
     var canReopenLastActive: Bool {
         features.supportsBenchmarks &&
-        !lastActiveProfiles.isEmpty &&
-        // Only offer reopen when those profiles still exist in this store
-        // (avoids a dead "Reopen Last Active" after profiles were removed).
-        lastActiveProfiles.contains { name in
-            sortedStatuses.contains { $0.profile == name }
-        } &&
+        !reopenableLastActiveProfiles.isEmpty &&
         !pendingGlobalActions.contains(.reopenLastActive) &&
         !sortedStatuses.contains(where: \.running) &&
         pendingProfileActions.isEmpty
@@ -91,17 +95,20 @@ extension SwitchboardStore {
         return nil
     }
 
-    static func userFacingErrorDescription(
+    nonisolated static func userFacingErrorDescription(
         for error: Error,
         actionName: String? = nil,
         status: ModelProfileStatus? = nil,
         diagnostic: ProfileDiagnostic? = nil,
         isLocal: Bool = false
     ) -> String {
-        if let mapped = mapTransportError(error, isLocal: isLocal) {
+        if let mapped = mapATSError(error) {
             return mapped
         }
-        guard isTimeout(error) else { return error.localizedDescription }
+        if let mapped = UserFacingControllerError.description(for: error, isLocal: isLocal) {
+            return mapped
+        }
+        guard UserFacingControllerError.isTimeout(error) else { return error.localizedDescription }
 
         let profileName = status?.displayName ?? diagnostic?.displayName
         let subject = profileName.map { " for \($0)" } ?? ""
@@ -136,17 +143,12 @@ extension SwitchboardStore {
         )
     }
 
-    /// Map raw URLSession / ATS / socket failures to short dashboard copy.
-    /// Code-based only: NSError domain+code (URLError, POSIX, ATS -1022/-1200)
-    /// walked through the underlying-error chain. Never sniffs
-    /// localizedDescription text.
-    static func mapTransportError(_ error: Error, isLocal: Bool = false) -> String? {
-        let chain = nsErrorChain(error)
-
+    /// ATS is app-target-only (rebuild / tunnel remediation). Other transport
+    /// copy lives in `UserFacingControllerError` so the widget shares it.
+    nonisolated static func mapATSError(_ error: Error) -> String? {
+        let chain = UserFacingControllerError.nsErrorChain(error)
         // NSURLErrorAppTransportSecurityRequiresSecureConnection == -1022
-        // NSURLErrorSecureConnectionFailed == -1200 (previously matched via the
-        // "secure connection" text; kept code-based so those errors keep the
-        // same ATS copy instead of regressing to the generic description).
+        // NSURLErrorSecureConnectionFailed == -1200
         let isATS = chain.contains {
             $0.domain == NSURLErrorDomain && $0.code == -1022
         } || chain.contains {
@@ -155,87 +157,14 @@ extension SwitchboardStore {
         if isATS {
             return "Blocked plain HTTP to this gateway (App Transport Security). Rebuild the app with ATS exceptions, or switch the gateway to SSH tunnel."
         }
-
-        for entry in chain {
-            if entry.domain == NSURLErrorDomain {
-                switch URLError.Code(rawValue: entry.code) {
-                case .notConnectedToInternet:
-                    return "No network route to the gateway."
-                case .cannotFindHost, .dnsLookupFailed:
-                    return "Gateway host not found. Check Tailscale / MagicDNS."
-                case .cannotConnectToHost:
-                    return connectionRefusedCopy(isLocal: isLocal)
-                case .networkConnectionLost:
-                    return "Connection to the gateway was lost."
-                case .userAuthenticationRequired, .userCancelledAuthentication:
-                    return "Gateway rejected the request (auth). Check the bearer token in Settings."
-                default:
-                    break
-                }
-            } else if entry.domain == NSPOSIXErrorDomain {
-                // POSIX socket codes surfacing from lower layers (tunnel, runner).
-                switch entry.code {
-                case Int(ECONNREFUSED):
-                    return connectionRefusedCopy(isLocal: isLocal)
-                case Int(ENETUNREACH), Int(EHOSTUNREACH):
-                    return "No network route to the gateway."
-                case Int(ECONNRESET), Int(ENOTCONN):
-                    return "Connection to the gateway was lost."
-                default:
-                    break
-                }
-            }
-        }
         return nil
     }
 
-    /// DNS / refused / no-route failures clear once Tailscale or the local
-    /// LaunchAgent is up. Auth and ATS are not in this set.
-    static func isTransientReachabilityFailure(_ error: Error) -> Bool {
-        if isTimeout(error) { return true }
-        for entry in nsErrorChain(error) {
-            if entry.domain == NSURLErrorDomain {
-                switch URLError.Code(rawValue: entry.code) {
-                case .notConnectedToInternet, .cannotFindHost, .dnsLookupFailed,
-                     .cannotConnectToHost, .networkConnectionLost:
-                    return true
-                default:
-                    break
-                }
-            } else if entry.domain == NSPOSIXErrorDomain {
-                switch entry.code {
-                case Int(ECONNREFUSED), Int(ENETUNREACH), Int(EHOSTUNREACH),
-                     Int(ECONNRESET), Int(ENOTCONN), Int(ETIMEDOUT):
-                    return true
-                default:
-                    break
-                }
-            }
-        }
-        return false
+    nonisolated static func isTransientReachabilityFailure(_ error: Error) -> Bool {
+        UserFacingControllerError.isTransient(error)
     }
 
-    private static func connectionRefusedCopy(isLocal: Bool) -> String {
-        isLocal
-            ? "Local controller refused the connection. It may still be starting."
-            : "Gateway refused the connection. Is the agent running?"
-    }
-
-    private static func nsErrorChain(_ error: Error) -> [NSError] {
-        let nsError = error as NSError
-        var chain: [NSError] = [nsError]
-        var current: NSError? = nsError
-        while let next = current?.userInfo[NSUnderlyingErrorKey] as? NSError {
-            chain.append(next)
-            current = next
-        }
-        return chain
-    }
-
-    static func isTimeout(_ error: Error) -> Bool {
-        if let urlError = error as? URLError, urlError.code == .timedOut { return true }
-        let nsError = error as NSError
-        return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorTimedOut
-            || nsError.domain == NSPOSIXErrorDomain && nsError.code == Int(ETIMEDOUT)
+    nonisolated static func isTimeout(_ error: Error) -> Bool {
+        UserFacingControllerError.isTimeout(error)
     }
 }

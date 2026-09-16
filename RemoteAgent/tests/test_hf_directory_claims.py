@@ -50,6 +50,17 @@ class HFDirectoryClaimTests(unittest.TestCase):
             self.assertEqual(profile.get("MODEL_FILE") or "", "")
             self.assertEqual(agent.missing_local_model_artifacts(profile.values), [])
 
+    def test_missing_artifacts_does_not_crash_on_unreadable_paths(self) -> None:
+        from unittest.mock import patch
+
+        with patch.object(Path, "is_file", side_effect=PermissionError("denied")), patch.object(
+            Path, "is_dir", side_effect=PermissionError("denied")
+        ):
+            missing = agent.missing_local_model_artifacts(
+                {"MODEL_FILE": "/run/user/126/model.gguf"}
+            )
+        self.assertEqual(missing, ["/run/user/126/model.gguf"])
+
 
 if __name__ == "__main__":
     unittest.main()

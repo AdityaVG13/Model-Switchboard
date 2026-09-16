@@ -120,7 +120,9 @@ extension SwitchboardStore {
     func considerAutoBenchmarks() {
         guard features.supportsBenchmarks else { return }
         guard canStartBenchmarkNow else { return }
-        guard let profile = statuses.first(where: { $0.ready && !autoBenchmarkedProfiles.contains($0.profile) })?.profile else {
+        guard let profile = statuses.first(where: {
+            $0.isBoardVisible && $0.ready && !autoBenchmarkedProfiles.contains($0.profile)
+        })?.profile else {
             return
         }
         markAutoBenchmarked(profile)

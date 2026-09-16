@@ -56,7 +56,9 @@ extension SwitchboardStore {
         noteManagedLoopbackTransition()
         rememberLastActiveProfiles(from: statuses)
         let previousStatuses = statuses
-        let stoppingProfiles = Set(statuses.filter { $0.running || $0.ready }.map(\.profile))
+        let stoppingProfiles = Set(
+            statuses.filter { ($0.running || $0.ready) && $0.isBoardVisible }.map(\.profile)
+        )
         statuses = statuses.map { $0.updating(running: false, ready: false) }
         let succeeded = await run(
             { try await $0.stopAll() },
@@ -97,7 +99,7 @@ extension SwitchboardStore {
 
     func reopenLastActive() async {
         guard canReopenLastActive else { return }
-        let profiles = lastActiveProfiles
+        let profiles = reopenableLastActiveProfiles
         guard pendingGlobalActions.insert(.reopenLastActive).inserted else { return }
         defer { pendingGlobalActions.remove(.reopenLastActive) }
         noteManagedLoopbackTransition()

@@ -51,6 +51,31 @@ PROFILE_SCAN_SKIP_DIRS = frozenset({
     "target",
 })
 
+
+def path_is_regular_file(path: Path) -> bool:
+    """``Path.is_file()`` that treats permission errors as absent.
+
+    Numeric uid dirs such as ``/run/user/126`` match port-claim names; stating
+    ``flags.env`` or ``MODEL=*`` there must not 500 ``/api/status``.
+    """
+    try:
+        return path.is_file()
+    except OSError:
+        return False
+
+
+def path_is_dir(path: Path) -> bool:
+    """``Path.is_dir()`` that treats permission errors as absent."""
+    try:
+        return path.is_dir()
+    except OSError:
+        return False
+
+
+def path_exists(path: Path) -> bool:
+    """True when ``path`` is a readable file or directory; OSError is absent."""
+    return path_is_regular_file(path) or path_is_dir(path)
+
 SCAN_ROOTS_ENV = "MODEL_SWITCHBOARD_SCAN_ROOTS"
 
 PROFILE_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -508,19 +533,19 @@ def missing_local_model_artifacts(values: dict[str, str] | dict[str, Any]) -> li
 
     if model_dir_raw and _looks_like_local_fs_path(model_dir_raw):
         model_dir = Path(model_dir_raw).expanduser()
-        if not model_dir.is_dir():
+        if not path_is_dir(model_dir):
             missing.append(str(model_dir))
 
     if model_path_raw and _looks_like_local_fs_path(model_path_raw):
         model_path = Path(model_path_raw).expanduser()
-        if not (model_path.is_file() or model_path.is_dir()):
+        if not path_exists(model_path):
             missing.append(str(model_path))
 
     if model_file_raw and _looks_like_local_fs_path(model_file_raw):
         model_file = Path(model_file_raw).expanduser()
         # HF / vLLM style checkpoints are directories; single-file weights are files.
         # Claim profiles historically stuffed MODEL= into MODEL_FILE for both.
-        if not (model_file.is_file() or model_file.is_dir()):
+        if not path_exists(model_file):
             missing.append(str(model_file))
 
     # Stable unique order
@@ -1052,7 +1077,7 @@ def agent_config_path(root: Path) -> Path:
 
 def load_agent_config(root: Path) -> dict[str, Any]:
     path = agent_config_path(root)
-    if not path.is_file():
+    if not path_is_regular_file(path):
         return {}
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))

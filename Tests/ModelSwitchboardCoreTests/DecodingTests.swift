@@ -121,3 +121,40 @@ import ModelSwitchboardTestSupport
     #expect(status.profile == "port-1")
     #expect(status.origin == .unknown)
 }
+
+@Test func controllerClientErrorDoesNotDumpJSONBodies() {
+    let http = ControllerClientError.httpError(
+        status: 500,
+        body: #"{"error":"internal_error","message":"internal server error"}"#
+    )
+    #expect(http.errorDescription?.contains("{") != true)
+    #expect(http.errorDescription?.localizedCaseInsensitiveContains("internal error") == true)
+
+    let auth = ControllerClientError.httpError(status: 401, body: #"{"error":"unauthorized"}"#)
+    #expect(auth.errorDescription?.contains("{") != true)
+    #expect(auth.errorDescription?.localizedCaseInsensitiveContains("auth") == true)
+
+    let jsonServer = ControllerClientError.serverError(#"{"error":"internal_error"}"#)
+    #expect(jsonServer.errorDescription?.contains("{") != true)
+}
+
+@Test func userFacingControllerErrorIsSharedAcrossClients() {
+    let json500 = ControllerClientError.httpError(
+        status: 500,
+        body: #"{"error":"internal_error"}"#
+    )
+    let remote = UserFacingControllerError.description(for: json500)
+    #expect(remote?.contains("{") != true)
+    #expect(remote?.localizedCaseInsensitiveContains("Remote agent") == true)
+
+    let local = UserFacingControllerError.description(for: json500, isLocal: true)
+    #expect(local?.localizedCaseInsensitiveContains("Local controller") == true)
+
+    let dns = UserFacingControllerError.description(for: URLError(.cannotFindHost), isLocal: true)
+    #expect(dns?.localizedCaseInsensitiveContains("Local controller") == true)
+    #expect(dns?.localizedCaseInsensitiveContains("Tailscale") != true)
+
+    #expect(UserFacingControllerError.isTransient(URLError(.cannotFindHost)))
+    #expect(UserFacingControllerError.isTransient(json500))
+    #expect(!UserFacingControllerError.isTransient(URLError(.userAuthenticationRequired)))
+}

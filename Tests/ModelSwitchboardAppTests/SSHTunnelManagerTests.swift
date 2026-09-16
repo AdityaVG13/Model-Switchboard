@@ -51,6 +51,7 @@ private func waitFor(
 @Test func stderrClassificationCoversCommonFailures() {
     let cases = [
         ("gpuadmin@spark: Permission denied (publickey,password).", "ssh-add"),
+        ("cp: cannot create directory '/opt/foo': Permission denied", "Permission denied"),
         ("Host key verification failed.", "Terminal"),
         ("bind [127.0.0.1]:9000: Address already in use", "port is in use"),
         ("ssh: connect to host spark port 22: Connection refused", "refused"),
@@ -60,6 +61,16 @@ private func waitFor(
         #expect(SSHTunnelManager.classifyFailure(stderrLines: [stderr]).contains(expected))
     }
     #expect(SSHTunnelManager.classifyFailure(stderrLines: []).contains("exited"))
+    #expect(
+        !SSHTunnelManager.classifyFailure(
+            stderrLines: ["cp: cannot create directory '/opt/foo': Permission denied"]
+        ).contains("ssh-add")
+    )
+    #expect(
+        !SSHTunnelManager.classifyFailure(
+            stderrLines: ["cp: cannot create directory '/opt/foo': Permission denied"]
+        ).localizedCaseInsensitiveContains("tunnel")
+    )
 }
 
 @Test func allocatedPortIsUsableAndInitiallyClosed() throws {

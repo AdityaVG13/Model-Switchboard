@@ -101,7 +101,13 @@ struct SwitchboardTimelineProvider: AppIntentTimelineProvider {
                     errorDescription: "Controller unavailable. Showing cached state."
                 )
             }
-            return SwitchboardWidgetEntry(date: .now, configuration: configuration, payload: nil, errorDescription: error.localizedDescription)
+            return SwitchboardWidgetEntry(
+                date: .now,
+                configuration: configuration,
+                payload: nil,
+                errorDescription: UserFacingControllerError.description(for: error, isLocal: true)
+                    ?? "Controller unavailable."
+            )
         }
     }
 
@@ -172,7 +178,7 @@ struct SwitchboardWidgetView: View {
     private let features = AppFeatures.current
 
     private var statuses: [ModelProfileStatus] {
-        (entry.payload?.statuses ?? []).sortedForDisplay()
+        (entry.payload?.statuses ?? []).boardVisible.sortedForDisplay()
     }
 
     private var summary: DashboardSummary {

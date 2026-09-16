@@ -33,6 +33,8 @@ private func makeStore(
 
     #expect(store.refreshState == .blocked(message: "missing the embedded controller"))
     #expect(store.lastError == "missing the embedded controller")
+    #expect(store.isRecoveringFromTransportFailure)
+    #expect(store.autoRefreshPolicy.mode == .recovering)
 }
 
 @MainActor
@@ -52,6 +54,27 @@ private func makeStore(
     #expect(store.isRecoveringFromTransportFailure)
     #expect(store.autoRefreshPolicy.mode == .recovering)
     #expect(store.autoRefreshPolicy.interval == AutoRefreshPolicy.recoveringInterval)
+    #expect(store.lastError?.localizedCaseInsensitiveContains("Local controller") == true)
+    #expect(store.lastError?.localizedCaseInsensitiveContains("Tailscale") != true)
+}
+
+@MainActor
+@Test func unreachableRemoteRefreshMentionsTailscale() async {
+    let store = SwitchboardStore(
+        controllerBaseURL: "http://spark.tail.ts.net:8877",
+        features: .base,
+        gateway: GatewayContext(id: "spark", name: "Spark"),
+        autoStartRefresh: false,
+        controllerClientFactory: { _, _ in
+            throw URLError(.cannotFindHost)
+        },
+        cachedStateLoader: { nil }
+    )
+
+    await store.refresh()
+
+    #expect(store.isRecoveringFromTransportFailure)
+    #expect(store.autoRefreshPolicy.mode == .recovering)
     #expect(store.lastError?.localizedCaseInsensitiveContains("Tailscale") == true)
 }
 
@@ -157,6 +180,37 @@ private func makeStore(
     ]
     store.lastActiveProfiles = ["a"]
     #expect(store.canReopenLastActive)
+
+    store.lastActiveProfiles = ["a", "ghost", "discovered-8000"]
+    #expect(store.reopenableLastActiveProfiles == ["a"])
+    #expect(store.canReopenLastActive)
+}
+
+@MainActor
+@Test func autoBenchmarkSkipsHiddenDiscoveryListeners() {
+    let defaults = UserDefaults.standard
+    let key = "modelswitchboard.auto-benchmarked-profiles.auto-bench-test"
+    defaults.removeObject(forKey: key)
+    defer { defaults.removeObject(forKey: key) }
+
+    let store = SwitchboardStore(
+        controllerBaseURL: "http://127.0.0.1:8877",
+        features: .plus,
+        gateway: GatewayContext(id: "auto-bench-test", name: "Spark"),
+        autoStartRefresh: false
+    )
+    store.statuses = [
+        ModelFixtures.profileStatus(
+            profile: "discovered-8000",
+            running: true,
+            ready: true,
+            origin: .discovery
+        ),
+        ModelFixtures.profileStatus(profile: "a", running: false, ready: false),
+    ]
+    store.considerAutoBenchmarks()
+    #expect(!store.autoBenchmarkedProfiles.contains("discovered-8000"))
+    #expect(store.loopbackEndpointProbeCandidates.isEmpty)
 }
 
 @MainActor

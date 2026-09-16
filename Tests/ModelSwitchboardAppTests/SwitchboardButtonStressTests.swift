@@ -185,6 +185,57 @@ import ModelSwitchboardTestSupport
     #expect(SwitchboardStore.isTransientReachabilityFailure(URLError(.cannotFindHost)))
     #expect(SwitchboardStore.isTransientReachabilityFailure(URLError(.cannotConnectToHost)))
     #expect(!SwitchboardStore.isTransientReachabilityFailure(URLError(.userAuthenticationRequired)))
+    #expect(
+        SwitchboardStore.isTransientReachabilityFailure(
+            DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "bad json"))
+        )
+    )
+    #expect(SwitchboardStore.isTransientReachabilityFailure(ControllerClientError.invalidResponse))
+}
+
+@MainActor
+@Test func localHostLookupFailureDoesNotMentionTailscale() {
+    let message = SwitchboardStore.userFacingErrorDescription(
+        for: URLError(.cannotFindHost),
+        isLocal: true
+    )
+    #expect(message.localizedCaseInsensitiveContains("Local controller"))
+    #expect(!message.localizedCaseInsensitiveContains("Tailscale"))
+}
+
+@MainActor
+@Test func httpInternalErrorDoesNotDumpJSON() {
+    let message = SwitchboardStore.userFacingErrorDescription(
+        for: ControllerClientError.httpError(
+            status: 500,
+            body: #"{"error": "internal_error", "message": "internal server error"}"#
+        )
+    )
+    #expect(!message.contains("{"))
+    #expect(message.localizedCaseInsensitiveContains("internal error"))
+    #expect(message.localizedCaseInsensitiveContains("Remote agent"))
+}
+
+@MainActor
+@Test func localHttpInternalErrorDoesNotBlameRemoteAgent() {
+    let message = SwitchboardStore.userFacingErrorDescription(
+        for: ControllerClientError.httpError(
+            status: 500,
+            body: #"{"error":"internal_error"}"#
+        ),
+        isLocal: true
+    )
+    #expect(!message.contains("{"))
+    #expect(message.localizedCaseInsensitiveContains("Local controller"))
+    #expect(!message.localizedCaseInsensitiveContains("Remote agent"))
+}
+
+@MainActor
+@Test func jsonServerErrorDoesNotDumpJSON() {
+    let message = SwitchboardStore.userFacingErrorDescription(
+        for: ControllerClientError.serverError(#"{"error":"internal_error"}"#)
+    )
+    #expect(!message.contains("{"))
 }
 
 @MainActor

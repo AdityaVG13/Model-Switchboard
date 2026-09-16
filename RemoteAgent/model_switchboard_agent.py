@@ -16,6 +16,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -60,6 +61,8 @@ from agent_core import (
     listener_pid_from_inventory,
     load_agent_config,
     missing_local_model_artifacts,
+    path_is_dir,
+    path_is_regular_file,
     parse_env_profile,
     parse_json_profile,
     parse_llamacpp_slots_tokens,
@@ -223,17 +226,20 @@ class ProfileRepository:
         self.directory = directory
 
     def load(self) -> dict[str, Profile]:
-        if not self.directory.is_dir():
+        if not path_is_dir(self.directory):
             return {}
         profiles: dict[str, Profile] = {}
-        files = sorted(
-            (
-                path
-                for path in self.directory.iterdir()
-                if path.suffix.lower() in (".env", ".json") and not path.name.startswith(".")
-            ),
-            key=lambda path: path.name.lower(),
-        )
+        try:
+            files = sorted(
+                (
+                    path
+                    for path in self.directory.iterdir()
+                    if path.suffix.lower() in (".env", ".json") and not path.name.startswith(".")
+                ),
+                key=lambda path: path.name.lower(),
+            )
+        except OSError:
+            return {}
         for file in files:
             name = file.stem
             try:
@@ -458,7 +464,7 @@ def save_profiles_directory(root: Path, profiles_dir: Path) -> Path:
     return resolved
 
 def _directory_has_profile_files(directory: Path) -> bool:
-    if not directory.is_dir():
+    if not path_is_dir(directory):
         return False
     try:
         for path in directory.iterdir():
@@ -472,7 +478,7 @@ def _directory_has_profile_files(directory: Path) -> bool:
 
 def _directory_has_port_claims(directory: Path) -> bool:
     """True when directory has a one-level port-claim child (flags.env / launch.sh / ...)."""
-    if not directory.is_dir():
+    if not path_is_dir(directory):
         return False
     try:
         for path in directory.iterdir():
@@ -481,7 +487,7 @@ def _directory_has_port_claims(directory: Path) -> bool:
                     continue
             except OSError:
                 continue
-            if any((path / marker).is_file() for marker in PORT_CLAIM_MARKERS):
+            if any(path_is_regular_file(path / marker) for marker in PORT_CLAIM_MARKERS):
                 return True
     except OSError:
         return False
@@ -638,7 +644,7 @@ def scan_profile_directories(
             continue
         if resolved in tallies:
             continue
-        if not resolved.is_dir():
+        if not path_is_dir(resolved):
             continue
         try:
             children = list(resolved.iterdir())
@@ -2120,6 +2126,7 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
         except AgentError as error:
             self._send_json(*_error_body(error.http_status, error.code, error.public_message))
         except Exception:  # pragma: no cover - defensive parity with router fallback
+            traceback.print_exc()
             self._send_json(*_error_body(500, "internal_error", "internal server error"))
 
     def _route(self, method: str, path: str) -> Callable[[dict[str, Any]], dict[str, Any]] | None:

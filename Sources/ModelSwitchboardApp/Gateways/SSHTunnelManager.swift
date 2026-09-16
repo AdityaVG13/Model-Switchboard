@@ -180,6 +180,7 @@ actor SSHTunnelManager {
         let process = Process()
         process.executableURL = executableURL
         process.arguments = tunnelArguments()
+        SSHInvocation.applyEnvironment(to: process)
         let stderrPipe = Pipe()
         process.standardError = stderrPipe
         process.standardOutput = FileHandle.nullDevice
@@ -379,6 +380,7 @@ actor SSHTunnelManager {
         // `--` so a destination that looks like an ssh option cannot be
         // interpreted as one (pairing codes / pasted hosts are untrusted).
         process.arguments = ["-S", controlSocketPath()] + arguments + ["--", configuration.destination]
+        SSHInvocation.applyEnvironment(to: process)
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         process.standardInput = FileHandle.nullDevice
@@ -528,7 +530,9 @@ actor SSHTunnelManager {
         {
             return "Tailscale SSH needs re-auth for this host. Run `tailscale up` (or connect once) in Terminal, or set a Deploy host - an ssh-config alias - on the gateway in Settings."
         }
-        if lowered.contains("permission denied") {
+        if lowered.contains("permission denied (")
+            || (lowered.contains("permission denied") && lowered.contains("publickey"))
+        {
             return "SSH auth failed. BatchMode needs a passphrase-less key or one loaded in an agent - run ssh-add, or set an identity file/agent for this gateway."
         }
         if lowered.contains("host key verification failed")
@@ -541,16 +545,16 @@ actor SSHTunnelManager {
         if lowered.contains("connection refused") {
             return "SSH connection refused. Check the host address and that sshd is running."
         }
-        if lowered.contains("timed out") || lowered.contains("timeout") {
+        if lowered.contains("timed out") || lowered.contains("operation timed out") {
             return "SSH connection timed out. Check that the host is reachable from this network."
         }
         if lowered.contains("could not resolve hostname") {
             return "Could not resolve the SSH host name."
         }
         if stderr.isEmpty {
-            return "SSH tunnel exited. Check the gateway's SSH settings."
+            return "SSH exited. Check the gateway's SSH settings."
         }
         let lastLine = stderrLines.last ?? "unknown error"
-        return "SSH tunnel failed: \(lastLine)"
+        return "SSH failed: \(lastLine)"
     }
 }

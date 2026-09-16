@@ -116,7 +116,7 @@ public final class ControllerRouter: @unchecked Sendable {
     case .unsupported:
       mapped = try? self.error(status: 400, code: "unsupported_action", message: error.description)
     case .operationFailed:
-      mapped = try? self.error(status: 500, code: "internal_error", message: error.description)
+      mapped = try? self.error(status: 500, code: "internal_error", message: "internal server error")
     }
     return mapped ?? fallback()
   }

@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- `/api/status` no longer 500s when a numeric uid dir such as `/run/user/126` looks like a port-claim folder: unreadable `flags.env` is skipped instead of crashing the scan, OS runtime mounts (`/run`, `/proc`, …) are not admitted as scan roots, `is_dir()` permission errors on hinted cmdlines are treated as absent, and MODEL_* existence checks use the same OSError-safe helpers.
+- Dashboard, widget, and host-metrics chips share one user-facing error mapper, so none of them paint raw `{"error":"internal_error",...}` JSON; local 500/DNS copy names the local controller instead of a remote agent or Tailscale; sticky LaunchAgent/SSH bootstrap diagnostics keep the 3s recovering cadence instead of dropping to idle 10-minute polling.
+- Reopen Last Active, Stop All verification, auto-benchmark, loopback probes, SSH forwards, and the widget list all use the same board-visible set (stale names and hidden discovery listeners are not started, waited on, or shown as ready).
+- SSH Update no longer treats remote file `Permission denied` as BatchMode auth failure, GUI ssh inherits the login `SSH_AUTH_SOCK`, generic SSH copy no longer says "tunnel" for a deploy file-copy step, and a bare "timeout" in ssh stderr is no longer classified as a connection timeout.
+- Local controller `operationFailed` responses no longer leak command stderr into the HTTP `message` field.
+
 ## [2.0.0] - 2026-09-15
 
 ### Added

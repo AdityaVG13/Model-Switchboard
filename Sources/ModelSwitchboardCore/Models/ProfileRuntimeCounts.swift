@@ -14,7 +14,7 @@ public struct ProfileRuntimeCounts: Equatable, Sendable {
     public init(statuses: [ModelProfileStatus]) {
         // Board census: same set as SwitchboardStore.sortedStatuses.
         // `isBoardVisible` already excludes synthetic discovery/listening rows.
-        let visible = statuses.filter(\.isBoardVisible)
+        let visible = statuses.boardVisible
         total = visible.count
         var runningCount = 0
         var readyCount = 0
