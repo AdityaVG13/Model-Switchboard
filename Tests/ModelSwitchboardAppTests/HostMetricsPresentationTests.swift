@@ -85,11 +85,20 @@ private func sparkMetrics(
 
 @MainActor
 @Test func dashPresentationLabels() {
+    let storage = HostStorageMetrics(usedMB: 422_296.6, totalMB: 1_875_335.2, percent: 22.5, source: "statvfs")
+    let network = HostNetworkMetrics(rxKbps: 1240.5, txKbps: 310.2, source: "proc")
+    let healthyTailnet = TailnetHealth(
+        online: true,
+        backendState: "Running",
+        ipv4: "100.64.1.2",
+        dnsName: nil,
+        health: []
+    )
     let metrics = HostMetricsPayload(
         uptimeSeconds: 3 * 86400 + 4 * 3600 + 5 * 60,
-        storage: HostStorageMetrics(usedMB: 422_296.6, totalMB: 1_875_335.2, percent: 22.5, source: "statvfs"),
-        network: HostNetworkMetrics(rxKbps: 1240.5, txKbps: 310.2, source: "proc"),
-        tailscale: TailnetHealth(online: true, backendState: "Running", ipv4: "100.64.1.2", dnsName: nil, health: [])
+        storage: storage,
+        network: network,
+        tailscale: healthyTailnet
     )
     #expect(HostMetricsPresentation.uptimeLabel(metrics) == "up 3d 4h")
     #expect(HostMetricsPresentation.storageLabel(metrics) == "412.4/1831.4 GB")
@@ -98,18 +107,28 @@ private func sparkMetrics(
     #expect(tailnet?.label == "TAILNET OK")
     #expect(tailnet?.detail == "100.64.1.2")
 
-    // Offline + warning states surface, not hide.
     let offline = HostMetricsPayload(
-        tailscale: TailnetHealth(online: false, backendState: "NeedsLogin", ipv4: nil, dnsName: nil, health: ["login expired"])
+        tailscale: TailnetHealth(
+            online: false,
+            backendState: "NeedsLogin",
+            ipv4: nil,
+            dnsName: nil,
+            health: ["login expired"]
+        )
     )
     #expect(HostMetricsPresentation.tailnetLabel(offline)?.label == "TAILNET OFF")
 
     let warned = HostMetricsPayload(
-        tailscale: TailnetHealth(online: true, backendState: "Running", ipv4: nil, dnsName: nil, health: ["derp relay issue"])
+        tailscale: TailnetHealth(
+            online: true,
+            backendState: "Running",
+            ipv4: nil,
+            dnsName: nil,
+            health: ["derp relay issue"]
+        )
     )
     #expect(HostMetricsPresentation.tailnetLabel(warned)?.label == "TAILNET WARN")
 
-    // No data -> no label (graceful degradation).
     #expect(HostMetricsPresentation.uptimeLabel(nil) == nil)
     #expect(HostMetricsPresentation.tailnetLabel(HostMetricsPayload()) == nil)
 }
