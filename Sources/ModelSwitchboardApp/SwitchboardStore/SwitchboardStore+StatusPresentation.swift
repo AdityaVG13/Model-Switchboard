@@ -33,7 +33,17 @@ extension SwitchboardStore {
             return statuses.isEmpty ? .error : .stale
         case .failedShowingCached:
             return statuses.isEmpty ? .error : .cached
-        case .idle, .refreshing, .refreshed:
+        case .refreshing(let held):
+            switch held {
+            case .failed, .blocked:
+                return statuses.isEmpty ? .error : .stale
+            case .cached:
+                return statuses.isEmpty ? .error : .cached
+            case nil:
+                break
+            }
+            fallthrough
+        case .idle, .refreshed:
             guard let lastUpdated else { return .error }
             if now.timeIntervalSince(lastUpdated) > Constants.statusStaleThresholdSeconds {
                 return .stale
@@ -43,11 +53,18 @@ extension SwitchboardStore {
     }
 
     func displayedRunningProfiles(relativeTo now: Date) -> Int {
-        statusFreshness(relativeTo: now) == .fresh ? summary.runningProfiles : 0
+        hasRecentBoardStatus(relativeTo: now) ? summary.runningProfiles : 0
     }
 
     func displayedReadyProfiles(relativeTo now: Date) -> Int {
-        statusFreshness(relativeTo: now) == .fresh ? summary.readyProfiles : 0
+        hasRecentBoardStatus(relativeTo: now) ? summary.readyProfiles : 0
+    }
+
+    /// Last known running/ready counts stay visible across a failed or in-flight
+    /// refresh so the menu bar cannot flash `N` → `0` → `N` on every poll.
+    func hasRecentBoardStatus(relativeTo now: Date) -> Bool {
+        guard !statuses.isEmpty, let lastUpdated else { return false }
+        return now.timeIntervalSince(lastUpdated) <= Constants.statusStaleThresholdSeconds
     }
 
     func profileBadgeState(for profile: ModelProfileStatus, relativeTo now: Date) -> ProfileBadgeState {

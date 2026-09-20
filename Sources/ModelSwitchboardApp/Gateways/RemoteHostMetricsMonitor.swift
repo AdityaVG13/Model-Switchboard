@@ -140,7 +140,9 @@ final class RemoteHostMetricsMonitor {
         }
 
         for (id, entry) in results {
-            entries[id] = entry
+            if entries[id] != entry {
+                entries[id] = entry
+            }
         }
     }
 }

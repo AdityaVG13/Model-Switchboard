@@ -160,6 +160,10 @@ extension SwitchboardStore {
         }
         guard UserFacingControllerError.isTimeout(error) else { return error.localizedDescription }
 
+        if !isLocal, actionName == nil, status == nil {
+            return "Gateway status timed out. Last known models are still shown."
+        }
+
         let profileName = status?.displayName ?? diagnostic?.displayName
         let subject = profileName.map { " for \($0)" } ?? ""
         let action = actionName ?? "Request"
@@ -180,8 +184,8 @@ extension SwitchboardStore {
         actionName: String? = nil,
         profile: String? = nil
     ) {
-        if case .blocked = refreshState { return }
-        isRecoveringFromTransportFailure = Self.isTransientReachabilityFailure(error)
+        if refreshState.isBlocked { return }
+        noteRecoveringFrom(error)
         refreshState = .failed(
             message: Self.userFacingErrorDescription(
                 for: error,
@@ -212,6 +216,14 @@ extension SwitchboardStore {
 
     nonisolated static func isTransientReachabilityFailure(_ error: Error) -> Bool {
         UserFacingControllerError.isTransient(error)
+    }
+
+    /// DNS / refused / no-route belong on the 3s recovering poll. Timeouts do
+    /// not: a 45s remote `/api/status` plus a 3s retry stacks requests and
+    /// flashes the menu bar on every cycle.
+    func noteRecoveringFrom(_ error: Error) {
+        isRecoveringFromTransportFailure =
+            Self.isTransientReachabilityFailure(error) && !Self.isTimeout(error)
     }
 
     nonisolated static func isTimeout(_ error: Error) -> Bool {

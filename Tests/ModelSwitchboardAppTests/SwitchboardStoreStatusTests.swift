@@ -59,6 +59,51 @@ private func makeStore(
 }
 
 @MainActor
+@Test func retryingRefreshKeepsFailureAndReadyCountsOnScreen() {
+    let store = makeStore()
+    let now = Date(timeIntervalSince1970: 200)
+    store.statuses = [ModelFixtures.profileStatus()]
+    store.lastUpdated = now
+    store.refreshState = .failed(message: "Gateway refused the connection. Is the agent running?")
+
+    let next = store.refreshState.beginningRefresh()
+    #expect(next.isInFlight)
+    #expect(next.message == "Gateway refused the connection. Is the agent running?")
+    store.refreshState = next
+
+    #expect(store.lastError == "Gateway refused the connection. Is the agent running?")
+    #expect(store.isRefreshing)
+    #expect(store.statusFreshness(relativeTo: now) == .stale)
+    #expect(store.displayedReadyProfiles(relativeTo: now) == 1)
+    #expect(store.displayedRunningProfiles(relativeTo: now) == 1)
+}
+
+@MainActor
+@Test func timeoutRefreshKeepsRecentCountsAndSkipsRecoveringCadence() async {
+    let store = SwitchboardStore(
+        controllerBaseURL: "http://spark.tail.ts.net:8877",
+        features: .base,
+        gateway: GatewayContext(id: "spark", name: "Spark"),
+        autoStartRefresh: false,
+        controllerClientFactory: { _, _ in
+            throw URLError(.timedOut)
+        },
+        cachedStateLoader: { nil }
+    )
+    let now = Date()
+    store.statuses = [ModelFixtures.profileStatus()]
+    store.lastUpdated = now
+    store.refreshState = .refreshed
+
+    await store.refresh()
+
+    #expect(store.lastError == "Gateway status timed out. Last known models are still shown.")
+    #expect(!store.isRecoveringFromTransportFailure)
+    #expect(store.autoRefreshPolicy.mode != .recovering)
+    #expect(store.displayedReadyProfiles(relativeTo: now) == 1)
+}
+
+@MainActor
 @Test func unreachableRemoteRefreshMentionsTailscale() async {
     let store = SwitchboardStore(
         controllerBaseURL: "http://spark.tail.ts.net:8877",

@@ -216,6 +216,11 @@ public struct GatewayConfig: Codable, Identifiable, Equatable, Sendable {
 
     /// Tailscale IPv4 CGNAT range 100.64.0.0/10 - not covered by ATS
     /// `NSAllowsLocalNetworking`, so cleartext direct URLs must use MagicDNS.
+    public static func isIPv4Address(_ host: String) -> Bool {
+        let parts = host.split(separator: ".", omittingEmptySubsequences: false).compactMap { Int($0) }
+        return parts.count == 4 && parts.allSatisfy { (0...255).contains($0) }
+    }
+
     public static func isTailscaleCGNATAddress(_ host: String) -> Bool {
         let parts = host.split(separator: ".").compactMap { Int($0) }
         guard parts.count == 4 else { return false }
@@ -241,11 +246,18 @@ public struct GatewayConfig: Codable, Identifiable, Equatable, Sendable {
         enabled = try container.decode(Bool.self, forKey: .enabled)
         switch try container.decode(GatewayKind.self, forKey: .kind) {
         case .direct:
-            // Legacy blobs may carry dead ssh keys; only the direct keys are read.
+            // Legacy blobs may carry dead ssh keys. A leftover IPv4 sshHost is
+            // the working Tailscale/LAN deploy target after a kind switch
+            // (MagicDNS URL + 100.x IP). Recover it as deployHost so Update
+            // does not SSH to an unresolvable *.ts.net name.
             connection = .direct(.init(
                 baseURL: try container.decode(String.self, forKey: .baseURL),
                 remotePort: try container.decode(Int.self, forKey: .remotePort),
-                deployHost: Self.nonEmpty(try container.decodeIfPresent(String.self, forKey: .deployHost))
+                deployHost: Self.recoveredDirectDeployHost(
+                    explicit: try container.decodeIfPresent(String.self, forKey: .deployHost),
+                    leftoverUser: try container.decodeIfPresent(String.self, forKey: .sshUser),
+                    leftoverHost: try container.decodeIfPresent(String.self, forKey: .sshHost)
+                )
             ))
         case .ssh:
             connection = .ssh(.init(
@@ -289,6 +301,23 @@ public struct GatewayConfig: Codable, Identifiable, Equatable, Sendable {
     private static func nonEmpty(_ value: String?) -> String? {
         guard let value, !value.isEmpty else { return nil }
         return value
+    }
+
+    static func recoveredDirectDeployHost(
+        explicit: String?,
+        leftoverUser: String?,
+        leftoverHost: String?
+    ) -> String? {
+        if let explicit = nonEmpty(explicit) {
+            return normalizedDeployHost(explicit)
+        }
+        guard let host = nonEmpty(leftoverHost), isIPv4Address(host) else {
+            return nil
+        }
+        if let user = nonEmpty(leftoverUser) {
+            return normalizedDeployHost("\(user)@\(host)")
+        }
+        return normalizedDeployHost(host)
     }
 }
 

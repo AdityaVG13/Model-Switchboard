@@ -78,7 +78,7 @@ struct ModelSwitchboardApp: App {
                 }
                 .onChange(of: controllerBaseURL) { _, newValue in
                     store.controllerBaseURL = newValue
-                    Task { await store.refresh() }
+                    Task { await store.refresh(includeDoctor: true) }
                 }
                 .onChange(of: controllerAuthToken) { _, newValue in
                     // Debounced: this fires per keystroke while typing a token.
@@ -91,7 +91,7 @@ struct ModelSwitchboardApp: App {
                         // clear/rotate-to-no-auth sticks across relaunch.
                         KeychainTokenStorage.shared.save(trimmed)
                         store.controllerAuthToken = newValue
-                        await store.refresh()
+                        await store.refresh(includeDoctor: true)
                     }
                 }
         } label: {
@@ -143,12 +143,7 @@ struct ModelSwitchboardApp: App {
 
     private var localControllerNeedsRecovery: Bool {
         if store.isRecoveringFromTransportFailure { return true }
-        switch store.refreshState {
-        case .blocked, .failed, .failedShowingCached:
-            return true
-        case .idle, .refreshing, .refreshed:
-            return false
-        }
+        return store.refreshState.message != nil
     }
 
     /// Bootstrap diagnostics concern the local LaunchAgent only;
@@ -160,7 +155,7 @@ struct ModelSwitchboardApp: App {
         // LaunchAgent is listening after a crash/reboot. Poll again
         // once registration has had a chance to bring the port up.
         if diagnostic == nil {
-            await store.refresh()
+            await store.refresh(includeDoctor: true)
         }
     }
 }

@@ -27,6 +27,19 @@ import ModelSwitchboardCore
     #expect(target.destination == "user@100.64.1.2")
 }
 
+@Test @MainActor func recoveredLegacyIPv4DeployHostWinsOverMagicDNSURL() throws {
+    let legacy = """
+    {"id":"g1","name":"Lab","kind":"direct",\
+    "baseURL":"http://gpu.example.ts.net:8877",\
+    "sshUser":"gpuadmin","sshHost":"100.64.1.2","sshPort":22,"remotePort":8877,\
+    "enabled":true}
+    """
+    let config = try JSONDecoder().decode(GatewayConfig.self, from: Data(legacy.utf8))
+    let target = try #require(GatewayHub.agentDeployTarget(for: config))
+    #expect(target.sshUser == "gpuadmin")
+    #expect(target.sshHost == "100.64.1.2")
+}
+
 /// Unresponsive ssh (interactive prompt BatchMode cannot answer) must be
 /// killed at the deploy deadline, not hang "Pushing agent…" forever.
 @Test func deployDeadlineKillsUnresponsiveSSH() async throws {

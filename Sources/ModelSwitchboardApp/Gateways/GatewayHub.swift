@@ -396,7 +396,7 @@ final class GatewayHub {
         }
         lastManualRefreshAt = now
         for store in allStores {
-            Task { await store.refresh() }
+            Task { await store.refresh(includeDoctor: true) }
         }
     }
 
@@ -416,8 +416,6 @@ final class GatewayHub {
 
     private func performForceUpdate(gatewayID: String) async {
         guard let runtime = remoteRuntimes.first(where: { $0.id == gatewayID }) else { return }
-        runtime.forceUpdatePhase = .updating("Clearing stale status…")
-        runtime.store.discardLiveStatusForForceUpdate()
 
         let config = runtime.config
         guard let deployTarget = Self.agentDeployTarget(for: config) else {
@@ -428,6 +426,8 @@ final class GatewayHub {
             return
         }
 
+        // Keep the live board visible. Discarding first made Retry blank the
+        // menu bar and then bounce a working tunnel when deploy failed.
         runtime.forceUpdatePhase = .updating("Pushing agent…")
         // Direct (Tailscale) installs bind the agent to the tailnet; SSH
         // tunnel installs keep loopback-only listen + Mac-side forward.
@@ -455,20 +455,17 @@ final class GatewayHub {
             }
             if let live = remoteRuntimes.first(where: { $0.id == gatewayID }) {
                 live.forceUpdatePhase = .failed(message)
+                await live.store.refresh()
             }
             Self.logger.error("force-update deploy failed: \(message, privacy: .public)")
-            // Still hard-refresh whatever agent is already running.
+            return
         }
 
         guard !Task.isCancelled else { return }
         guard let current = remoteRuntimes.first(where: { $0.id == gatewayID }) else { return }
 
         if current.config.kind == .ssh {
-            if case .failed = current.forceUpdatePhase {
-                // Keep the deploy failure visible across the tunnel bounce.
-            } else {
-                current.forceUpdatePhase = .updating("Reconnecting…")
-            }
+            current.forceUpdatePhase = .updating("Reconnecting…")
             bounceSSHRuntime(id: gatewayID, preservingPhase: current.forceUpdatePhase)
             // Wait briefly for the replacement tunnel; refresh starts on .established.
             for _ in 0..<40 {
@@ -481,11 +478,6 @@ final class GatewayHub {
         }
 
         guard let live = remoteRuntimes.first(where: { $0.id == gatewayID }) else { return }
-        if case .failed = live.forceUpdatePhase {
-            // Deploy already failed; still attempt a status pull.
-            await live.store.refresh()
-            return
-        }
         live.forceUpdatePhase = .updating("Refreshing…")
         var lastMessage: String?
         for _ in 0..<8 {
@@ -497,7 +489,9 @@ final class GatewayHub {
                 return
             case .failed(let message), .failedShowingCached(let message), .blocked(let message):
                 lastMessage = message
-            default:
+            case .refreshing(let held):
+                lastMessage = held?.message ?? lastMessage
+            case .idle:
                 break
             }
             if !live.store.isRecoveringFromTransportFailure {

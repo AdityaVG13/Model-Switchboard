@@ -458,6 +458,62 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
     }
 }
 
+@MainActor
+@Test func forceUpdateDeployFailureKeepsLiveRuntimeAndStatus() async throws {
+    try await withTestDefaultsAsync { defaults, service in
+        let hub = GatewayHub(
+            localStore: makeLocalStore(),
+            defaults: defaults,
+            remoteStoreFactory: { config, baseURL, token in
+                SwitchboardStore(
+                    controllerBaseURL: baseURL,
+                    controllerAuthToken: token,
+                    features: .base,
+                    gateway: GatewayContext(config: config),
+                    autoStartRefresh: false,
+                    controllerClientFactory: { _, _ in throw TestBoom() }
+                )
+            },
+            tokenStorageFactory: { id in
+                KeychainTokenStorage(service: service, accessGroup: nil, account: "gateway-\(id)")
+            },
+            sshExecutableURL: URL(fileURLWithPath: "/usr/bin/true"),
+            deployAgent: { _, _, _ in
+                throw RemoteAgentDeployer.DeployError.sshFailed(
+                    step: "push agent",
+                    message: "no route"
+                )
+            }
+        )
+        let config = GatewayConfig.ssh(
+            name: "Spark",
+            sshUser: "ubuntu",
+            sshHost: "spark.local",
+            remotePort: 8877
+        )
+        hub.upsertGateway(config, token: "tok")
+        defer { hub.removeGateway(id: config.id) }
+
+        let runtime = try #require(hub.remoteRuntimes.first)
+        runtime.store.statuses = [
+            ModelFixtures.profileStatus(profile: "remote-a", running: true, ready: true)
+        ]
+        runtime.store.lastUpdated = Date()
+        runtime.store.refreshState = .refreshed
+
+        await hub.forceUpdateGateway(id: config.id)
+
+        #expect(hub.remoteRuntimes.first === runtime)
+        #expect(runtime.store.statuses.map(\.profile) == ["remote-a"])
+        #expect(runtime.store.displayedReadyProfiles == 1)
+        if case .failed(let message) = runtime.forceUpdatePhase {
+            #expect(message.contains("no route"))
+        } else {
+            Issue.record("expected Retry to keep the deploy failure without tearing down the gateway")
+        }
+    }
+}
+
 @Test func remoteGatewayHTTPTimeoutsLeaveRoomForDiscovery() {
     // Cold /api/status on a busy vLLM host previously took ~15s while the Mac
     // client aborted at 5s request / 15s resource - permanent DIRECT · ERROR.

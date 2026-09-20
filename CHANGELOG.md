@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Remote gateway Retry no longer blanks the dashboard or tears down a live SSH tunnel, and failed refreshes keep the last error and ready-count on screen instead of flashing the menu bar every poll.
+
 ## [2.0.0] - 2026-09-16
 
 ### Added

@@ -274,3 +274,16 @@ import Testing
     #expect(legacy.first?.direct?.deployHost == nil)
     #expect(legacy.first?.direct?.baseURL == "http://dgx-spark.tail1234.ts.net:8877")
 }
+
+@Test func legacyDirectBlobRecoversIPv4SSHHostAsDeployHost() throws {
+    let legacy = """
+    [{"id":"g1","name":"Lab","kind":"direct",\
+    "baseURL":"http://gpu.example.ts.net:8877",\
+    "sshUser":"gpuadmin","sshHost":"100.64.1.2","sshPort":22,"remotePort":8877,\
+    "enabled":true}]
+    """
+    let decoded = try JSONDecoder().decode([GatewayConfig].self, from: Data(legacy.utf8))
+    let gateway = try #require(decoded.first)
+    #expect(gateway.direct?.deployHost == "gpuadmin@100.64.1.2")
+    #expect(gateway.ssh == nil)
+}

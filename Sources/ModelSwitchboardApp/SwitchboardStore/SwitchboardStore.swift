@@ -32,13 +32,28 @@ final class SwitchboardStore {
 
     /// Single source of truth for the refresh lifecycle and the store's ONE error
     /// slot. Replaces the parallel `isRefreshing` boolean + `lastError` /
-    /// `bootstrapDiagnostic` string slots: refreshing-while-failed, two errors at
-    /// once, and stale-vs-cached-vs-blocked ambiguity are all unrepresentable now.
+    /// `bootstrapDiagnostic` string slots: two errors at once and
+    /// stale-vs-cached-vs-blocked ambiguity are unrepresentable. A retry in
+    /// flight keeps the last failure in `refreshing(held:)` so the dashboard
+    /// cannot flash empty / error-free between polls.
     enum RefreshState: Equatable {
+        enum HeldFailure: Equatable {
+            case failed(String)
+            case cached(String)
+            case blocked(String)
+
+            var message: String {
+                switch self {
+                case .failed(let message), .cached(let message), .blocked(let message):
+                    return message
+                }
+            }
+        }
+
         /// No refresh has completed yet (initial store, or after a force-update discard).
         case idle
-        /// A refresh is in flight.
-        case refreshing
+        /// A refresh is in flight. `held` is the last failure kept on screen.
+        case refreshing(held: HeldFailure? = nil)
         /// The last refresh (or successful action) completed; freshness is
         /// time-derived from `lastUpdated`.
         case refreshed
@@ -52,13 +67,47 @@ final class SwitchboardStore {
         /// must not clobber it; only a success (or a discard) clears it.
         case blocked(message: String)
 
-        /// The user-facing message carried by any failing case.
+        /// The user-facing message carried by any failing case, including a
+        /// retry that is still in flight.
         var message: String? {
             switch self {
             case .failed(let message), .failedShowingCached(let message), .blocked(let message):
                 return message
-            case .idle, .refreshing, .refreshed:
+            case .refreshing(let held):
+                return held?.message
+            case .idle, .refreshed:
                 return nil
+            }
+        }
+
+        var isInFlight: Bool {
+            if case .refreshing = self { true } else { false }
+        }
+
+        var isBlocked: Bool {
+            switch self {
+            case .blocked:
+                return true
+            case .refreshing(.blocked):
+                return true
+            default:
+                return false
+            }
+        }
+
+        /// Start a refresh without dropping the last failure from the UI.
+        func beginningRefresh() -> RefreshState {
+            switch self {
+            case .failed(let message):
+                return .refreshing(held: .failed(message))
+            case .failedShowingCached(let message):
+                return .refreshing(held: .cached(message))
+            case .blocked(let message):
+                return .refreshing(held: .blocked(message))
+            case .refreshing(let held):
+                return .refreshing(held: held)
+            case .idle, .refreshed:
+                return .refreshing(held: nil)
             }
         }
     }
@@ -251,7 +300,7 @@ final class SwitchboardStore {
 
     /// Derived view convenience: a refresh is in flight.
     var isRefreshing: Bool {
-        refreshState == .refreshing
+        refreshState.isInFlight
     }
 
     var hasPendingActions: Bool {
