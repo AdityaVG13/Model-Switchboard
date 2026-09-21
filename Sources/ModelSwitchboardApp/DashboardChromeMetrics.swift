@@ -18,25 +18,6 @@ enum DashboardChromeMetrics {
     static let inspectorPanelWidth: CGFloat = 372
     static let panelHeight: CGFloat = 620
 
-    static func clampPanelWidth(_ value: CGFloat) -> CGFloat {
-        min(max(value, minMainPanelWidth), maxMainPanelWidth)
-    }
-
-    static func clampPanelWidth(_ value: Double) -> Double {
-        Double(clampPanelWidth(CGFloat(value)))
-    }
-
-    /// Idle stop affordance: enabled only when something is running or a stop
-    /// is already in flight (quiet disabled state when idle).
-    static func canStopAnything(
-        isBusy: Bool,
-        storesHaveRunning: Bool,
-        storesHavePending: Bool
-    ) -> Bool {
-        if isBusy { return true }
-        return storesHaveRunning || storesHavePending
-    }
-
     /// Trailing padding for a fixed icon rail so the last icon stays fully
     /// inside the continuous corner (hit size is square; glyph is centered).
     static func footerTrailingInset() -> CGFloat {

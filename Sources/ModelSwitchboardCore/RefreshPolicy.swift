@@ -26,32 +26,10 @@ public struct AutoRefreshPolicy: Equatable, Sendable {
         hasPendingActions: Bool = false,
         isRecovering: Bool = false
     ) {
-        if hasPendingActions {
-            mode = .pendingAction
-            interval = Self.pendingActionInterval
-            return
-        }
-
-        if isRecovering {
-            mode = .recovering
-            interval = Self.recoveringInterval
-            return
-        }
-
-        if payload.benchmark?.running == true {
-            mode = .benchmarking
-            interval = Self.benchmarkingInterval
-            return
-        }
-
-        let counts = ProfileRuntimeCounts(statuses: payload.statuses)
-        if counts.running > 0 || counts.ready > 0 {
-            mode = .activeRuntime
-            interval = Self.activeRuntimeInterval
-            return
-        }
-
-        mode = .idle
-        interval = Self.idleInterval
+        (mode, interval) = Self.resolved(
+            payload: payload,
+            hasPendingActions: hasPendingActions,
+            isRecovering: isRecovering
+        )
     }
 }

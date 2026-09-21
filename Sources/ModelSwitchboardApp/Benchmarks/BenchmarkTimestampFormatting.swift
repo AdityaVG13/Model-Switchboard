@@ -1,8 +1,9 @@
 import Foundation
+import ModelSwitchboardCore
 
 enum BenchmarkTimestampFormatting {
     static func formattedGeneratedAt(_ value: String?) -> String {
-        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+        guard let value = value.nonEmptyTrimmed else {
             return "Unknown"
         }
         guard let date = parsedGeneratedAt(value) else {
@@ -12,7 +13,7 @@ enum BenchmarkTimestampFormatting {
     }
 
     static func parsedGeneratedAt(_ value: String?) -> Date? {
-        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+        guard let value = value.nonEmptyTrimmed else {
             return nil
         }
 

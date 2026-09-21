@@ -4,9 +4,7 @@ public enum LoopbackHost {
     /// Single owner of loopback identity for app, controller, and scripts.
     /// Empty, `127.1`, and other 127/8 aliases are not loopback here.
     public static func isLoopback(_ host: String) -> Bool {
-        let normalized = host.trimmingCharacters(in: .whitespacesAndNewlines)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
-            .lowercased()
+        let normalized = host.trimmed.strippingBrackets.lowercased()
         return normalized == "127.0.0.1" || normalized == "localhost" || normalized == "::1"
     }
 

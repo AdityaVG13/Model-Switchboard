@@ -13,70 +13,7 @@ extension SwitchboardStore {
             return "\(scope) model status is unavailable. Refresh to verify live status."
         case .error, .fresh:
             // Display order matters here (matches the menu list); sortedStatuses is cached.
-            let running = sortedStatuses.filter(\.running)
-            guard !running.isEmpty else {
-                return gateway.isLocal
-                    ? "No local models running"
-                    : "No models running on \(gateway.name)"
-            }
-            let prefix = gateway.isLocal ? "Running" : "\(gateway.name)"
-            return "\(prefix): " + running.map(\.displayName).joined(separator: ", ")
-        }
-    }
-
-    func statusFreshness(relativeTo now: Date) -> StatusFreshness {
-        // Freshness is derived from the structured refresh state - never from
-        // error-message text. `.cached` is the failedShowingCached provenance,
-        // not a substring of the message copy.
-        switch refreshState {
-        case .failed, .blocked:
-            return statuses.isEmpty ? .error : .stale
-        case .failedShowingCached:
-            return statuses.isEmpty ? .error : .cached
-        case .refreshing(let held):
-            switch held {
-            case .failed, .blocked:
-                return statuses.isEmpty ? .error : .stale
-            case .cached:
-                return statuses.isEmpty ? .error : .cached
-            case nil:
-                break
-            }
-            fallthrough
-        case .idle, .refreshed:
-            guard let lastUpdated else { return .error }
-            if now.timeIntervalSince(lastUpdated) > Constants.statusStaleThresholdSeconds {
-                return .stale
-            }
-            return .fresh
-        }
-    }
-
-    func displayedRunningProfiles(relativeTo now: Date) -> Int {
-        hasRecentBoardStatus(relativeTo: now) ? summary.runningProfiles : 0
-    }
-
-    func displayedReadyProfiles(relativeTo now: Date) -> Int {
-        hasRecentBoardStatus(relativeTo: now) ? summary.readyProfiles : 0
-    }
-
-    /// Last known running/ready counts stay visible across a failed or in-flight
-    /// refresh so the menu bar cannot flash `N` → `0` → `N` on every poll.
-    func hasRecentBoardStatus(relativeTo now: Date) -> Bool {
-        guard !statuses.isEmpty, let lastUpdated else { return false }
-        return now.timeIntervalSince(lastUpdated) <= Constants.statusStaleThresholdSeconds
-    }
-
-    func profileBadgeState(for profile: ModelProfileStatus, relativeTo now: Date) -> ProfileBadgeState {
-        if let pending = pendingLabel(for: profile.profile) {
-            return .pending(pending)
-        }
-        if profile.lifecycle.isActive && statusFreshness(relativeTo: now) != .fresh {
-            return .stale
-        }
-        switch profile.lifecycle {
-        case .running, .readyUnowned, .starting: return .running
-        case .stopped: return .notRunning
+            return runningStatusesHelp()
         }
     }
 

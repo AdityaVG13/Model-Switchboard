@@ -38,7 +38,6 @@ from agent_core import (
     InvalidProfileError,
     LOOPBACK_HOSTS,
     OperationFailedError,
-    PROFILE_KEY_RE,
     PROFILE_SCAN_SKIP_DIRS,
     Profile,
     ProfileConflictError,
@@ -54,13 +53,16 @@ from agent_core import (
     canonical_runtime,
     env_flag,
     first_known,
+    first_present,
     gpu_metrics_snapshot,
     is_loopback,
     is_placeholder_model_name,
+    is_tailscale_ip,
     listener_pid,
     listener_pid_from_inventory,
     load_agent_config,
     missing_local_model_artifacts,
+    openai_model_ids_from_entries,
     path_is_dir,
     path_is_regular_file,
     parse_env_profile,
@@ -86,6 +88,10 @@ from agent_core import (
     sample_memory,
     sample_network_rates,
     storage_usage,
+    _assignment_key_rest,
+    _json_object_file,
+    _round_tenths,
+    _stripped_assignment_line,
     tailscale_health_snapshot,
     terminate_process_tree,
     urlopen_no_redirect,
@@ -137,10 +143,6 @@ PROFILE_SCAN_MAX_DEPTH = 5
 
 PROFILE_SCAN_MAX_CANDIDATES = 8
 
-def is_tailscale_ip(address: str) -> bool:
-    """Deprecated alias kept for import compatibility; see agent_core."""
-    from agent_core import is_tailscale_ip as _impl
-    return _impl(address)
 
 @dataclass(frozen=True)
 class TailscalePresence:
@@ -183,6 +185,56 @@ class TailscalePresence:
     def error(self) -> str | None:
         return self._error
 
+def _run_tailscale(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["tailscale", *args],
+        capture_output=True, text=True, timeout=5, check=False,
+    )
+
+
+def _tailscale_presence_from_parsed(parsed: Any) -> TailscalePresence | None:
+    self_info = parsed.get("Self") or {}
+    ips = _tailscale_ips_from_self(self_info)
+    if not ips:
+        return None
+    return TailscalePresence.present_with(ips[0], _tailscale_dns_from_self(self_info))
+
+
+def _tailscale_ips_from_self(self_info: dict[str, Any]) -> list[str]:
+    return [ip for ip in self_info.get("TailscaleIPs") or [] if is_tailscale_ip(ip)]
+
+
+def _tailscale_dns_from_self(self_info: dict[str, Any]) -> str | None:
+    return (self_info.get("DNSName") or "").rstrip(".") or None
+
+
+def _tailscale_from_status_json() -> TailscalePresence | None:
+    result = _run_tailscale("status", "--json")
+    if result.returncode != 0:
+        return None
+    return _tailscale_presence_from_parsed(json.loads(result.stdout))
+
+
+def _tailscale_from_ip_v4() -> TailscalePresence | None:
+    result = _run_tailscale("ip", "-4")
+    if result.returncode != 0:
+        return None
+    for line in result.stdout.split():
+        if is_tailscale_ip(line.strip()):
+            return TailscalePresence.present_with(line.strip(), None)
+    return None
+
+
+def _tailscale_failed_or_absent(
+    status_failed: str | None, ip_failed: str | None
+) -> TailscalePresence:
+    if status_failed:
+        return TailscalePresence.failed(status_failed)
+    if ip_failed:
+        return TailscalePresence.failed(ip_failed)
+    return TailscalePresence.absent()
+
+
 def tailscale_status() -> TailscalePresence:
     """Tailnet presence for this host (CLI-backed, no interface sniffing).
 
@@ -191,92 +243,128 @@ def tailscale_status() -> TailscalePresence:
     that could treat a non-tailnet 100.64/10 address as "tailnet-only" and skip
     the normal non-loopback auth rules.
     """
-    status_failed: str | None = None
+    present, status_failed = _probe_tailscale_status_json()
+    if present is not None:
+        return present
+    present, ip_failed = _probe_tailscale_ip()
+    if present is not None:
+        return present
+    return _tailscale_failed_or_absent(status_failed, ip_failed)
+
+
+def _probe_tailscale_status_json() -> tuple[TailscalePresence | None, str | None]:
     try:
-        result = subprocess.run(
-            ["tailscale", "status", "--json"],
-            capture_output=True, text=True, timeout=5, check=False,
-        )
-        if result.returncode == 0:
-            parsed = json.loads(result.stdout)
-            self_info = parsed.get("Self") or {}
-            ips = [ip for ip in self_info.get("TailscaleIPs") or [] if is_tailscale_ip(ip)]
-            dns_name = (self_info.get("DNSName") or "").rstrip(".") or None
-            if ips:
-                return TailscalePresence.present_with(ips[0], dns_name)
+        return _tailscale_from_status_json(), None
     except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError) as error:
-        status_failed = f"tailscale status failed: {error}"
+        return None, f"tailscale status failed: {error}"
+
+
+def _probe_tailscale_ip() -> tuple[TailscalePresence | None, str | None]:
     try:
-        result = subprocess.run(
-            ["tailscale", "ip", "-4"],
-            capture_output=True, text=True, timeout=5, check=False,
-        )
-        if result.returncode == 0:
-            for line in result.stdout.split():
-                if is_tailscale_ip(line.strip()):
-                    return TailscalePresence.present_with(line.strip(), None)
+        return _tailscale_from_ip_v4(), None
     except (OSError, subprocess.TimeoutExpired) as error:
-        status_failed = status_failed or f"tailscale ip failed: {error}"
-    if status_failed:
-        return TailscalePresence.failed(status_failed)
-    return TailscalePresence.absent()
+        return None, f"tailscale ip failed: {error}"
+
+
+def _iter_profile_files(directory: Path) -> list[Path]:
+    try:
+        return sorted(
+            (
+                path
+                for path in directory.iterdir()
+                if path.suffix.lower() in (".env", ".json") and not path.name.startswith(".")
+            ),
+            key=lambda path: path.name.lower(),
+        )
+    except OSError:
+        return []
+
+
+def _try_profile_from_file(file: Path) -> Profile | None:
+    try:
+        values = (
+            parse_json_profile(file)
+            if file.suffix.lower() == ".json"
+            else parse_env_profile(file)
+        )
+        return Profile(name=file.stem, values=values)
+    except (AgentError, OSError, ValueError, json.JSONDecodeError) as error:
+        sys.stderr.write(f"[profiles] skipping {file.name}: {error}\n")
+        return None
+
+
+def _conflicts_from_endpoint_groups(
+    groups: dict[str, list[str]],
+) -> dict[str, tuple[str, list[str]]]:
+    result: dict[str, tuple[str, list[str]]] = {}
+    for endpoint, names in groups.items():
+        result.update(_conflicts_for_endpoint(endpoint, names))
+    return result
+
+
+def _conflicts_for_endpoint(
+    endpoint: str, names: list[str]
+) -> dict[str, tuple[str, list[str]]]:
+    if len(names) <= 1:
+        return {}
+    return {
+        name: (endpoint, sorted(n for n in names if n != name))
+        for name in sorted(names)
+    }
+
 
 class ProfileRepository:
     def __init__(self, directory: Path):
         self.directory = directory
 
-    def load(self) -> dict[str, Profile]:
-        if not path_is_dir(self.directory):
-            return {}
+    def _load_profile_files(self) -> dict[str, Profile]:
         profiles: dict[str, Profile] = {}
+        for file in _iter_profile_files(self.directory):
+            profile = _try_profile_from_file(file)
+            if profile is not None:
+                profiles[file.stem] = profile
+        return profiles
+
+    def _claim_path_under_directory(self, claim: dict[str, Any], directory: Path) -> bool:
+        claim_path = Path(str(claim.get("path") or ""))
         try:
-            files = sorted(
-                (
-                    path
-                    for path in self.directory.iterdir()
-                    if path.suffix.lower() in (".env", ".json") and not path.name.startswith(".")
-                ),
-                key=lambda path: path.name.lower(),
-            )
-        except OSError:
-            return {}
-        for file in files:
-            name = file.stem
-            try:
-                values = (
-                    parse_json_profile(file)
-                    if file.suffix.lower() == ".json"
-                    else parse_env_profile(file)
-                )
-                profiles[name] = Profile(name=name, values=values)
-            except (AgentError, OSError, ValueError, json.JSONDecodeError) as error:
-                # One bad file must not take down /api/status for the whole host.
-                sys.stderr.write(f"[profiles] skipping {file.name}: {error}\n")
-        # One-level nested port-claim folders (e.g. <dir>/8027/flags.env → port-8027).
-        # Flat files win on name collision via setdefault.
+            claim_path.resolve().relative_to(directory)
+            return True
+        except (ValueError, OSError):
+            return False
+
+    def _profile_from_nested_claim(self, claim: dict[str, Any]) -> Profile | None:
         try:
-            directory = self.directory.expanduser().resolve()
+            return profile_from_claim(claim)
+        except (AgentError, OSError, TypeError, ValueError) as error:
+            sys.stderr.write(f"[profiles] skipping claim {claim.get('path')}: {error}\n")
+            return None
+
+    def _resolved_profile_directory(self) -> Path:
+        try:
+            return self.directory.expanduser().resolve()
         except OSError:
-            directory = self.directory
-        claims = scan_port_claim_directories(
+            return self.directory
+
+    def _merge_nested_claims(self, profiles: dict[str, Profile]) -> None:
+        directory = self._resolved_profile_directory()
+        for claim in scan_port_claim_directories(
             roots=[self.directory],
             agent_root=None,
             listeners=[],
-        )
-        for claim in claims:
-            claim_path = Path(str(claim.get("path") or ""))
-            try:
-                claim_path.resolve().relative_to(directory)
-            except (ValueError, OSError):
+        ):
+            if not self._claim_path_under_directory(claim, directory):
                 continue
-            try:
-                profile = profile_from_claim(claim)
-            except (AgentError, OSError, TypeError, ValueError) as error:
-                sys.stderr.write(
-                    f"[profiles] skipping claim {claim.get('path')}: {error}\n"
-                )
+            profile = self._profile_from_nested_claim(claim)
+            if profile is None:
                 continue
             profiles.setdefault(profile.name, profile)
+
+    def load(self) -> dict[str, Profile]:
+        if not path_is_dir(self.directory):
+            return {}
+        profiles = self._load_profile_files()
+        self._merge_nested_claims(profiles)
         return profiles
 
     def profile(self, name: str) -> Profile:
@@ -291,12 +379,7 @@ class ProfileRepository:
             identity = profile.endpoint_identity
             if identity:
                 groups.setdefault(identity, []).append(profile.name)
-        result: dict[str, tuple[str, list[str]]] = {}
-        for endpoint, names in groups.items():
-            if len(names) > 1:
-                for name in sorted(names):
-                    result[name] = (endpoint, sorted(n for n in names if n != name))
-        return result
+        return _conflicts_from_endpoint_groups(groups)
 
     def ensure_unique(self, name: str, action: str, profiles: dict[str, Profile]) -> None:
         conflict = self.conflicts(profiles).get(name)
@@ -306,60 +389,114 @@ class ProfileRepository:
                 f"Cannot {action} {name}: endpoint {endpoint} is also configured for {', '.join(others)}."
             )
 
-def build_start_command(profile: Profile) -> str:
-    """Return the shell command that launches this profile's model server."""
-    explicit = (profile.get("START_COMMAND") or "").strip()
-    if explicit:
-        return explicit
+def _adapter_start_command(
+    profile: Profile,
+    runtime: str,
+    host: str,
+    port: str,
+    model: str,
+    model_file: str,
+) -> str:
+    builder = _ADAPTER_START.get(runtime)
+    if builder is not None:
+        return builder(profile, host, port, model, model_file)
+    return _unsupported_adapter_start(profile, runtime)
+
+
+def _vllm_start_command(profile: Profile, host: str, port: str, model: str) -> str:
+    return (
+        f"vllm serve {shlex.quote(model)} --host {shlex.quote(host)} --port {shlex.quote(port)}"
+        f" --served-model-name {shlex.quote(profile.server_model_id)}"
+    )
+
+
+def _llamacpp_start_command(profile: Profile, host: str, port: str, model_file: str) -> str:
+    if not model_file:
+        raise InvalidProfileError(
+            f"{profile.name}: llama.cpp launches need MODEL_FILE (or MODEL_PATH) or an explicit START_COMMAND"
+        )
+    return (
+        f"llama-server -m {shlex.quote(model_file)} --host {shlex.quote(host)}"
+        f" --port {shlex.quote(port)} -a {shlex.quote(profile.server_model_id)}"
+    )
+
+
+def _sglang_start_command(host: str, port: str, model: str) -> str:
+    return (
+        f"python3 -m sglang.launch_server --model-path {shlex.quote(model)}"
+        f" --host {shlex.quote(host)} --port {shlex.quote(port)}"
+    )
+
+
+def _tgi_start_command(host: str, port: str, model: str) -> str:
+    return (
+        f"text-generation-launcher --model-id {shlex.quote(model)}"
+        f" --hostname {shlex.quote(host)} --port {shlex.quote(port)}"
+    )
+
+
+def _unsupported_adapter_start(profile: Profile, runtime: str) -> str:
+    _, _, launch_mode = profile.runtime_spec
+    if launch_mode == "external":
+        raise UnsupportedError(
+            f"{profile.name}: runtime {runtime} is externally managed; the agent only reports its health"
+        )
+    raise InvalidProfileError(
+        f"{profile.name}: no launch template for runtime {runtime}; set START_COMMAND"
+    )
+
+
+_ADAPTER_START = {
+    "vllm": lambda profile, host, port, model, model_file: _vllm_start_command(
+        profile, host, port, model
+    ),
+    "llama.cpp": lambda profile, host, port, model, model_file: _llamacpp_start_command(
+        profile, host, port, model_file
+    ),
+    "sglang": lambda profile, host, port, model, model_file: _sglang_start_command(
+        host, port, model
+    ),
+    "tgi": lambda profile, host, port, model, model_file: _tgi_start_command(
+        host, port, model
+    ),
+}
+
+
+def _explicit_start_command(profile: Profile) -> str:
+    return (profile.get("START_COMMAND") or "").strip()
+
+
+def _start_model_fields(profile: Profile) -> tuple[str, str, str, str]:
+    host = first_present(profile.get("HOST"), "127.0.0.1")
+    extra = (profile.get("EXTRA_ARGS") or "").strip()
+    model = first_present(profile.get("MODEL_PATH"), profile.get("MODEL_REPO"), profile.request_model)
+    model_file = first_present(profile.get("MODEL_FILE"), profile.get("MODEL_PATH"), "")
+    return host, extra, model, model_file
+
+
+def _require_managed_start(profile: Profile) -> None:
     if (profile.get("LAUNCH_MODE") or "").lower() == "external":
         raise UnsupportedError(
             f"{profile.name}: externally managed endpoint; set START_COMMAND or a launch claim to start"
         )
 
-    runtime = profile.runtime
-    host = profile.get("HOST") or "127.0.0.1"
-    port = profile.endpoint_port
-    extra = (profile.get("EXTRA_ARGS") or "").strip()
-    model = profile.get("MODEL_PATH") or profile.get("MODEL_REPO") or profile.request_model
-    model_file = profile.get("MODEL_FILE") or profile.get("MODEL_PATH") or ""
 
-    if runtime == "vllm":
-        command = (
-            f"vllm serve {shlex.quote(model)} --host {shlex.quote(host)} --port {shlex.quote(port)}"
-            f" --served-model-name {shlex.quote(profile.server_model_id)}"
-        )
-    elif runtime == "llama.cpp":
-        if not model_file:
-            raise InvalidProfileError(
-                f"{profile.name}: llama.cpp launches need MODEL_FILE (or MODEL_PATH) or an explicit START_COMMAND"
-            )
-        command = (
-            f"llama-server -m {shlex.quote(model_file)} --host {shlex.quote(host)}"
-            f" --port {shlex.quote(port)} -a {shlex.quote(profile.server_model_id)}"
-        )
-    elif runtime == "sglang":
-        command = (
-            f"python3 -m sglang.launch_server --model-path {shlex.quote(model)}"
-            f" --host {shlex.quote(host)} --port {shlex.quote(port)}"
-        )
-    elif runtime == "tgi":
-        command = (
-            f"text-generation-launcher --model-id {shlex.quote(model)}"
-            f" --hostname {shlex.quote(host)} --port {shlex.quote(port)}"
-        )
-    else:
-        _, _, launch_mode = profile.runtime_spec
-        if launch_mode == "external":
-            raise UnsupportedError(
-                f"{profile.name}: runtime {runtime} is externally managed; the agent only reports its health"
-            )
-        raise InvalidProfileError(
-            f"{profile.name}: no launch template for runtime {runtime}; set START_COMMAND"
-        )
+def build_start_command(profile: Profile) -> str:
+    """Return the shell command that launches this profile's model server."""
+    explicit = _explicit_start_command(profile)
+    if explicit:
+        return explicit
+    _require_managed_start(profile)
+    host, extra, model, model_file = _start_model_fields(profile)
+    command = _adapter_start_command(
+        profile, profile.runtime, host, profile.endpoint_port, model, model_file
+    )
+    return _wrap_start_command(command, extra, (profile.get("VENV") or "").strip())
 
+
+def _wrap_start_command(command: str, extra: str, venv: str) -> str:
     if extra:
         command = f"{command} {extra}"
-    venv = (profile.get("VENV") or "").strip()
     if venv:
         activate = Path(venv).expanduser() / "bin" / "activate"
         command = f"source {shlex.quote(str(activate))} && {command}"
@@ -377,38 +514,63 @@ def host_metrics_payload() -> dict[str, Any]:
     gpu = gpu_metrics_snapshot()
     mem = sample_memory()
     cpu_percent = sample_cpu_percent()
-    hostname = socket.gethostname()
-    # Copy GPU dicts so UMA fill does not mutate the nvidia-smi TTL cache.
-    gpus = [dict(entry) for entry in (gpu.get("gpus") or [])]
-    gpu_source = gpu.get("source") or "unavailable"
-    vram_by_pid = gpu.get("vram_by_pid") or {}
-    proc_names = gpu.get("process_names") or {}
+    gpus, gpu_source, vram_by_pid, proc_names = _gpu_snapshot_fields(gpu)
     apply_unified_memory_vram(gpus, vram_by_pid, mem if isinstance(mem, dict) else None)
+    return _assembled_host_metrics(gpu, mem, gpus, gpu_source, proc_names, cpu_percent)
+
+
+def _copied_gpu_entries(gpu: dict[str, Any]) -> list[dict[str, Any]]:
+    return [dict(entry) for entry in (gpu.get("gpus") or [])]
+
+
+def _gpu_snapshot_fields(gpu: dict[str, Any]) -> tuple[list[dict[str, Any]], str, Any, Any]:
+    # Copy GPU dicts so UMA fill does not mutate the nvidia-smi TTL cache.
+    return (
+        _copied_gpu_entries(gpu),
+        gpu.get("source") or "unavailable",
+        gpu.get("vram_by_pid") or {},
+        gpu.get("process_names") or {},
+    )
+
+
+def _host_uptime_seconds() -> int | None:
     uptime = read_uptime_seconds()
-    storage = storage_usage("/")
-    network = sample_network_rates()
-    tailscale = tailscale_health_snapshot()
+    return round(uptime) if uptime is not None else None
+
+
+def _assembled_host_metrics(
+    gpu: dict[str, Any],
+    mem: Any,
+    gpus: list[dict[str, Any]],
+    gpu_source: str,
+    proc_names: dict[Any, Any],
+    cpu_percent: Any,
+) -> dict[str, Any]:
     return {
-        "host": hostname,
+        "host": socket.gethostname(),
         "collected_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "cpu_percent": cpu_percent,
         "memory": mem,
         "gpus": gpus,
         "gpu_source": gpu_source,
-        "processes": [
-            {
-                "pid": pid,
-                "vram_mb": round(float(mb) * 10) / 10,
-                "name": proc_names.get(pid),
-            }
-            for pid, mb in sorted((gpu.get("vram_by_pid") or {}).items())
-        ],
-        "uptime_seconds": round(uptime) if uptime is not None else None,
-        "storage": storage,
-        "network": network,
-        "tailscale": tailscale,
+        "processes": _gpu_process_rows(gpu, proc_names),
+        "uptime_seconds": _host_uptime_seconds(),
+        "storage": storage_usage("/"),
+        "network": sample_network_rates(),
+        "tailscale": tailscale_health_snapshot(),
         "agent_version": AGENT_VERSION,
     }
+
+
+def _gpu_process_rows(gpu: dict[str, Any], proc_names: dict[Any, Any]) -> list[dict[str, Any]]:
+    return [
+        {
+            "pid": pid,
+            "vram_mb": round(float(mb) * 10) / 10,
+            "name": proc_names.get(pid),
+        }
+        for pid, mb in sorted((gpu.get("vram_by_pid") or {}).items())
+    ]
 
 
 def _default_root() -> Path:
@@ -439,59 +601,303 @@ def save_agent_config(root: Path, updates: dict[str, Any]) -> Path:
     root = root.expanduser()
     root.mkdir(parents=True, exist_ok=True)
     path = agent_config_path(root)
+    with open(_agent_config_lock_path(path), "w", encoding="utf-8") as lock_handle:
+        _flock_exclusive(lock_handle)
+        _merge_locked_agent_config(path, root, updates)
+    return path
+
+
+def _agent_config_lock_path(path: Path) -> Path:
     # NOTE: Path.with_suffix would STRIP the ".json" out of "config.json"
     # (config.json -> config.lock), producing a lock name that does not match
     # the installer's config.json.lock. Build names by concatenation; the
     # installer's writer must keep using exactly these two names.
-    lock_path = path.parent / (path.name + ".lock")
-    with open(lock_path, "w", encoding="utf-8") as lock_handle:
-        if fcntl is not None:
-            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
-        payload = load_agent_config(root)
-        payload.update(updates)
-        temporary = path.parent / (path.name + ".tmp")
-        temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        os.replace(temporary, path)
-        try:
-            path.chmod(0o600)
-        except OSError:
-            pass
-    return path
+    return path.parent / (path.name + ".lock")
+
+
+def _flock_exclusive(lock_handle) -> None:
+    if fcntl is not None:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+
+
+def _merge_locked_agent_config(path: Path, root: Path, updates: dict[str, Any]) -> None:
+    payload = load_agent_config(root)
+    payload.update(updates)
+    _write_agent_config_payload(path, payload)
+
+
+def _write_agent_config_payload(path: Path, payload: dict[str, Any]) -> None:
+    temporary = path.parent / (path.name + ".tmp")
+    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(temporary, path)
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
 
 def save_profiles_directory(root: Path, profiles_dir: Path) -> Path:
     resolved = profiles_dir.expanduser().resolve()
     save_agent_config(root, {"profiles_dir": str(resolved)})
     return resolved
 
-def _directory_has_profile_files(directory: Path) -> bool:
-    if not path_is_dir(directory):
-        return False
+
+def _benchmark_chat_request(profile: Profile, prompt: dict[str, Any]) -> urllib.request.Request:
+    url = profile.base_url.rstrip("/") + "/chat/completions"
+    body = json.dumps(
+        {
+            "model": profile.request_model,
+            "messages": [{"role": "user", "content": prompt["prompt"]}],
+            "max_tokens": int(prompt.get("max_tokens") or 32),
+            "temperature": 0,
+            "stream": False,
+        }
+    ).encode("utf-8")
+    return urllib.request.Request(
+        url,
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+
+def _benchmark_success_row(
+    prompt: dict[str, Any],
+    elapsed_s: float,
+    completion_tokens: int,
+    prompt_tokens: int,
+) -> dict[str, Any]:
+    ttft_ms = elapsed_s * 1000.0  # non-stream: whole response latency as TTFT proxy
+    return {
+        "benchmark": prompt.get("benchmark"),
+        "category": prompt.get("category"),
+        "ttft_ms": round(ttft_ms * 10) / 10,
+        "decode_tokens_per_sec": round((completion_tokens / elapsed_s) * 10) / 10,
+        "e2e_tokens_per_sec": round(((prompt_tokens + completion_tokens) / elapsed_s) * 10) / 10,
+        "completion_tokens": completion_tokens,
+        "prompt_est_tokens": prompt_tokens,
+    }
+
+
+def _benchmark_markdown_row(report: dict[str, Any]) -> str:
+    averages = report.get("averages") or {}
+    return (
+        f"| {report.get('profile')} | {report.get('runtime')} | "
+        f"{averages.get('ttft_ms') or '-'} | {averages.get('decode_tokens_per_sec') or '-'} |"
+    )
+
+
+def _benchmark_markdown_table(generated_at: str, reports: list[dict[str, Any]]) -> str:
+    lines = [
+        "# Model Switchboard Benchmark",
+        "",
+        f"Generated: {generated_at}",
+        "",
+        "| Profile | Runtime | TTFT ms | Decode tok/s |",
+        "|---|---|---:|---:|",
+    ]
+    for report in reports:
+        lines.append(_benchmark_markdown_row(report))
+    return "\n".join(lines) + "\n"
+
+
+def _status_row_fields(
+    profile: Profile,
+    *,
+    display_name: str,
+    label: str,
+    tags: Any,
+    launch_mode: Any,
+    pid: int | None,
+    alive: bool,
+    ready: bool,
+    ready_flag: bool,
+    server_ids: list[str],
+    rss_mb: Any,
+    vram_mb: Any,
+    command: Any,
+    llm_rates: dict[str, Any] | None,
+) -> dict[str, Any]:
+    return {
+        **_status_identity_payload(profile, display_name, label, tags, launch_mode),
+        **_status_endpoint_payload(profile),
+        **_status_process_payload(
+            pid=pid,
+            alive=alive,
+            ready=ready,
+            ready_flag=ready_flag,
+            server_ids=server_ids,
+            rss_mb=rss_mb,
+            vram_mb=vram_mb,
+            command=command,
+            log_path=profile.log_path,
+            origin=profile.origin,
+            missing_artifacts=missing_local_model_artifacts(profile.values),
+            llm_rates=llm_rates,
+        ),
+    }
+
+
+def _status_identity_payload(
+    profile: Profile,
+    display_name: str,
+    label: str,
+    tags: Any,
+    launch_mode: Any,
+) -> dict[str, Any]:
+    return {
+        "profile": profile.name,
+        "display_name": display_name,
+        "runtime": profile.runtime,
+        "runtime_label": label,
+        "runtime_tags": tags if isinstance(tags, list) else profile.runtime_tags,
+        "launch_mode": launch_mode,
+    }
+
+
+def _status_endpoint_payload(profile: Profile) -> dict[str, Any]:
+    return {
+        "host": profile.endpoint_host,
+        "port": profile.endpoint_port,
+        "base_url": profile.base_url,
+        "request_model": profile.request_model,
+        "server_model_id": profile.server_model_id,
+    }
+
+
+def _status_process_payload(
+    *,
+    pid: int | None,
+    alive: bool,
+    ready: bool,
+    ready_flag: bool,
+    server_ids: list[str],
+    rss_mb: Any,
+    vram_mb: Any,
+    command: Any,
+    log_path: Any,
+    origin: Any,
+    missing_artifacts: Any,
+    llm_rates: dict[str, Any] | None,
+) -> dict[str, Any]:
+    return {
+        "pid": pid,
+        "running": alive,
+        "ready": ready_flag,
+        "server_ids": server_ids if (alive or ready) else [],
+        "rss_mb": rss_mb,
+        "vram_mb": vram_mb,
+        "command": command,
+        "log_path": log_path,
+        "source": origin,
+        "missing_artifacts": missing_artifacts,
+        "serving": llm_rates,
+    }
+
+
+def _profile_ports_from_loaded(loaded: dict[str, Any]) -> set[int]:
+    profile_ports: set[int] = set()
+    for profile in loaded.values():
+        try:
+            profile_ports.add(int(profile.endpoint_port))
+        except (TypeError, ValueError):
+            pass
+    return profile_ports
+
+
+def _spawn_environment(profile: Profile, canonical: str) -> dict[str, str]:
+    environment = dict(os.environ)
+    environment.update(profile.values)
+    environment["MODEL_PROFILE"] = canonical
+    environment["MODEL_SWITCHBOARD_PROFILE_LOADED"] = "1"
+    environment["MODEL_SWITCHBOARD_AGENT"] = "1"
+    return environment
+
+
+def _popen_profile_bash(
+    command: str,
+    log_handle,
+    environment: dict[str, str],
+    *,
+    canonical: str,
+    cwd: Path,
+) -> subprocess.Popen[str]:
+    try:
+        return subprocess.Popen(
+            ["/bin/bash", "-lc", command],
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            cwd=cwd,
+            env=environment,
+            start_new_session=True,
+        )
+    except OSError as error:
+        raise OperationFailedError(f"failed to launch {canonical}: {error}") from error
+
+
+def _popen_profile(
+    profile: Profile,
+    command: str,
+    environment: dict[str, str],
+    *,
+    canonical: str,
+    cwd: Path,
+) -> subprocess.Popen[str]:
+    log_path = Path(profile.log_path)
+    try:
+        log_handle = log_path.open("ab")
+    except OSError as error:
+        raise OperationFailedError(f"cannot open log {log_path}: {error}") from error
+    try:
+        return _popen_profile_bash(
+            command, log_handle, environment, canonical=canonical, cwd=cwd
+        )
+    finally:
+        log_handle.close()
+
+
+def _any_iterdir_match(directory: Path, matches) -> bool:
     try:
         for path in directory.iterdir():
-            if path.suffix.lower() in (".env", ".json") and not path.name.startswith("."):
-                if path.name.endswith(".example"):
-                    continue
+            if matches(path):
                 return True
     except OSError:
         return False
     return False
 
-def _directory_has_port_claims(directory: Path) -> bool:
-    """True when directory has a one-level port-claim child (flags.env / launch.sh / ...)."""
+
+def _directory_has_matching_child(directory: Path, matches) -> bool:
     if not path_is_dir(directory):
         return False
+    return _any_iterdir_match(directory, matches)
+
+
+def _directory_has_profile_files(directory: Path) -> bool:
+    return _directory_has_matching_child(directory, _is_loadable_profile_filename)
+
+
+def _is_loadable_profile_filename(path: Path) -> bool:
+    if path.suffix.lower() not in (".env", ".json") or path.name.startswith("."):
+        return False
+    return not path.name.endswith(".example")
+
+
+def _directory_has_port_claims(directory: Path) -> bool:
+    """True when directory has a one-level port-claim child (flags.env / launch.sh / ...)."""
+    return _directory_has_matching_child(directory, _is_port_claim_child)
+
+
+def _is_port_named_dir(path: Path) -> bool:
     try:
-        for path in directory.iterdir():
-            try:
-                if not path_is_dir(path) or not PORT_CLAIM_DIR_RE.fullmatch(path.name):
-                    continue
-            except OSError:
-                continue
-            if any(path_is_regular_file(path / marker) for marker in PORT_CLAIM_MARKERS):
-                return True
+        return path_is_dir(path) and bool(PORT_CLAIM_DIR_RE.fullmatch(path.name))
     except OSError:
         return False
-    return False
+
+
+def _is_port_claim_child(path: Path) -> bool:
+    if not _is_port_named_dir(path):
+        return False
+    return any(path_is_regular_file(path / marker) for marker in PORT_CLAIM_MARKERS)
 
 def _directory_has_loadable_profiles(directory: Path) -> bool:
     return _directory_has_profile_files(directory) or _directory_has_port_claims(directory)
@@ -506,6 +912,13 @@ def _profiles_dir_from_scan_roots(root: Path) -> Path | None:
         if _directory_has_port_claims(resolved):
             return resolved
     return None
+
+def _configured_profiles_dir(root: Path) -> Path | None:
+    configured_raw = load_agent_config(root).get("profiles_dir")
+    if isinstance(configured_raw, str) and configured_raw.strip():
+        return Path(configured_raw).expanduser().resolve()
+    return None
+
 
 def resolve_profiles_directory(
     root: Path,
@@ -524,29 +937,38 @@ def resolve_profiles_directory(
     env = (os.environ.get(PROFILES_DIR_ENV) or "").strip()
     if env:
         return Path(env).expanduser().resolve()
+    return _fallback_profiles_directory(root)
 
-    configured: Path | None = None
-    configured_raw = load_agent_config(root).get("profiles_dir")
-    if isinstance(configured_raw, str) and configured_raw.strip():
-        configured = Path(configured_raw).expanduser().resolve()
-        if _directory_has_loadable_profiles(configured):
-            return configured
 
-    legacy = root.expanduser() / "model-profiles"
-    if _directory_has_loadable_profiles(legacy):
-        return legacy.resolve()
+def _maybe_resolve(path: Path, *, resolve: bool) -> Path:
+    return path.resolve() if resolve else path
 
-    preferred = preferred_profiles_directory().resolve()
-    if _directory_has_loadable_profiles(preferred):
-        return preferred
 
+def _loadable_profiles_dir(path: Path | None, *, resolve: bool = False) -> Path | None:
+    if path is None or not _directory_has_loadable_profiles(path):
+        return None
+    return _maybe_resolve(path, resolve=resolve)
+
+
+def _scan_or_configured_profiles_dir(
+    root: Path, configured: Path | None, preferred: Path
+) -> Path:
     scan_hit = _profiles_dir_from_scan_roots(root)
     if scan_hit is not None:
         return scan_hit
+    return first_present(configured, preferred)
 
-    if configured is not None:
-        return configured
-    return preferred
+
+def _fallback_profiles_directory(root: Path) -> Path:
+    configured = _configured_profiles_dir(root)
+    if hit := _loadable_profiles_dir(configured):
+        return hit
+    if hit := _loadable_profiles_dir(root.expanduser() / "model-profiles", resolve=True):
+        return hit
+    preferred = preferred_profiles_directory().resolve()
+    if hit := _loadable_profiles_dir(preferred):
+        return hit
+    return _scan_or_configured_profiles_dir(root, configured, preferred)
 
 def _peek_profile_keys(path: Path) -> set[str]:
     """Best-effort key set for scan scoring - never executes file contents."""
@@ -555,45 +977,151 @@ def _peek_profile_keys(path: Path) -> set[str]:
     except OSError:
         return set()
     if path.suffix.lower() == ".json":
-        try:
-            parsed = json.loads(text)
-        except json.JSONDecodeError:
-            return set()
-        if not isinstance(parsed, dict):
-            return set()
-        return {str(key) for key in parsed.keys()}
+        return _peek_json_keys(text)
+    return _peek_env_keys(text)
+
+
+def _peek_json_keys(text: str) -> set[str]:
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return set()
+    if not isinstance(parsed, dict):
+        return set()
+    return {str(key) for key in parsed.keys()}
+
+
+def _peek_env_keys(text: str) -> set[str]:
     keys: set[str] = set()
     for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("export "):
-            line = line[len("export "):].strip()
-        equals = line.find("=")
-        if equals <= 0:
-            continue
-        key = line[:equals].strip()
-        if PROFILE_KEY_RE.match(key):
+        key = _env_assignment_key(raw_line)
+        if key:
             keys.add(key)
     return keys
 
-def looks_like_profile_file(path: Path) -> bool:
+
+def _env_assignment_key(raw_line: str) -> str | None:
+    line = _stripped_assignment_line(raw_line)
+    if line is None:
+        return None
+    parsed = _assignment_key_rest(line)
+    return parsed[0] if parsed else None
+
+
+def _live_non_placeholder_model(request: Any) -> Any:
+    if request and not str(request).startswith("port-"):
+        return request
+    return None
+
+
+def _int_or_word_count(value: Any, text: Any) -> int:
+    if isinstance(value, int):
+        return value
+    return max(1, len(str(text).split()))
+
+def _is_candidate_profile_filename(path: Path) -> bool:
     if path.suffix.lower() not in (".env", ".json") or path.name.startswith("."):
         return False
-    # Skip installer samples that are not live profiles yet.
-    if ".example" in path.name:
+    return ".example" not in path.name
+
+
+def looks_like_profile_file(path: Path) -> bool:
+    if not _is_candidate_profile_filename(path):
         return False
     keys = _peek_profile_keys(path)
-    if not keys:
-        return False
+    return bool(keys) and _profile_file_signals(keys)
+
+
+def _has_model_identity_signal(signals: set[str]) -> bool:
+    return bool(signals & {"RUNTIME", "MODEL_FILE", "MODEL_PATH", "MODEL_REPO", "DISPLAY_NAME"})
+
+
+def _has_launch_signal(signals: set[str]) -> bool:
+    return "REQUEST_MODEL" in signals or "START_COMMAND" in signals
+
+
+def _profile_file_signals(keys: set[str]) -> bool:
     signals = keys & PROFILE_SIGNAL_KEYS
-    if "REQUEST_MODEL" in signals:
-        return True
-    if "START_COMMAND" in signals:
+    if _has_launch_signal(signals):
         return True
     if "PORT" in signals or "BASE_URL" in signals:
-        return bool(signals & {"RUNTIME", "MODEL_FILE", "MODEL_PATH", "MODEL_REPO", "DISPLAY_NAME"})
+        return _has_model_identity_signal(signals)
     return False
+
+def _walk_profile_scan(
+    directory: Path,
+    depth: int,
+    max_depth: int,
+    tallies: dict[Path, list[str]],
+) -> None:
+    if depth > max_depth:
+        return
+    try:
+        entries = list(directory.iterdir())
+    except OSError:
+        return
+    for entry in entries:
+        _profile_scan_entry(entry, depth, max_depth, tallies)
+
+
+def _tally_profile_file(entry: Path, tallies: dict[Path, list[str]]) -> None:
+    if looks_like_profile_file(entry):
+        tallies.setdefault(entry.parent.resolve(), []).append(entry.name)
+
+
+def _profile_scan_entry(
+    entry: Path,
+    depth: int,
+    max_depth: int,
+    tallies: dict[Path, list[str]],
+) -> None:
+    name = entry.name
+    if name in PROFILE_SCAN_SKIP_DIRS:
+        return
+    try:
+        is_dir = entry.is_dir()
+    except OSError:
+        return
+    if is_dir:
+        _scan_profile_directory(entry, name, depth, max_depth, tallies)
+        return
+    _tally_profile_file(entry, tallies)
+
+
+def _scan_profile_directory(
+    entry: Path, name: str, depth: int, max_depth: int, tallies: dict[Path, list[str]]
+) -> None:
+    if not name.startswith("."):
+        _walk_profile_scan(entry, depth + 1, max_depth, tallies)
+
+
+def _tally_known_profile_dirs(tallies: dict[Path, list[str]]) -> None:
+    for extra in (preferred_profiles_directory(), _default_root() / "model-profiles"):
+        resolved = _resolved_existing_dir(extra)
+        if resolved is None or resolved in tallies:
+            continue
+        _tally_profile_dir_children(resolved, tallies)
+
+
+def _resolved_existing_dir(path: Path) -> Path | None:
+    try:
+        resolved = path.expanduser().resolve()
+    except OSError:
+        return None
+    if not path_is_dir(resolved):
+        return None
+    return resolved
+
+
+def _tally_profile_dir_children(directory: Path, tallies: dict[Path, list[str]]) -> None:
+    try:
+        children = list(directory.iterdir())
+    except OSError:
+        return
+    for path in children:
+        if looks_like_profile_file(path):
+            tallies.setdefault(directory, []).append(path.name)
+
 
 def scan_profile_directories(
     home: Path | None = None,
@@ -608,65 +1136,222 @@ def scan_profile_directories(
     """
     home = (home or Path.home()).expanduser()
     tallies: dict[Path, list[str]] = {}
+    _walk_profile_scan(home, 0, max_depth, tallies)
+    _tally_known_profile_dirs(tallies)
+    return _ranked_profile_scan_results(tallies, limit)
 
-    def walk(directory: Path, depth: int) -> None:
-        if depth > max_depth:
-            return
-        try:
-            entries = list(directory.iterdir())
-        except OSError:
-            return
-        for entry in entries:
-            name = entry.name
-            if name in PROFILE_SCAN_SKIP_DIRS:
-                continue
-            # Skip hidden directories; still consider visible files.
-            try:
-                is_dir = entry.is_dir()
-            except OSError:
-                continue
-            if is_dir:
-                if name.startswith("."):
-                    continue
-                walk(entry, depth + 1)
-                continue
-            if not looks_like_profile_file(entry):
-                continue
-            parent = entry.parent.resolve()
-            tallies.setdefault(parent, []).append(entry.name)
 
-    walk(home, 0)
-    # Always consider the preferred default and common legacy path.
-    for extra in (preferred_profiles_directory(), _default_root() / "model-profiles"):
-        try:
-            resolved = extra.expanduser().resolve()
-        except OSError:
-            continue
-        if resolved in tallies:
-            continue
-        if not path_is_dir(resolved):
-            continue
-        try:
-            children = list(resolved.iterdir())
-        except OSError:
-            continue
-        for path in children:
-            if looks_like_profile_file(path):
-                tallies.setdefault(resolved, []).append(path.name)
-
+def _ranked_profile_scan_results(
+    tallies: dict[Path, list[str]], limit: int
+) -> list[dict[str, Any]]:
     ranked = sorted(
         tallies.items(),
         key=lambda item: (-len(item[1]), str(item[0])),
     )
-    results: list[dict[str, Any]] = []
-    for directory, files in ranked[:limit]:
-        unique_files = sorted(set(files))
-        results.append({
-            "path": str(directory),
-            "profile_count": len(unique_files),
-            "files": unique_files[:12],
-        })
-    return results
+    return [_profile_scan_result(directory, files) for directory, files in ranked[:limit]]
+
+
+def _profile_scan_result(directory: Path, files: list[str]) -> dict[str, Any]:
+    unique_files = sorted(set(files))
+    return {
+        "path": str(directory),
+        "profile_count": len(unique_files),
+        "files": unique_files[:12],
+    }
+
+def _choose_blank_profiles_directory(
+    current: Path,
+    candidates: list[dict[str, Any]],
+) -> Path:
+    if current.exists() or _directory_has_profile_files(current):
+        return current
+    if candidates:
+        return Path(candidates[0]["path"])
+    return preferred_profiles_directory()
+
+
+def _digit_candidate_index(answer: str, candidates: list[dict[str, Any]]) -> int | None:
+    if not answer.isdigit() or not candidates:
+        return None
+    return int(answer)
+
+
+def _choose_digit_profiles_directory(
+    answer: str,
+    candidates: list[dict[str, Any]],
+) -> Path | None:
+    index = _digit_candidate_index(answer, candidates)
+    if index is None:
+        return None
+    if 1 <= index <= len(candidates):
+        return Path(candidates[index - 1]["path"])
+    raise UsageError(f"No candidate numbered {index}")
+
+
+def _choose_profiles_directory(
+    answer: str,
+    current: Path,
+    candidates: list[dict[str, Any]],
+) -> Path:
+    if not answer:
+        return _choose_blank_profiles_directory(current, candidates)
+    if answer == "0":
+        return preferred_profiles_directory()
+    if (chosen := _choose_digit_profiles_directory(answer, candidates)) is not None:
+        return chosen
+    return Path(answer)
+
+
+def _print_profile_scan_candidates(candidates: list[dict[str, Any]]) -> None:
+    print("Found folders that look like they already have model launch profiles:")
+    for index, candidate in enumerate(candidates, start=1):
+        preview = ", ".join(candidate["files"][:4])
+        extra = "" if len(candidate["files"]) <= 4 else ", …"
+        print(
+            f"  [{index}] {candidate['path']} "
+            f"({candidate['profile_count']} file(s): {preview}{extra})"
+        )
+    print("  [Enter] keep current")
+    print("  [0]     use ~/model-profiles (create if needed)")
+    print("  or paste another folder path")
+
+
+def _print_profiles_directory_prompt(current: Path, candidates: list[dict[str, Any]]) -> None:
+    print("Model profiles are plain .env/.json launch files (ports, START_COMMAND, …).")
+    print("Switchboard only needs the folder that already holds them - it will not")
+    print("author flags for every runtime fork.")
+    print()
+    print(f"Current profiles folder: {current}")
+    if candidates:
+        _print_profile_scan_candidates(candidates)
+    else:
+        _print_empty_profile_scan()
+    print()
+
+
+def _print_empty_profile_scan() -> None:
+    print("No launch-looking .env/.json folders found under your home directory.")
+    print("  [Enter] keep current / use ~/model-profiles")
+    print("  or paste the folder path where your model .env files live")
+
+
+def _live_item_for_port(live: list[dict[str, Any]], port: int) -> dict[str, Any] | None:
+    for item in live:
+        try:
+            if int(item["port"]) == port:
+                return item
+        except (KeyError, TypeError, ValueError):
+            continue
+    return None
+
+
+def _profile_from_discovered_item(name: str, port: int, item: dict[str, Any]) -> Profile:
+    request = str(first_present(item.get("request_model"), f"port-{port}"))
+    return Profile(
+        name=name,
+        values={
+            "DISPLAY_NAME": str(first_present(item.get("display_name"), request)),
+            "RUNTIME": canonical_runtime(item.get("runtime")),
+            "REQUEST_MODEL": request,
+            "SERVER_MODEL_ID": request,
+            "PORT": str(port),
+            "HOST": "127.0.0.1",
+            "LAUNCH_MODE": "external",
+            "START_COMMAND": "",
+            "LOG_ALIAS": f"discovered-{port}",
+        },
+    )
+
+
+def _digit_ports(items: list[dict[str, Any]]) -> set[int]:
+    return {
+        int(item["port"])
+        for item in items
+        if str(item.get("port") or "").isdigit()
+    }
+
+
+def _items_by_digit_port(items: list[dict[str, Any]]) -> dict[int, dict[str, Any]]:
+    return {
+        int(item["port"]): item
+        for item in items
+        if str(item.get("port") or "").isdigit()
+    }
+
+
+def _benchmark_loaded_names(
+    loaded: dict[str, Any],
+    profiles: list[str] | None,
+) -> list[str]:
+    if not profiles:
+        return sorted(loaded.keys())
+    names = _names_present_in(loaded, profiles)
+    if names:
+        return names
+    missing = _first_name_absent_from(loaded, profiles)
+    if missing:
+        raise ProfileNotFoundError(missing)
+    return names
+
+
+def _names_present_in(loaded: dict[str, Any], profiles: list[str]) -> list[str]:
+    return [name for name in profiles if name in loaded]
+
+
+def _first_name_absent_from(loaded: dict[str, Any], profiles: list[str]) -> str | None:
+    for name in profiles:
+        if name not in loaded:
+            return name
+    return None
+
+
+def _openai_model_ids(body: bytes) -> list[str] | None:
+    try:
+        parsed_body = json.loads(body)
+        entries = parsed_body.get("data", [])
+    except (json.JSONDecodeError, AttributeError):
+        return None
+    return openai_model_ids_from_entries(entries)
+
+
+def _token_is_port_flag(argv: list[str], index: int, token: str, port: str) -> bool:
+    if token == f"--port={port}":
+        return True
+    return token == "--port" and index + 1 < len(argv) and argv[index + 1] == port
+
+
+def _argv_has_port_flag(argv: list[str], port: str) -> bool:
+    return any(
+        _token_is_port_flag(argv, index, token, port)
+        for index, token in enumerate(argv)
+    )
+
+
+def _foreign_process_command(pid: int) -> str | None:
+    if pid == os.getpid():
+        return None
+    command = (process_command(pid) or "").lower()
+    return command or None
+
+
+def _optional_profile_names(payload: dict[str, Any]) -> list[str] | None:
+    selected = payload.get("profiles")
+    if selected is None:
+        return None
+    return _require_string_list(selected, "profiles must be a list of strings")
+
+
+def _require_string_list(value: Any, message: str) -> list[str]:
+    if not isinstance(value, list):
+        raise UsageError(message)
+    return [_require_nonempty_string(item, message) for item in value]
+
+
+def _require_nonempty_string(item: Any, message: str) -> str:
+    if not isinstance(item, str) or not item:
+        raise UsageError(message)
+    return item
+
 
 def prompt_profiles_directory(
     root: Path,
@@ -678,54 +1363,23 @@ def prompt_profiles_directory(
     """Interactive: confirm a scanned folder or paste another path."""
     reader = input_func or input
     candidates = scan_profile_directories(home)
-    print("Model profiles are plain .env/.json launch files (ports, START_COMMAND, …).")
-    print("Switchboard only needs the folder that already holds them - it will not")
-    print("author flags for every runtime fork.")
-    print()
-    print(f"Current profiles folder: {current}")
-    if candidates:
-        print("Found folders that look like they already have model launch profiles:")
-        for index, candidate in enumerate(candidates, start=1):
-            preview = ", ".join(candidate["files"][:4])
-            extra = "" if len(candidate["files"]) <= 4 else ", …"
-            print(
-                f"  [{index}] {candidate['path']} "
-                f"({candidate['profile_count']} file(s): {preview}{extra})"
-            )
-        print("  [Enter] keep current")
-        print("  [0]     use ~/model-profiles (create if needed)")
-        print("  or paste another folder path")
-    else:
-        print("No launch-looking .env/.json folders found under your home directory.")
-        print("  [Enter] keep current / use ~/model-profiles")
-        print("  or paste the folder path where your model .env files live")
-    print()
-    try:
-        answer = reader("Profiles folder? ").strip()
-    except EOFError:
-        answer = ""
-    if not answer:
-        if current.exists() or _directory_has_profile_files(current):
-            chosen = current
-        elif candidates:
-            chosen = Path(candidates[0]["path"])
-        else:
-            chosen = preferred_profiles_directory()
-    elif answer == "0":
-        chosen = preferred_profiles_directory()
-    elif answer.isdigit() and candidates:
-        index = int(answer)
-        if 1 <= index <= len(candidates):
-            chosen = Path(candidates[index - 1]["path"])
-        else:
-            raise UsageError(f"No candidate numbered {index}")
-    else:
-        chosen = Path(answer)
+    _print_profiles_directory_prompt(current, candidates)
+    chosen = _choose_profiles_directory(
+        _read_profiles_folder_answer(reader), current, candidates
+    )
     chosen = chosen.expanduser().resolve()
     chosen.mkdir(parents=True, exist_ok=True)
     save_profiles_directory(root, chosen)
     print(f"Using profiles folder: {chosen}")
     return chosen
+
+
+def _read_profiles_folder_answer(reader: Callable[[str], str]) -> str:
+    try:
+        return reader("Profiles folder? ").strip()
+    except EOFError:
+        return ""
+
 
 @dataclass
 class AgentConfiguration:
@@ -739,32 +1393,43 @@ class AgentConfiguration:
     allow_unauthenticated: bool = False
     profiles_dir: Path | None = None
 
+    def _validate_bind(self, token: str) -> None:
+        if self.tailscale_bind:
+            self._require_tailscale_bind(token)
+            return
+        if is_loopback(self.host):
+            return
+        self._require_unsafe_bind(token)
+
+    def _require_tailscale_bind(self, token: str) -> None:
+        if not is_tailscale_ip(self.host):
+            raise InvalidConfigurationError(
+                f"--tailscale bind resolved a non-Tailscale address: {self.host}"
+            )
+        if not token and not self.allow_unauthenticated:
+            raise InvalidConfigurationError(
+                "--tailscale requires a bearer auth token "
+                "(--auth-token / --auth-token-file), or pass "
+                "--allow-unauthenticated for a personal tailnet"
+            )
+
+    def _require_unsafe_bind(self, token: str) -> None:
+        if not self.unsafe_bind:
+            raise InvalidConfigurationError(
+                f"non-loopback agent bind requires --unsafe-bind: {self.host}"
+            )
+        if not token:
+            raise InvalidConfigurationError(
+                "non-loopback agent bind requires a bearer auth token"
+            )
+
     def __post_init__(self) -> None:
         token = (self.auth_token or "").strip()
         if token and len(token.encode("utf-8")) < MINIMUM_TOKEN_BYTES:
             raise InvalidConfigurationError(
                 f"auth token must be at least {MINIMUM_TOKEN_BYTES} bytes"
             )
-        if self.tailscale_bind and not is_tailscale_ip(self.host):
-            raise InvalidConfigurationError(
-                f"--tailscale bind resolved a non-Tailscale address: {self.host}"
-            )
-        if self.tailscale_bind and not token and not self.allow_unauthenticated:
-            raise InvalidConfigurationError(
-                "--tailscale requires a bearer auth token "
-                "(--auth-token / --auth-token-file), or pass "
-                "--allow-unauthenticated for a personal tailnet"
-            )
-        if not is_loopback(self.host) and not self.tailscale_bind:
-            # Plain LAN / non-loopback: unsafe-bind + token always required.
-            if not self.unsafe_bind:
-                raise InvalidConfigurationError(
-                    f"non-loopback agent bind requires --unsafe-bind: {self.host}"
-                )
-            if not token:
-                raise InvalidConfigurationError(
-                    "non-loopback agent bind requires a bearer auth token"
-                )
+        self._validate_bind(token)
         self.auth_token = token or None
         self.root = self.root.expanduser()
         self.profiles_dir = resolve_profiles_directory(self.root, self.profiles_dir)
@@ -802,21 +1467,27 @@ def openai_model_id_matches(expected: str | None, ids: list[str], *aliases: str)
         return bool(ids)
     if not expected:
         return False
+    return _ids_match_candidates(_expected_id_candidates(expected, aliases), ids)
+
+
+def _expected_id_candidates(expected: str, aliases: tuple[str, ...]) -> set[str]:
     candidates = {expected}
     for alias in aliases:
         alias_s = (alias or "").strip()
         if alias_s:
             candidates.add(alias_s)
-    id_set = set(ids)
-    if candidates & id_set:
-        return True
+    return candidates
+
+
+def _ids_match_by_basename(candidates: set[str], ids: list[str]) -> bool:
     id_names = {Path(item).name for item in ids}
-    for candidate in list(candidates):
-        if Path(candidate).name in id_names:
-            return True
-        if candidate in id_names:
-            return True
-    return False
+    return any(Path(candidate).name in id_names or candidate in id_names for candidate in candidates)
+
+
+def _ids_match_candidates(candidates: set[str], ids: list[str]) -> bool:
+    if candidates & set(ids):
+        return True
+    return _ids_match_by_basename(candidates, ids)
 
 class AgentService:
     def __init__(self, configuration: AgentConfiguration):
@@ -831,6 +1502,39 @@ class AgentService:
         self._benchmark_lock = threading.Lock()
         self._benchmark_running = False
 
+    def _port_from_profile_name(self, name: str) -> int | None:
+        if not name.startswith("port-"):
+            return None
+        try:
+            return int(name.removeprefix("port-"))
+        except ValueError:
+            return None
+
+    def _claim_profile_for_port(self, claims: list[dict[str, Any]], port: int) -> Profile | None:
+        for claim in claims:
+            try:
+                if int(claim["port"]) == port:
+                    return profile_from_claim(claim)
+            except (KeyError, TypeError, ValueError):
+                continue
+        return None
+
+    def _discovered_profile_for_port(
+        self,
+        name: str,
+        port: int,
+        listeners: list[dict[str, Any]],
+    ) -> Profile | None:
+        live = discover_live_model_endpoints(
+            profile_ports=set(),
+            claim_ports={port},
+            listeners=listeners,
+        )
+        item = _live_item_for_port(live, port)
+        if item is None:
+            return None
+        return _profile_from_discovered_item(name, port, item)
+
     def resolve_profile(self, name: str) -> Profile:
         """Profiles folder first; then claimed port folders (port-N); never invent.
 
@@ -842,180 +1546,37 @@ class AgentService:
             return loaded[name]
         if name.startswith("discovered-"):
             raise ProfileNotFoundError(name)
-        port: int | None = None
-        if name.startswith("port-"):
-            try:
-                port = int(name.removeprefix("port-"))
-            except ValueError:
-                port = None
-        if port is not None:
-            # One inventory for claim scan + live discovery (no second ss/lsof).
-            listeners = list_listening_tcp()
-            claims = scan_port_claim_directories(
-                agent_root=self.configuration.root,
-                listeners=listeners,
-            )
-            for claim in claims:
-                try:
-                    if int(claim["port"]) == port:
-                        return profile_from_claim(claim)
-                except (KeyError, TypeError, ValueError):
-                    continue
-            live = discover_live_model_endpoints(
-                profile_ports=set(),
-                claim_ports={port},
-                listeners=listeners,
-            )
-            for item in live:
-                try:
-                    if int(item["port"]) != port:
-                        continue
-                except (KeyError, TypeError, ValueError):
-                    continue
-                request = str(item.get("request_model") or f"port-{port}")
-                return Profile(
-                    name=name,
-                    values={
-                        "DISPLAY_NAME": str(item.get("display_name") or request),
-                        # L07: canonical_runtime is the single owner of the
-                        # "absent runtime stays unknown" rule.
-                        "RUNTIME": canonical_runtime(item.get("runtime")),
-                        "REQUEST_MODEL": request,
-                        "SERVER_MODEL_ID": request,
-                        "PORT": str(port),
-                        "HOST": "127.0.0.1",
-                        "LAUNCH_MODE": "external",
-                        "START_COMMAND": "",
-                        "LOG_ALIAS": f"discovered-{port}",
-                    },
-                )
+        resolved = self._resolve_port_named_profile(name)
+        if resolved is not None:
+            return resolved
         raise ProfileNotFoundError(name)
+
+    def _profile_for_named_port(
+        self,
+        name: str,
+        port: int,
+        listeners: list[dict[str, Any]],
+    ) -> Profile | None:
+        claims = scan_port_claim_directories(
+            agent_root=self.configuration.root,
+            listeners=listeners,
+        )
+        return self._claim_profile_for_port(claims, port) or self._discovered_profile_for_port(
+            name, port, listeners
+        )
+
+    def _resolve_port_named_profile(self, name: str) -> Profile | None:
+        port = self._port_from_profile_name(name)
+        if port is None:
+            return None
+        listeners = list_listening_tcp()
+        return self._profile_for_named_port(name, port, listeners)
 
     # -- status ------------------------------------------------------------
 
-    def status_payload(self, selected: list[str] | None = None) -> dict[str, Any]:
-        """Assemble controller status JSON (profiles + optional full discovery)."""
-        loaded = self.profiles.load()
-        conflicts = self.profiles.conflicts(loaded)
-        names = selected if selected is not None else sorted(loaded.keys())
-        # One inventory for profile port attribution (no N× socket/lsof) and,
-        # when listing everything, claim scan + live discovery.
-        listeners = list_listening_tcp()
-        statuses = []
-        profile_ports: set[int] = set()
-        for name in names:
-            profile = loaded.get(name)
-            if profile is None:
-                raise ProfileNotFoundError(name)
-            statuses.append(
-                self.status(
-                    profile,
-                    allow_port_fallback=name not in conflicts,
-                    listeners=listeners,
-                )
-            )
-            try:
-                profile_ports.add(int(profile.endpoint_port))
-            except (TypeError, ValueError):
-                pass
-
-        claims: list[dict[str, Any]] = []
-        listening: list[dict[str, Any]] = []
-        # Full discovery only when listing everything - targeted stays profile-only.
-        if selected is None:
-            # Visibility is owned by Swift (isBoardVisible on the wire facts):
-            # stale flat configs are shipped and hidden client-side (L04) -
-            # no second claim-visibility filter here.
-            # Reuse the same listeners snapshot (no second inventory).
-            start_cmds = [
-                profile.get("START_COMMAND")
-                for profile in loaded.values()
-            ]
-            # START_COMMAND path hints only; scan re-hints from listeners=.
-            claim_roots = roots_hinted_by_commands(start_cmds)
-            claims = scan_port_claim_directories(
-                roots=claim_roots or None,
-                agent_root=self.configuration.root,
-                listeners=listeners,
-            )
-            claim_ports = {int(item["port"]) for item in claims}
-            listening = discover_live_model_endpoints(
-                profile_ports=profile_ports,
-                claim_ports=claim_ports,
-                listeners=listeners,
-            )
-            covered_ports = {
-                int(item["port"])
-                for item in statuses
-                if str(item.get("port") or "").isdigit()
-            }
-            listening_by_port = {
-                int(item["port"]): item
-                for item in listening
-                if str(item.get("port") or "").isdigit()
-            }
-
-            # Claimed port folders not already represented by a profile.
-            for claim in claims:
-                port = int(claim["port"])
-                if port in covered_ports:
-                    continue
-                live = listening_by_port.get(port)
-                merged = dict(claim)
-                if live:
-                    merged.update(
-                        {
-                            "pid": live.get("pid"),
-                            "command": live.get("command"),
-                            "ready": live.get("ready"),
-                            "server_ids": live.get("server_ids"),
-                            "base_url": live.get("base_url"),
-                            # L07: prefer-known merge routes through the one
-                            # helper - live discovery inference wins, the claim
-                            # flag hint backs it up, "unknown" is the fallback.
-                            "runtime": first_known(
-                                live.get("runtime"), claim.get("runtime_hint")
-                            ),
-                            "request_model": live.get("request_model")
-                            if live.get("request_model")
-                            and not str(live.get("request_model")).startswith("port-")
-                            else (claim.get("model_hint") or live.get("request_model")),
-                            "display_name": claim.get("display_name")
-                            or live.get("display_name"),
-                        }
-                    )
-                else:
-                    merged["ready"] = False
-                    merged["request_model"] = claim.get("model_hint") or f"port-{port}"
-                    merged["runtime"] = first_known(claim.get("runtime_hint"))
-                statuses.append(
-                    status_dict_from_discovery(
-                        merged,
-                        source="claim",
-                        profile_name=f"port-{port}",
-                        listeners=listeners,
-                    )
-                )
-                covered_ports.add(port)
-
-            # Pure listeners not claimed and not profiled.
-            for live in listening:
-                port = int(live["port"])
-                if port in covered_ports:
-                    continue
-                statuses.append(
-                    status_dict_from_discovery(
-                        live,
-                        source="discovery",
-                        profile_name=f"discovered-{port}",
-                        listeners=listeners,
-                    )
-                )
-                covered_ports.add(port)
-
-        benchmark = self.benchmark_status()
-        # Ready N/M is derived by Swift (ProfileRuntimeCounts) from board-visible
-        # statuses - the single owner. The wire no longer carries counts.
+    def _status_payload_fields(
+        self, statuses: list[dict[str, Any]], benchmark: dict[str, Any]
+    ) -> dict[str, Any]:
         return {
             "statuses": statuses,
             "benchmark": benchmark,
@@ -1024,43 +1585,252 @@ class AgentService:
             "controller_root": str(self.configuration.root),
         }
 
-    def ports_payload(self) -> dict[str, Any]:
-        """Ports-style inventory: every listener + model probe outcome."""
+    def _selected_status_names(
+        self, loaded: dict[str, Any], selected: list[str] | None
+    ) -> list[str]:
+        return selected if selected is not None else sorted(loaded.keys())
+
+    def status_payload(self, selected: list[str] | None = None) -> dict[str, Any]:
+        """Assemble controller status JSON (profiles + optional full discovery)."""
         loaded = self.profiles.load()
-        profile_ports: set[int] = set()
-        for profile in loaded.values():
-            try:
-                profile_ports.add(int(profile.endpoint_port))
-            except (TypeError, ValueError):
-                pass
-        # One inventory shared with claim scan + live discovery.
+        conflicts = self.profiles.conflicts(loaded)
+        names = self._selected_status_names(loaded, selected)
+        # One inventory for profile port attribution (no N× socket/lsof) and,
+        # when listing everything, claim scan + live discovery.
         listeners = list_listening_tcp()
-        claims = scan_port_claim_directories(
+        statuses, profile_ports = self._status_rows_for_names(
+            names, loaded, conflicts, listeners
+        )
+        if selected is None:
+            self._append_discovered_statuses(statuses, loaded, profile_ports, listeners)
+        # Ready N/M is derived by Swift (ProfileRuntimeCounts) from board-visible
+        # statuses - the single owner. The wire no longer carries counts.
+        return self._status_payload_fields(statuses, self.benchmark_status())
+
+    def _append_status_row_port(
+        self,
+        name: str,
+        loaded: dict[str, Any],
+        conflicts: dict[str, Any],
+        listeners: list[dict[str, Any]],
+        statuses: list[dict[str, Any]],
+        profile_ports: set[int],
+    ) -> None:
+        row, port = self._status_row_for_name(name, loaded, conflicts, listeners)
+        statuses.append(row)
+        if port is not None:
+            profile_ports.add(port)
+
+    def _status_rows_for_names(
+        self,
+        names: list[str],
+        loaded: dict[str, Any],
+        conflicts: dict[str, Any],
+        listeners: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], set[int]]:
+        statuses: list[dict[str, Any]] = []
+        profile_ports: set[int] = set()
+        for name in names:
+            self._append_status_row_port(
+                name, loaded, conflicts, listeners, statuses, profile_ports
+            )
+        return statuses, profile_ports
+
+    def _endpoint_port_or_none(self, profile: Profile) -> int | None:
+        try:
+            return int(profile.endpoint_port)
+        except (TypeError, ValueError):
+            return None
+
+    def _status_row_for_name(
+        self,
+        name: str,
+        loaded: dict[str, Any],
+        conflicts: dict[str, Any],
+        listeners: list[dict[str, Any]],
+    ) -> tuple[dict[str, Any], int | None]:
+        profile = loaded.get(name)
+        if profile is None:
+            raise ProfileNotFoundError(name)
+        row = self.status(
+            profile,
+            allow_port_fallback=name not in conflicts,
+            listeners=listeners,
+        )
+        return row, self._endpoint_port_or_none(profile)
+
+    def _overlay_live_claim(self, claim: dict[str, Any], live: dict[str, Any]) -> dict[str, Any]:
+        merged = dict(claim)
+        merged.update(self._live_claim_overlay(claim, live))
+        return merged
+
+    def _merge_claim_with_live(self, claim: dict[str, Any], live: dict[str, Any] | None) -> dict[str, Any]:
+        if not live:
+            return self._empty_claim_status(claim, int(claim["port"]))
+        return self._overlay_live_claim(claim, live)
+
+    def _live_claim_overlay(self, claim: dict[str, Any], live: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "pid": live.get("pid"),
+            "command": live.get("command"),
+            "ready": live.get("ready"),
+            "server_ids": live.get("server_ids"),
+            "base_url": live.get("base_url"),
+            "runtime": first_known(live.get("runtime"), claim.get("runtime_hint")),
+            "request_model": self._live_request_model(claim, live),
+            "display_name": claim.get("display_name") or live.get("display_name"),
+        }
+
+    def _empty_claim_status(self, claim: dict[str, Any], port: int) -> dict[str, Any]:
+        merged = dict(claim)
+        merged["ready"] = False
+        merged["request_model"] = claim.get("model_hint") or f"port-{port}"
+        merged["runtime"] = first_known(claim.get("runtime_hint"))
+        return merged
+
+    def _live_request_model(self, claim: dict[str, Any], live: dict[str, Any]) -> Any:
+        request = live.get("request_model")
+        return _live_non_placeholder_model(request) or claim.get("model_hint") or request
+
+    def _scan_status_claims(
+        self,
+        loaded: dict[str, Any],
+        listeners: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        start_cmds = [profile.get("START_COMMAND") for profile in loaded.values()]
+        return scan_port_claim_directories(
+            roots=roots_hinted_by_commands(start_cmds) or None,
             agent_root=self.configuration.root,
             listeners=listeners,
         )
+
+    def _append_discovered_statuses(
+        self,
+        statuses: list[dict[str, Any]],
+        loaded: dict[str, Any],
+        profile_ports: set[int],
+        listeners: list[dict[str, Any]],
+    ) -> None:
+        claims = self._scan_status_claims(loaded, listeners)
         claim_ports = {int(item["port"]) for item in claims}
-        live = discover_live_model_endpoints(
+        listening = discover_live_model_endpoints(
             profile_ports=profile_ports,
             claim_ports=claim_ports,
             listeners=listeners,
         )
+        covered_ports = _digit_ports(statuses)
+        listening_by_port = _items_by_digit_port(listening)
+        self._append_uncovered_claims(
+            statuses, claims, covered_ports, listening_by_port, listeners
+        )
+        self._append_uncovered_listeners(
+            statuses, listening, covered_ports, listeners
+        )
+
+    def _append_uncovered_claims(
+        self,
+        statuses: list[dict[str, Any]],
+        claims: list[dict[str, Any]],
+        covered_ports: set[int],
+        listening_by_port: dict[int, dict[str, Any]],
+        listeners: list[dict[str, Any]],
+    ) -> None:
+        for claim in claims:
+            port = int(claim["port"])
+            if port in covered_ports:
+                continue
+            statuses.append(
+                status_dict_from_discovery(
+                    self._merge_claim_with_live(claim, listening_by_port.get(port)),
+                    source="claim",
+                    profile_name=f"port-{port}",
+                    listeners=listeners,
+                )
+            )
+            covered_ports.add(port)
+
+    def _append_uncovered_listeners(
+        self,
+        statuses: list[dict[str, Any]],
+        listening: list[dict[str, Any]],
+        covered_ports: set[int],
+        listeners: list[dict[str, Any]],
+    ) -> None:
+        for live in listening:
+            port = int(live["port"])
+            if port in covered_ports:
+                continue
+            statuses.append(
+                status_dict_from_discovery(
+                    live,
+                    source="discovery",
+                    profile_name=f"discovered-{port}",
+                    listeners=listeners,
+                )
+            )
+            covered_ports.add(port)
+
+    def _ports_inventory_maps(
+        self,
+        loaded: dict[str, Any],
+        listeners: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], dict[int, dict[str, Any]], dict[int, dict[str, Any]]]:
+        claims = scan_port_claim_directories(
+            agent_root=self.configuration.root,
+            listeners=listeners,
+        )
+        live = discover_live_model_endpoints(
+            profile_ports=_profile_ports_from_loaded(loaded),
+            claim_ports={int(item["port"]) for item in claims},
+            listeners=listeners,
+        )
         live_by_port = {int(item["port"]): item for item in live}
         claims_by_port = {int(item["port"]): item for item in claims}
+        return claims, live_by_port, claims_by_port
+
+    def ports_payload(self) -> dict[str, Any]:
+        """Ports-style inventory: every listener + model probe outcome."""
+        loaded = self.profiles.load()
+        listeners = list_listening_tcp()
+        claims, live_by_port, claims_by_port = self._ports_inventory_maps(loaded, listeners)
+        ports = self._ports_from_listeners(listeners, live_by_port, claims_by_port)
+        self._append_silent_claims(ports, claims, listeners)
+        ports.sort(key=lambda item: int(item["port"]))
+        return {
+            "ports": ports,
+            "profiles_dir": str(self.configuration.profiles_directory),
+            "controller_root": str(self.configuration.root),
+            "scan_roots_env": SCAN_ROOTS_ENV,
+        }
+
+    def _ports_from_listeners(
+        self,
+        listeners: list[dict[str, Any]],
+        live_by_port: dict[int, dict[str, Any]],
+        claims_by_port: dict[int, dict[str, Any]],
+    ) -> list[dict[str, Any]]:
         ports: list[dict[str, Any]] = []
         for listener in listeners:
             port = int(listener["port"])
-            entry = {
-                "port": port,
-                "pid": listener.get("pid"),
-                "command": listener.get("command"),
-                "bind": listener.get("bind"),
-                "looks_like_model": command_looks_like_model_server(listener.get("command")),
-                "model": live_by_port.get(port),
-                "claimed": claims_by_port.get(port),
-            }
-            ports.append(entry)
-        # Claims with nothing listening yet still appear.
+            ports.append(
+                {
+                    "port": port,
+                    "pid": listener.get("pid"),
+                    "command": listener.get("command"),
+                    "bind": listener.get("bind"),
+                    "looks_like_model": command_looks_like_model_server(listener.get("command")),
+                    "model": live_by_port.get(port),
+                    "claimed": claims_by_port.get(port),
+                }
+            )
+        return ports
+
+    def _append_silent_claims(
+        self,
+        ports: list[dict[str, Any]],
+        claims: list[dict[str, Any]],
+        listeners: list[dict[str, Any]],
+    ) -> None:
         listening_ports = {int(item["port"]) for item in listeners}
         for claim in claims:
             if int(claim["port"]) not in listening_ports:
@@ -1075,13 +1845,6 @@ class AgentService:
                         "claimed": claim,
                     }
                 )
-        ports.sort(key=lambda item: int(item["port"]))
-        return {
-            "ports": ports,
-            "profiles_dir": str(self.configuration.profiles_directory),
-            "controller_root": str(self.configuration.root),
-            "scan_roots_env": SCAN_ROOTS_ENV,
-        }
 
     def action_response(self) -> dict[str, Any]:
         payload = self.status_payload()
@@ -1137,51 +1900,83 @@ class AgentService:
 
     def _latest_benchmark_report(self) -> dict[str, Any] | None:
         path = self._benchmark_latest_json()
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        payload = _json_object_file(path)
+        if payload is None:
             return None
-        if not isinstance(payload, dict):
-            return None
-        reports = payload.get("benchmarks") or []
-        rows: list[dict[str, Any]] = []
-        for report in reports:
-            if not isinstance(report, dict):
-                continue
-            averages = report.get("averages") or {}
-            rows.append(
-                {
-                    "profile": report.get("profile"),
-                    "runtime": report.get("runtime"),
-                    "ttft_ms": averages.get("ttft_ms"),
-                    "decode_tokens_per_sec": averages.get("decode_tokens_per_sec"),
-                    "e2e_tokens_per_sec": averages.get("e2e_tokens_per_sec"),
-                    "rss_mb": report.get("rss_mb"),
-                    "vram_mb": report.get("vram_mb"),
-                }
-            )
+        return self._latest_benchmark_payload(path, payload)
+
+    def _latest_benchmark_payload(self, path: Path, payload: dict[str, Any]) -> dict[str, Any]:
         return {
             "generated_at": payload.get("generated_at"),
             "suite": payload.get("suite"),
             "profiles": payload.get("profiles") or [],
-            "rows": rows,
+            "rows": [
+                self._benchmark_summary_row(report)
+                for report in payload.get("benchmarks") or []
+                if isinstance(report, dict)
+            ],
             "json_path": str(path),
             "markdown_path": str(self._benchmark_latest_md()),
         }
 
+    def _benchmark_summary_row(self, report: dict[str, Any]) -> dict[str, Any]:
+        averages = report.get("averages") or {}
+        return {
+            "profile": report.get("profile"),
+            "runtime": report.get("runtime"),
+            "ttft_ms": averages.get("ttft_ms"),
+            "decode_tokens_per_sec": averages.get("decode_tokens_per_sec"),
+            "e2e_tokens_per_sec": averages.get("e2e_tokens_per_sec"),
+            "rss_mb": report.get("rss_mb"),
+            "vram_mb": report.get("vram_mb"),
+        }
+
     def benchmark_status(self) -> dict[str, Any]:
-        pid = self._read_benchmark_pid() if self._benchmark_running else None
+        self._discard_stale_benchmark_pid()
+        return self._benchmark_status_payload(self._benchmark_log_path())
+
+    def _benchmark_status_payload(self, log_path: Path) -> dict[str, Any]:
+        running = self._benchmark_running
+        return {
+            "running": running,
+            "pid": self._read_benchmark_pid() if running else None,
+            "log_path": str(log_path) if log_path.exists() or running else None,
+            "latest": self._latest_benchmark_report(),
+        }
+
+    def _discard_stale_benchmark_pid(self) -> None:
         # Clear stale pid files left after process crash.
         if not self._benchmark_running and self._benchmark_pid_file().exists():
             self._benchmark_pid_file().unlink(missing_ok=True)
-            pid = None
-        log_path = self._benchmark_log_path()
-        return {
-            "running": self._benchmark_running,
-            "pid": pid if self._benchmark_running else None,
-            "log_path": str(log_path) if log_path.exists() or self._benchmark_running else None,
-            "latest": self._latest_benchmark_report(),
-        }
+
+    def _benchmark_target_names(self, profiles: list[str] | None) -> list[str]:
+        names = _benchmark_loaded_names(self.profiles.load(), profiles)
+        if not names:
+            raise UsageError("no profiles available to benchmark")
+        return names
+
+    def _begin_benchmark(self) -> None:
+        with self._benchmark_lock:
+            if self._benchmark_running:
+                raise OperationFailedError("benchmark already running")
+            self._benchmark_running = True
+
+    def _start_benchmark_worker(
+        self,
+        profiles: list[str] | None,
+        suite: str,
+        allow_concurrent: bool,
+        keep_running: bool,
+    ) -> None:
+        names = self._benchmark_target_names(profiles)
+        log_path = self._prepare_benchmark_log()
+        self._launch_benchmark_thread(
+            names,
+            suite=suite,
+            allow_concurrent=allow_concurrent,
+            keep_running=keep_running,
+            log_path=log_path,
+        )
 
     def start_benchmark(
         self,
@@ -1196,52 +1991,147 @@ class AgentService:
         Mac app must only start a remote bench when the profile is ready; the
         agent will also try switch/start if needed.
         """
-        with self._benchmark_lock:
-            if self._benchmark_running:
-                raise OperationFailedError("benchmark already running")
-            self._benchmark_running = True
+        self._begin_benchmark()
         # From here to the worker start, any failure MUST reset the flag or
         # every future benchmark is rejected with "already running" (the flag
         # is only cleared by the worker's finally or the validation paths).
         try:
-            loaded = self.profiles.load()
-            if profiles:
-                names = [n for n in profiles if n in loaded]
-                missing = [n for n in profiles if n not in loaded]
-                if missing and not names:
-                    raise ProfileNotFoundError(missing[0])
-            else:
-                names = sorted(loaded.keys())
-            if not names:
-                raise UsageError("no profiles available to benchmark")
-
-            log_path = self._benchmark_log_path()
-            log_path.parent.mkdir(parents=True, exist_ok=True)
-            log_path.write_text("", encoding="utf-8")
-            # Marker pid = this agent process while the worker thread runs.
-            self._benchmark_pid_file().write_text(f"{os.getpid()}\n", encoding="utf-8")
-
-            def worker() -> None:
-                try:
-                    self._run_benchmark_worker(
-                        names,
-                        suite=suite,
-                        allow_concurrent=allow_concurrent,
-                        keep_running=keep_running,
-                        log_path=log_path,
-                    )
-                finally:
-                    self._benchmark_pid_file().unlink(missing_ok=True)
-                    with self._benchmark_lock:
-                        self._benchmark_running = False
-
-            thread = threading.Thread(target=worker, name="msw-benchmark", daemon=True)
-            thread.start()
+            self._start_benchmark_worker(
+                profiles, suite, allow_concurrent, keep_running
+            )
         except BaseException:
-            with self._benchmark_lock:
-                self._benchmark_running = False
+            self._disarm_benchmark()
             raise
         return self.benchmark_status()
+
+    def _disarm_benchmark(self) -> None:
+        with self._benchmark_lock:
+            self._benchmark_running = False
+
+    def _prepare_benchmark_log(self) -> Path:
+        log_path = self._benchmark_log_path()
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text("", encoding="utf-8")
+        # Marker pid = this agent process while the worker thread runs.
+        self._benchmark_pid_file().write_text(f"{os.getpid()}\n", encoding="utf-8")
+        return log_path
+
+    def _launch_benchmark_thread(
+        self,
+        names: list[str],
+        *,
+        suite: str,
+        allow_concurrent: bool,
+        keep_running: bool,
+        log_path: Path,
+    ) -> None:
+        def worker() -> None:
+            try:
+                self._run_benchmark_worker(
+                    names,
+                    suite=suite,
+                    allow_concurrent=allow_concurrent,
+                    keep_running=keep_running,
+                    log_path=log_path,
+                )
+            finally:
+                self._benchmark_pid_file().unlink(missing_ok=True)
+                with self._benchmark_lock:
+                    self._benchmark_running = False
+
+        threading.Thread(target=worker, name="msw-benchmark", daemon=True).start()
+
+    def _benchmark_log(self, log_path: Path, line: str) -> None:
+        try:
+            with log_path.open("a", encoding="utf-8") as handle:
+                handle.write(line + "\n")
+        except OSError:
+            pass
+
+    def _wait_until_benchmark_ready(self, name: str, suite: str) -> dict[str, Any]:
+        return self._refresh_status_until_ready(
+            name, time.time() + (15 if suite == "quick" else 90)
+        )
+
+    def _current_profile_status(self, name: str) -> dict[str, Any]:
+        return self.status(self.resolve_profile(name))
+
+    def _refresh_status_until_ready(self, name: str, deadline: float) -> dict[str, Any]:
+        current = self._current_profile_status(name)
+        while time.time() < deadline and not current.get("ready"):
+            time.sleep(0.5)
+            current = self._current_profile_status(name)
+        return current
+
+    def _benchmark_metric_average(
+        self, successful: list[dict[str, Any]], key: str
+    ) -> float | None:
+        vals = [float(row[key]) for row in successful if row.get(key) is not None]
+        if not vals:
+            return None
+        return _round_tenths(sum(vals) / len(vals))
+
+    def _benchmark_averages(self, successful: list[dict[str, Any]]) -> dict[str, float | None]:
+        return {
+            "ttft_ms": self._benchmark_metric_average(successful, "ttft_ms"),
+            "decode_tokens_per_sec": self._benchmark_metric_average(
+                successful, "decode_tokens_per_sec"
+            ),
+            "e2e_tokens_per_sec": self._benchmark_metric_average(
+                successful, "e2e_tokens_per_sec"
+            ),
+        }
+
+    def _empty_benchmark_report(self, name: str, runtime: str, error: str) -> dict[str, Any]:
+        return {
+            "profile": name,
+            "runtime": runtime,
+            "rss_mb": None,
+            "vram_mb": None,
+            "averages": {
+                "ttft_ms": None,
+                "decode_tokens_per_sec": None,
+                "e2e_tokens_per_sec": None,
+            },
+            "results": [{"error": error}],
+        }
+
+    def _stop_benchmark_guest(self, name: str) -> None:
+        try:
+            self.stop(name, force=True)
+        except TypeError:
+            try:
+                self.stop(name)
+            except AgentError:
+                pass
+        except AgentError:
+            pass
+
+    def _write_benchmark_artifacts(
+        self,
+        names: list[str],
+        suite: str,
+        reports: list[dict[str, Any]],
+    ) -> Path:
+        generated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        latest = self._benchmark_latest_json()
+        latest.write_text(
+            json.dumps(
+                {
+                    "generated_at": generated_at,
+                    "suite": suite,
+                    "profiles": names,
+                    "benchmarks": reports,
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        self._benchmark_latest_md().write_text(
+            _benchmark_markdown_table(generated_at, reports), encoding="utf-8"
+        )
+        return latest
 
     def _run_benchmark_worker(
         self,
@@ -1254,124 +2144,163 @@ class AgentService:
     ) -> None:
         prompts = self._benchmark_prompts(suite)
         reports: list[dict[str, Any]] = []
-
-        def log(line: str) -> None:
-            try:
-                with log_path.open("a", encoding="utf-8") as handle:
-                    handle.write(line + "\n")
-            except OSError:
-                pass
-
         for name in names:
-            try:
-                profile = self.resolve_profile(name)
-            except AgentError as error:
-                log(f"{name}: resolve failed: {error}")
-                continue
-            before = self.status(profile)
-            was_running = bool(before.get("running"))
-            try:
-                if not before.get("ready"):
-                    if allow_concurrent:
-                        self.start(name)
-                    else:
-                        self.switch_profile(name)
-                    # Quick suite should not block the agent for minutes if the
-                    # model never becomes ready (disabled healthcheck, OOM, …).
-                    deadline = time.time() + (15 if suite == "quick" else 90)
-                    while time.time() < deadline:
-                        before = self.status(self.resolve_profile(name))
-                        if before.get("ready"):
-                            break
-                        time.sleep(0.5)
-                results: list[dict[str, Any]] = []
-                if not before.get("ready"):
-                    results.append(
-                        {
-                            "benchmark": "ready-wait",
-                            "category": "setup",
-                            "error": "profile not ready for benchmark",
-                        }
-                    )
-                else:
-                    for prompt in prompts:
-                        results.append(self._benchmark_one(profile, prompt))
-                successful = [r for r in results if not r.get("error")]
-                def avg(key: str) -> float | None:
-                    vals = [float(r[key]) for r in successful if r.get(key) is not None]
-                    if not vals:
-                        return None
-                    return round(sum(vals) / len(vals) * 10) / 10
-                current = self.status(self.resolve_profile(name))
-                reports.append(
-                    {
-                        "profile": name,
-                        "runtime": profile.runtime,
-                        "rss_mb": current.get("rss_mb"),
-                        "vram_mb": current.get("vram_mb"),
-                        "averages": {
-                            "ttft_ms": avg("ttft_ms"),
-                            "decode_tokens_per_sec": avg("decode_tokens_per_sec"),
-                            "e2e_tokens_per_sec": avg("e2e_tokens_per_sec"),
-                        },
-                        "results": results,
-                    }
-                )
-                log(f"{name}: ok rows={len(successful)}/{len(results)}")
-            except AgentError as error:
-                log(f"{name}: {error}")
-                reports.append(
-                    {
-                        "profile": name,
-                        "runtime": profile.runtime,
-                        "rss_mb": None,
-                        "vram_mb": None,
-                        "averages": {
-                            "ttft_ms": None,
-                            "decode_tokens_per_sec": None,
-                            "e2e_tokens_per_sec": None,
-                        },
-                        "results": [{"error": str(error)}],
-                    }
-                )
-            finally:
-                # Prefer leaving the host as we found it for quick suite.
-                if not keep_running and not was_running:
-                    try:
-                        self.stop(name, force=True)
-                    except TypeError:
-                        try:
-                            self.stop(name)
-                        except AgentError:
-                            pass
-                    except AgentError:
-                        pass
-
-        generated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        payload = {
-            "generated_at": generated_at,
-            "suite": suite,
-            "profiles": names,
-            "benchmarks": reports,
-        }
-        latest = self._benchmark_latest_json()
-        latest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-        lines = [
-            "# Model Switchboard Benchmark",
-            "",
-            f"Generated: {generated_at}",
-            "",
-            "| Profile | Runtime | TTFT ms | Decode tok/s |",
-            "|---|---|---:|---:|",
-        ]
-        for report in reports:
-            averages = report.get("averages") or {}
-            lines.append(
-                f"| {report.get('profile')} | {report.get('runtime')} | "
-                f"{averages.get('ttft_ms') or '-'} | {averages.get('decode_tokens_per_sec') or '-'} |"
+            self._benchmark_named_profile(
+                name,
+                suite=suite,
+                prompts=prompts,
+                reports=reports,
+                allow_concurrent=allow_concurrent,
+                keep_running=keep_running,
+                log_path=log_path,
             )
-        self._benchmark_latest_md().write_text("\n".join(lines) + "\n", encoding="utf-8")
-        log(f"wrote {latest}")
+        latest = self._write_benchmark_artifacts(names, suite, reports)
+        self._benchmark_log(log_path, f"wrote {latest}")
+
+    def _benchmark_named_profile(
+        self,
+        name: str,
+        *,
+        suite: str,
+        prompts: list[Any],
+        reports: list[dict[str, Any]],
+        allow_concurrent: bool,
+        keep_running: bool,
+        log_path: Path,
+    ) -> None:
+        profile = self._resolved_benchmark_profile(name, log_path)
+        if profile is None:
+            return
+        before = self.status(profile)
+        try:
+            self._try_benchmark_ready_profile(
+                name,
+                profile,
+                suite=suite,
+                before=before,
+                prompts=prompts,
+                reports=reports,
+                allow_concurrent=allow_concurrent,
+                log_path=log_path,
+            )
+        finally:
+            self._stop_benchmark_if_guest(name, keep_running, bool(before.get("running")))
+
+    def _stop_benchmark_if_guest(self, name: str, keep_running: bool, was_running: bool) -> None:
+        if not keep_running and not was_running:
+            self._stop_benchmark_guest(name)
+
+    def _try_benchmark_ready_profile(
+        self,
+        name: str,
+        profile: Profile,
+        *,
+        suite: str,
+        before: dict[str, Any],
+        prompts: list[Any],
+        reports: list[dict[str, Any]],
+        allow_concurrent: bool,
+        log_path: Path,
+    ) -> None:
+        try:
+            reports.append(
+                self._benchmark_ready_profile(
+                    name,
+                    profile,
+                    suite=suite,
+                    before=before,
+                    prompts=prompts,
+                    allow_concurrent=allow_concurrent,
+                    log_path=log_path,
+                )
+            )
+        except AgentError as error:
+            self._append_benchmark_error(name, profile, error, reports, log_path)
+
+    def _append_benchmark_error(
+        self,
+        name: str,
+        profile: Profile,
+        error: AgentError,
+        reports: list[dict[str, Any]],
+        log_path: Path,
+    ) -> None:
+        self._benchmark_log(log_path, f"{name}: {error}")
+        reports.append(self._empty_benchmark_report(name, profile.runtime, str(error)))
+
+    def _resolved_benchmark_profile(self, name: str, log_path: Path) -> Profile | None:
+        try:
+            return self.resolve_profile(name)
+        except AgentError as error:
+            self._benchmark_log(log_path, f"{name}: resolve failed: {error}")
+            return None
+
+    def _benchmark_ready_report(
+        self,
+        name: str,
+        profile: Profile,
+        results: list[dict[str, Any]],
+        current: dict[str, Any],
+    ) -> dict[str, Any]:
+        successful = [row for row in results if not row.get("error")]
+        return {
+            "profile": name,
+            "runtime": profile.runtime,
+            "rss_mb": current.get("rss_mb"),
+            "vram_mb": current.get("vram_mb"),
+            "averages": self._benchmark_averages(successful),
+            "results": results,
+        }
+
+    def _benchmark_ready_profile(
+        self,
+        name: str,
+        profile: Profile,
+        *,
+        suite: str,
+        before: dict[str, Any],
+        prompts: list[Any],
+        allow_concurrent: bool,
+        log_path: Path,
+    ) -> dict[str, Any]:
+        before = self._ensure_benchmark_ready(
+            name, suite=suite, before=before, allow_concurrent=allow_concurrent
+        )
+        results = self._benchmark_prompt_results(profile, before, prompts)
+        successful = [row for row in results if not row.get("error")]
+        current = self.status(self.resolve_profile(name))
+        self._benchmark_log(log_path, f"{name}: ok rows={len(successful)}/{len(results)}")
+        return self._benchmark_ready_report(name, profile, results, current)
+
+    def _benchmark_prompt_results(
+        self,
+        profile: Profile,
+        before: dict[str, Any],
+        prompts: list[Any],
+    ) -> list[dict[str, Any]]:
+        if before.get("ready"):
+            return [self._benchmark_one(profile, prompt) for prompt in prompts]
+        return [{
+            "benchmark": "ready-wait",
+            "category": "setup",
+            "error": "profile not ready for benchmark",
+        }]
+
+    def _ensure_benchmark_ready(
+        self,
+        name: str,
+        *,
+        suite: str,
+        before: dict[str, Any],
+        allow_concurrent: bool,
+    ) -> dict[str, Any]:
+        if before.get("ready"):
+            return before
+        if allow_concurrent:
+            self.start(name)
+        else:
+            self.switch_profile(name)
+        return self._wait_until_benchmark_ready(name, suite)
 
     @staticmethod
     def _benchmark_prompts(suite: str) -> list[dict[str, Any]]:
@@ -1396,56 +2325,171 @@ class AgentService:
             },
         ]
 
+    def _benchmark_token_counts(self, payload: dict[str, Any], prompt: dict[str, Any]) -> tuple[int, int]:
+        choice = (payload.get("choices") or [{}])[0]
+        message = choice.get("message") or {}
+        content = first_present(message.get("content"), choice.get("text"), "")
+        usage = payload.get("usage") or {}
+        return (
+            _int_or_word_count(usage.get("completion_tokens"), content),
+            _int_or_word_count(usage.get("prompt_tokens"), prompt["prompt"]),
+        )
+
     def _benchmark_one(self, profile: Profile, prompt: dict[str, Any]) -> dict[str, Any]:
         """POST /v1/chat/completions on the local endpoint and time TTFT/decode."""
-        url = profile.base_url.rstrip("/") + "/chat/completions"
-        body = json.dumps(
-            {
-                "model": profile.request_model,
-                "messages": [{"role": "user", "content": prompt["prompt"]}],
-                "max_tokens": int(prompt.get("max_tokens") or 32),
-                "temperature": 0,
-                "stream": False,
-            }
-        ).encode("utf-8")
-        request = urllib.request.Request(
-            url,
-            data=body,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
+        request = _benchmark_chat_request(profile, prompt)
         started = time.perf_counter()
         try:
             with urlopen_no_redirect(request, 30) as response:
                 raw = response.read()
             elapsed_s = max(time.perf_counter() - started, 1e-6)
             payload = json.loads(raw.decode("utf-8"))
-            choice = (payload.get("choices") or [{}])[0]
-            message = choice.get("message") or {}
-            content = message.get("content") or choice.get("text") or ""
-            usage = payload.get("usage") or {}
-            completion_tokens = usage.get("completion_tokens")
-            if not isinstance(completion_tokens, int):
-                completion_tokens = max(1, len(str(content).split()))
-            prompt_tokens = usage.get("prompt_tokens")
-            if not isinstance(prompt_tokens, int):
-                prompt_tokens = max(1, len(str(prompt["prompt"]).split()))
-            ttft_ms = elapsed_s * 1000.0  # non-stream: whole response latency as TTFT proxy
-            return {
-                "benchmark": prompt.get("benchmark"),
-                "category": prompt.get("category"),
-                "ttft_ms": round(ttft_ms * 10) / 10,
-                "decode_tokens_per_sec": round((completion_tokens / elapsed_s) * 10) / 10,
-                "e2e_tokens_per_sec": round(((prompt_tokens + completion_tokens) / elapsed_s) * 10) / 10,
-                "completion_tokens": completion_tokens,
-                "prompt_est_tokens": prompt_tokens,
-            }
+            completion_tokens, prompt_tokens = self._benchmark_token_counts(payload, prompt)
+            return _benchmark_success_row(
+                prompt, elapsed_s, completion_tokens, prompt_tokens
+            )
         except Exception as error:  # noqa: BLE001 - surface as row error
             return {
                 "benchmark": prompt.get("benchmark"),
                 "category": prompt.get("category"),
                 "error": str(error),
             }
+
+    def _status_display_name(self, profile: Profile, server_ids: list[str]) -> str:
+        display_name = profile.display_name
+        if server_ids and (
+            display_name.lower() == f"port {profile.endpoint_port}"
+            or is_placeholder_model_name(display_name)
+        ):
+            return Path(server_ids[0]).name
+        return display_name
+
+    def _resolve_status_pid(
+        self,
+        profile: Profile,
+        allow_port_fallback: bool,
+        listeners: list[dict[str, Any]] | None,
+    ) -> tuple[int | None, bool]:
+        pid = self._read_pid(profile.name)
+        zombie = bool(pid and process_is_zombie(pid))
+        pid, zombie = self._clear_dead_status_pid(profile, pid, zombie)
+        return self._fallback_status_pid(
+            profile, pid, zombie, allow_port_fallback, listeners
+        )
+
+    def _fallback_status_pid(
+        self,
+        profile: Profile,
+        pid: int | None,
+        zombie: bool,
+        allow_port_fallback: bool,
+        listeners: list[dict[str, Any]] | None,
+    ) -> tuple[int | None, bool]:
+        if pid is None and allow_port_fallback:
+            return self._adopt_listener_pid(profile, listeners)
+        return pid, zombie
+
+    def _is_dead_status_pid(self, pid: int | None, zombie: bool) -> bool:
+        return pid is not None and not process_is_alive(pid) and not zombie
+
+    def _clear_dead_status_pid(
+        self, profile: Profile, pid: int | None, zombie: bool
+    ) -> tuple[int | None, bool]:
+        if self._is_dead_status_pid(pid, zombie):
+            self._pid_file(profile.name).unlink(missing_ok=True)
+            return None, zombie
+        return pid, zombie
+
+    def _adopt_listener_pid(
+        self,
+        profile: Profile,
+        listeners: list[dict[str, Any]] | None,
+    ) -> tuple[int | None, bool]:
+        listener = self._listener_pid_for_profile(profile, listeners)
+        if listener is not None and self._process_matches(listener, profile):
+            return listener, process_is_zombie(listener)
+        return None, False
+
+    def _listener_pid_for_profile(
+        self,
+        profile: Profile,
+        listeners: list[dict[str, Any]] | None,
+    ) -> int | None:
+        if listeners is not None:
+            return listener_pid_from_inventory(profile.endpoint_port, listeners)
+        return listener_pid(profile.endpoint_port)
+
+    def _status_listening(
+        self,
+        profile: Profile,
+        listeners: list[dict[str, Any]] | None,
+    ) -> bool:
+        if listeners is not None:
+            return port_listening_from_inventory(profile.endpoint_port, listeners)
+        return port_is_listening(profile.endpoint_port)
+
+    def _status_row(
+        self,
+        profile: Profile,
+        *,
+        display_name: str,
+        pid: int | None,
+        zombie: bool,
+        alive: bool,
+        ready: bool,
+        ready_flag: bool,
+        server_ids: list[str],
+        llm_rates: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        label, tags, launch_mode = profile.runtime_spec
+        shown_pid, rss_mb, vram_mb, command = self._status_row_process(
+            pid, zombie, alive
+        )
+        return _status_row_fields(
+            profile,
+            display_name=display_name,
+            label=label,
+            tags=tags,
+            launch_mode=launch_mode,
+            pid=shown_pid,
+            alive=alive,
+            ready=ready,
+            ready_flag=ready_flag,
+            server_ids=server_ids,
+            rss_mb=rss_mb,
+            vram_mb=vram_mb,
+            command=command,
+            llm_rates=llm_rates,
+        )
+
+    def _status_row_process(
+        self, pid: int | None, zombie: bool, alive: bool
+    ) -> tuple[int | None, Any, Any, Any]:
+        show_pid = alive or zombie
+        rss_mb, vram_mb = self._status_memory(pid, alive)
+        return pid if show_pid else None, rss_mb, vram_mb, self._status_command(pid, show_pid)
+
+    def _status_memory(self, pid: int | None, alive: bool) -> tuple[Any, Any]:
+        if alive and pid:
+            return process_rss_mb(pid), process_vram_mb(pid)
+        return None, None
+
+    def _status_command(self, pid: int | None, show_pid: bool) -> str | None:
+        if show_pid and pid:
+            return process_command(pid)
+        return None
+
+    def _status_probe_fields(
+        self,
+        profile: Profile,
+        allow_port_fallback: bool,
+        listeners: list[dict[str, Any]] | None,
+    ) -> tuple[bool, list[str], int | None, bool, bool, bool]:
+        ready, server_ids = self._probe_health(profile)
+        pid, zombie = self._resolve_status_pid(profile, allow_port_fallback, listeners)
+        alive = self._status_alive(pid, zombie=zombie, ready=ready)
+        ready_flag = self._status_ready_flag(profile, ready, alive, listeners)
+        return ready, server_ids, pid, zombie, alive, ready_flag
 
     def status(
         self,
@@ -1454,101 +2498,45 @@ class AgentService:
         *,
         listeners: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        ready, server_ids = self._probe_health(profile)
-        # A claim with no model-name hint invents "port-N" as its identity; the
-        # id the endpoint actually serves (while it is up) is the real name.
-        request_model = profile.request_model
-        server_model_id = profile.server_model_id
-        display_name = profile.display_name
-        if server_ids and (
-            display_name.lower() == f"port {profile.endpoint_port}"
-            or is_placeholder_model_name(display_name)
-        ):
-            display_name = Path(server_ids[0]).name
-        pid = self._read_pid(profile.name)
-        zombie = bool(pid and process_is_zombie(pid))
-        if pid is not None and not process_is_alive(pid):
-            # Clear pid file for dead *and* zombie children once reaped/known.
-            if not zombie:
-                self._pid_file(profile.name).unlink(missing_ok=True)
-                pid = None
-            else:
-                # Still show the defunct pid once so operators can see it, but
-                # running stays false; next successful stop clears the file.
-                pass
-        if pid is None and allow_port_fallback:
-            if listeners is not None:
-                listener = listener_pid_from_inventory(profile.endpoint_port, listeners)
-            else:
-                listener = listener_pid(profile.endpoint_port)
-            # Ownership only - never adopt a listener just because health
-            # succeeded (that would make stop() SIGKILL foreign processes via
-            # primary_pid without _process_matches). Mirrors Swift ControllerService.
-            if listener is not None and self._process_matches(listener, profile):
-                pid = listener
-                zombie = process_is_zombie(pid)
-        label, tags, launch_mode = profile.runtime_spec
-        runtime = profile.runtime
+        ready, server_ids, pid, zombie, alive, ready_flag = self._status_probe_fields(
+            profile, allow_port_fallback, listeners
+        )
+        return self._status_row(
+            profile,
+            display_name=self._status_display_name(profile, server_ids),
+            pid=pid,
+            zombie=zombie,
+            alive=alive,
+            ready=ready,
+            ready_flag=ready_flag,
+            server_ids=server_ids,
+            llm_rates=self._status_llm_rates(profile, alive, ready_flag),
+        )
+
+    def _status_ready_flag(
+        self,
+        profile: Profile,
+        ready: bool,
+        alive: bool,
+        listeners: list[dict[str, Any]] | None,
+    ) -> bool:
+        return bool(ready and (alive or self._status_listening(profile, listeners)))
+
+    def _status_llm_rates(
+        self, profile: Profile, alive: bool, ready_flag: bool
+    ) -> dict[str, Any] | None:
+        if not (alive and ready_flag):
+            return None
+        return sample_llm_serving_rates(
+            profile.base_url or "",
+            allow_remote=env_flag(os.environ.get("ALLOW_REMOTE_HEALTHCHECK")),
+        )
+
+    def _status_alive(self, pid: int | None, *, zombie: bool, ready: bool) -> bool:
         alive = process_is_alive(pid)
-        listening = False
-        if listeners is not None:
-            listening = port_listening_from_inventory(profile.endpoint_port, listeners)
-        else:
-            listening = port_is_listening(profile.endpoint_port)
-        # Health can succeed on a foreign listener; keep ready visible without
-        # claiming ownership (running/pid stay unset) so stop stays safe.
-        # The stringly lifecycle "state" key was deleted from the wire contract
-        # (L22): running/ready booleans are the single encoding Swift decodes.
-        # A zombie that is not ready must not report running.
-        if zombie and not process_is_alive(pid) and not ready:
-            alive = False
-        ready_flag = bool(ready and (alive or listening))
-        missing = missing_local_model_artifacts(profile.values)
-        # L08: `launchable` was deleted from the wire - Swift derives it from
-        # missing_artifacts + running + ready (provably the same formula).
-        command = process_command(pid) if ((alive or zombie) and pid) else None
-        # L21: no interior runtime re-derivation. `runtime` / `label` / `tags` /
-        # `launch_mode` come from the boundary parse (profile.runtime_spec on
-        # the profile's RUNTIME + START_COMMAND). The live process command
-        # never overrides the configured runtime here; discovery rows get their
-        # runtime inferred once at the discovery boundary instead.
-        # Live serving rates for running rows (llama.cpp /slots, vLLM /metrics,
-        # sglang /server_info). Loopback-only unless ALLOW_REMOTE_HEALTHCHECK,
-        # same SSRF posture as health probes; all failures degrade to None.
-        llm_rates: dict[str, Any] | None = None
-        if alive and ready_flag:
-            rates_root = profile.base_url or ""
-            llm_rates = sample_llm_serving_rates(
-                rates_root,
-                allow_remote=env_flag(os.environ.get("ALLOW_REMOTE_HEALTHCHECK")),
-            )
-        return {
-            "profile": profile.name,
-            "display_name": display_name,
-            "runtime": runtime,
-            "runtime_label": label,
-            "runtime_tags": tags if isinstance(tags, list) else profile.runtime_tags,
-            "launch_mode": launch_mode,
-            "host": profile.endpoint_host,
-            "port": profile.endpoint_port,
-            "base_url": profile.base_url,
-            "request_model": request_model,
-            "server_model_id": server_model_id,
-            "pid": pid if (alive or zombie) else None,
-            "running": alive,
-            # Health alone when the port answers (Swift-like). Unowned ready
-            # endpoints stay stop-safe because pid/running stay false.
-            "ready": ready_flag,
-            "server_ids": server_ids if (alive or ready) else [],
-            "rss_mb": process_rss_mb(pid) if alive and pid else None,
-            # GPU VRAM when nvidia-smi can attribute memory to this pid (not RSS).
-            "vram_mb": process_vram_mb(pid) if alive and pid else None,
-            "command": command,
-            "log_path": profile.log_path,
-            "source": profile.origin,
-            "missing_artifacts": missing,
-            "serving": llm_rates,
-        }
+        if zombie and not alive and not ready:
+            return False
+        return alive
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -1557,161 +2545,192 @@ class AgentService:
             profile = self.resolve_profile(name)
             # Always key pid files / supervision on the canonical profile name.
             canonical = profile.name
-            if not (profile.get("START_COMMAND") or "").strip() and profile.runtime_spec[2] == "external":
-                raise UnsupportedError(
-                    f"{canonical}: discovered endpoint has no launch claim; cannot start from Switchboard"
-                )
-            # Idempotent only when *this* agent owns a live pid file - not when a
-            # foreign listener happens to answer health on the profile port.
-            owned_pid = self._read_pid(canonical)
-            if owned_pid and process_is_alive(owned_pid):
-                self._supervised.add(canonical)
+            self._reject_unlaunchable_external(profile, canonical)
+            if self._supervise_owned_pid(canonical):
                 return
-            loaded = self.profiles.load()
-            # Include synthetic claim profile for conflict checks on the port.
-            loaded = dict(loaded)
-            loaded[profile.name] = profile
-            self.profiles.ensure_unique(profile.name, "start", loaded)
+            self._register_start_conflict(profile)
             command = build_start_command(profile)
+            if self._adopt_existing_listener(profile, canonical):
+                return
+            self._spawn_profile(profile, canonical, command)
 
-            # Refuse to launch into a foreign listener (daemonized leftovers /
-            # another stack on the same PORT). Watchdog must not pile orphans.
-            port = profile.endpoint_port
-            if port and port_is_listening(port):
-                listener = listener_pid(port)
-                if listener and self._process_matches(listener, profile):
-                    self._supervised.add(canonical)
-                    return
-                detail = f" by pid {listener}" if listener else ""
-                raise ProfileConflictError(
-                    f"Cannot start {canonical}: port {port} is already in use{detail}."
-                )
+    def _reject_unlaunchable_external(self, profile: Profile, canonical: str) -> None:
+        if not (profile.get("START_COMMAND") or "").strip() and profile.runtime_spec[2] == "external":
+            raise UnsupportedError(
+                f"{canonical}: discovered endpoint has no launch claim; cannot start from Switchboard"
+            )
 
-            missing = missing_local_model_artifacts(profile.values)
-            if missing:
-                raise InvalidProfileError(
-                    f"{canonical}: cannot start; missing model path(s): {', '.join(missing)}"
-                )
-
-            environment = dict(os.environ)
-            environment.update(profile.values)
-            environment["MODEL_PROFILE"] = canonical
-            environment["MODEL_SWITCHBOARD_PROFILE_LOADED"] = "1"
-            environment["MODEL_SWITCHBOARD_AGENT"] = "1"
-
-            self.configuration.run_directory.mkdir(parents=True, exist_ok=True)
-            log_path = Path(profile.log_path)
-            try:
-                log_handle = log_path.open("ab")
-            except OSError as error:
-                raise OperationFailedError(f"cannot open log {log_path}: {error}") from error
-            try:
-                process = subprocess.Popen(
-                    ["/bin/bash", "-lc", command],
-                    stdout=log_handle,
-                    stderr=subprocess.STDOUT,
-                    stdin=subprocess.DEVNULL,
-                    cwd=profile.working_directory or self.configuration.root,
-                    env=environment,
-                    start_new_session=True,
-                )
-            except OSError as error:
-                raise OperationFailedError(f"failed to launch {canonical}: {error}") from error
-            finally:
-                log_handle.close()
-            self._pid_file(canonical).write_text(f"{process.pid}\n", encoding="utf-8")
+    def _supervise_owned_pid(self, canonical: str) -> bool:
+        # Idempotent only when *this* agent owns a live pid file - not when a
+        # foreign listener happens to answer health on the profile port.
+        owned_pid = self._read_pid(canonical)
+        if owned_pid and process_is_alive(owned_pid):
             self._supervised.add(canonical)
-            clear_listening_tcp_cache()
+            return True
+        return False
+
+    def _register_start_conflict(self, profile: Profile) -> None:
+        loaded = dict(self.profiles.load())
+        loaded[profile.name] = profile
+        self.profiles.ensure_unique(profile.name, "start", loaded)
+
+    def _listening_profile_port(self, profile: Profile) -> str | None:
+        port = profile.endpoint_port
+        if not port or not port_is_listening(port):
+            return None
+        return port
+
+    def _adopt_existing_listener(self, profile: Profile, canonical: str) -> bool:
+        port = self._listening_profile_port(profile)
+        if port is None:
+            return False
+        listener = listener_pid(port)
+        if self._claim_matching_listener(profile, canonical, listener):
+            return True
+        detail = f" by pid {listener}" if listener else ""
+        raise ProfileConflictError(
+            f"Cannot start {canonical}: port {port} is already in use{detail}."
+        )
+
+    def _claim_matching_listener(
+        self, profile: Profile, canonical: str, listener: int | None
+    ) -> bool:
+        if listener and self._process_matches(listener, profile):
+            self._supervised.add(canonical)
+            return True
+        return False
+
+    def _spawn_profile(self, profile: Profile, canonical: str, command: str) -> None:
+        missing = missing_local_model_artifacts(profile.values)
+        if missing:
+            raise InvalidProfileError(
+                f"{canonical}: cannot start; missing model path(s): {', '.join(missing)}"
+            )
+        environment = _spawn_environment(profile, canonical)
+        self.configuration.run_directory.mkdir(parents=True, exist_ok=True)
+        process = _popen_profile(
+            profile,
+            command,
+            environment,
+            canonical=canonical,
+            cwd=profile.working_directory or self.configuration.root,
+        )
+        self._pid_file(canonical).write_text(f"{process.pid}\n", encoding="utf-8")
+        self._supervised.add(canonical)
+        clear_listening_tcp_cache()
+
+    def _alive_orphan_pid(self, name: str) -> int | None:
+        orphan = self._read_pid(name)
+        if orphan and orphan != os.getpid() and process_is_alive(orphan):
+            return orphan
+        return None
+
+    def _terminate_orphan_model_server(self, orphan: int, force: bool) -> None:
+        cmd = process_command(orphan) or ""
+        if command_looks_like_model_server(cmd):
+            terminate_process_tree(orphan, force=force)
 
     def _reap_unresolved_pid(self, name: str, force: bool = False) -> None:
         """Pid-file leftover after resolve failed - kill only if it still looks like us."""
-        orphan = self._read_pid(name)
-        if (
-            orphan
-            and orphan != os.getpid()
-            and process_is_alive(orphan)
-        ):
-            cmd = process_command(orphan) or ""
-            if command_looks_like_model_server(cmd):
-                terminate_process_tree(orphan, force=force)
+        orphan = self._alive_orphan_pid(name)
+        if orphan is not None:
+            self._terminate_orphan_model_server(orphan, force)
         self._pid_file(name).unlink(missing_ok=True)
+
+    def _trusted_stop_pid(self, profile: Profile, current: dict[str, Any], was_supervised: bool):
+        primary_pid = current.get("pid")
+        if not primary_pid or self._process_matches(primary_pid, profile):
+            return primary_pid
+        if self._owned_pid_is_trusted(profile, primary_pid, was_supervised):
+            return primary_pid
+        return None
+
+    def _owned_pid_is_trusted(self, profile: Profile, primary_pid, was_supervised: bool) -> bool:
+        owned = self._owned_alive_pid(profile.name, primary_pid)
+        if owned is None:
+            return False
+        return was_supervised or command_looks_like_model_server(process_command(owned) or "")
+
+    def _owned_alive_pid(self, name: str, primary_pid) -> int | None:
+        owned = self._read_pid(name)
+        if owned and owned == primary_pid and process_is_alive(owned):
+            return owned
+        return None
+
+    def _run_stop_command(self, profile: Profile) -> Exception | None:
+        stop_command = (profile.get("STOP_COMMAND") or "").strip()
+        if not stop_command:
+            return None
+        environment = dict(os.environ)
+        environment.update(profile.values)
+        try:
+            subprocess.run(
+                ["/bin/bash", "-lc", stop_command],
+                cwd=profile.working_directory,
+                env=environment,
+                capture_output=True,
+                check=True,
+                timeout=60,
+            )
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as error:
+            return error
+        return None
 
     def stop(self, name: str, force: bool = False) -> None:
         with self._mutation_lock:
-            self._suppress_watchdog()
-            profile = self.resolve_profile(name)
-            canonical = profile.name
-            was_supervised = canonical in self._supervised
-            self._supervised.discard(canonical)
-            self._clear_active_profile(if_matching=canonical)
-            current = self.status(profile)
-            primary_pid = current.get("pid")
-            # Pid-file children we started this session are trusted even without
-            # cmdline match. Leftover pid files from prior boots must look like
-            # a model server - never killpg a reused unrelated PID.
-            if primary_pid and not self._process_matches(primary_pid, profile):
-                owned = self._read_pid(canonical)
-                if (
-                    owned
-                    and owned == primary_pid
-                    and process_is_alive(owned)
-                    and (
-                        was_supervised
-                        or command_looks_like_model_server(process_command(owned) or "")
-                    )
-                ):
-                    pass
-                else:
-                    primary_pid = None
-            # Idle profiles must not run STOP_COMMAND (curl-to-shutdown dies
-            # with connection-refused and would abort exclusive switch).
-            if not current.get("running") and not primary_pid and not force:
-                self._pid_file(canonical).unlink(missing_ok=True)
-                clear_listening_tcp_cache()
-                return
-            stop_error: Exception | None = None
+            self._stop_locked(name, force=force)
 
-            stop_command = (profile.get("STOP_COMMAND") or "").strip()
-            if stop_command and not force:
-                environment = dict(os.environ)
-                environment.update(profile.values)
-                try:
-                    subprocess.run(
-                        ["/bin/bash", "-lc", stop_command],
-                        cwd=profile.working_directory,
-                        env=environment,
-                        capture_output=True,
-                        check=True,
-                        timeout=60,
-                    )
-                except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as error:
-                    stop_error = error
+    def _stop_locked(self, name: str, force: bool) -> None:
+        profile, canonical, current, primary_pid = self._stop_context(name)
+        if self._should_skip_stop(current, primary_pid, force):
+            self._finish_idle_stop(canonical)
+            return
+        self._stop_running_profile(profile, canonical, primary_pid, force)
 
-            if profile.get("STOP_COMMAND_ONLY") != "1" or force:
-                self._terminate_profile_processes(
-                    profile, primary_pid, force=force
-                )
-                wait_ok = self._wait_until_stopped(
-                    profile,
-                    primary_pid,
-                    timeout=FORCE_TERMINATE_TIMEOUT_SECONDS * 3 if force else STOP_WAIT_SECONDS,
-                )
-                if not wait_ok:
-                    # Last-chance SIGKILL of anything still matching the port.
-                    self._terminate_profile_processes(profile, primary_pid, force=True)
-                    wait_ok = self._wait_until_stopped(
-                        profile,
-                        primary_pid,
-                        timeout=FORCE_TERMINATE_TIMEOUT_SECONDS * 2,
-                    )
-                if not wait_ok:
-                    raise OperationFailedError(
-                        f"failed to stop {canonical}: endpoint or process is still alive"
-                    )
-            self._pid_file(canonical).unlink(missing_ok=True)
-            clear_listening_tcp_cache()
-            if stop_error is not None and not force:
-                raise OperationFailedError(f"STOP_COMMAND failed for {canonical}: {stop_error}")
+    def _stop_context(
+        self, name: str
+    ) -> tuple[Profile, str, dict[str, Any], int | None]:
+        self._suppress_watchdog()
+        profile = self.resolve_profile(name)
+        canonical = profile.name
+        was_supervised = canonical in self._supervised
+        self._supervised.discard(canonical)
+        self._clear_active_profile(if_matching=canonical)
+        current = self.status(profile)
+        return profile, canonical, current, self._trusted_stop_pid(profile, current, was_supervised)
+
+    def _stop_running_profile(
+        self,
+        profile: Profile,
+        canonical: str,
+        primary_pid: int | None,
+        force: bool,
+    ) -> None:
+        stop_error = None if force else self._run_stop_command(profile)
+        self._apply_stop_processes(profile, primary_pid, force, canonical)
+        self._finish_idle_stop(canonical)
+        if stop_error is not None and not force:
+            raise OperationFailedError(f"STOP_COMMAND failed for {canonical}: {stop_error}")
+
+    def _finish_idle_stop(self, canonical: str) -> None:
+        self._pid_file(canonical).unlink(missing_ok=True)
+        clear_listening_tcp_cache()
+
+    def _should_skip_stop(self, current: dict[str, Any], primary_pid: int | None, force: bool) -> bool:
+        return not current.get("running") and not primary_pid and not force
+
+    def _apply_stop_processes(
+        self,
+        profile: Profile,
+        primary_pid: int | None,
+        force: bool,
+        canonical: str,
+    ) -> None:
+        if profile.get("STOP_COMMAND_ONLY") != "1" or force:
+            self._terminate_profile_processes(
+                profile, primary_pid, force=force
+            )
+            self._ensure_stopped(profile, primary_pid, force=force, name=canonical)
 
     def restart(self, name: str) -> None:
         with self._mutation_lock:
@@ -1721,6 +2740,17 @@ class AgentService:
             self.profiles.ensure_unique(profile.name, "restart", loaded)
             self.stop(name)
             self.start(name)
+
+    def _stop_other_managed(self, managed_names: set[str], canonical: str) -> None:
+        for other in sorted(managed_names - {canonical}):
+            try:
+                self.stop(other)
+            except ProfileNotFoundError:
+                self._reap_unresolved_pid(other)
+            except AgentError as error:
+                # Keep going so a later idle/missing sibling cannot leave
+                # the board with the previous model already killed.
+                sys.stderr.write(f"[activate] stop {other}: {error.message}\n")
 
     def switch_profile(self, name: str) -> None:
         with self._mutation_lock:
@@ -1733,41 +2763,17 @@ class AgentService:
             # claims - never discovered listeners. Do not assemble the full
             # status board (claim walk + live HTTP probes) just to find them.
             managed_names = set(loaded.keys()) | set(self._supervised)
-            for other in sorted(managed_names - {canonical}):
-                try:
-                    self.stop(other)
-                except ProfileNotFoundError:
-                    self._reap_unresolved_pid(other)
-                except AgentError as error:
-                    # Keep going so a later idle/missing sibling cannot leave
-                    # the board with the previous model already killed.
-                    sys.stderr.write(f"[activate] stop {other}: {error.message}\n")
+            self._stop_other_managed(managed_names, canonical)
             self.start(canonical)
             self.configuration.run_directory.mkdir(parents=True, exist_ok=True)
             self.configuration.active_profile_file.write_text(f"{canonical}\n", encoding="utf-8")
 
     def stop_all(self, force: bool = False) -> None:
         with self._mutation_lock:
-            failures: list[str] = []
             # Folder profiles, session-supervised claims, and durable pid files
             # left from a prior agent process (claims survive reboot of the agent).
-            names = set(self.profiles.load().keys()) | set(self._supervised)
-            try:
-                for path in self.configuration.run_directory.glob("*.pid"):
-                    stem = path.stem
-                    if stem in {"benchmark", "active-profile"}:
-                        continue
-                    names.add(stem)
-            except OSError:
-                pass
-            for name in sorted(names):
-                try:
-                    # Nested stop also takes the mutation lock (RLock).
-                    self.stop(name, force=force)
-                except ProfileNotFoundError:
-                    self._reap_unresolved_pid(name, force=force)
-                except AgentError as error:
-                    failures.append(f"{name}: {error.message}")
+            names = set(self.profiles.load().keys()) | set(self._supervised) | self._durable_pid_names()
+            failures = self._stop_named_profiles(names, force=force)
             # Clear any leftover active marker so a later watchdog cannot revive.
             self.configuration.active_profile_file.unlink(missing_ok=True)
             self._supervised.clear()
@@ -1775,26 +2781,56 @@ class AgentService:
             if failures:
                 raise OperationFailedError("Failed to stop profiles: " + "; ".join(failures))
 
+    def _durable_pid_names(self) -> set[str]:
+        names: set[str] = set()
+        try:
+            for path in self.configuration.run_directory.glob("*.pid"):
+                stem = path.stem
+                if stem in {"benchmark", "active-profile"}:
+                    continue
+                names.add(stem)
+        except OSError:
+            pass
+        return names
+
+    def _stop_named_profiles(self, names: set[str], force: bool) -> list[str]:
+        failures: list[str] = []
+        for name in sorted(names):
+            try:
+                # Nested stop also takes the mutation lock (RLock).
+                self.stop(name, force=force)
+            except ProfileNotFoundError:
+                self._reap_unresolved_pid(name, force=force)
+            except AgentError as error:
+                failures.append(f"{name}: {error.message}")
+        return failures
+
     def run_integration(self, integration: str, action: str) -> None:
         raise UnsupportedError(f"Unsupported integration action: {integration}:{action}")
 
     # -- doctor ------------------------------------------------------------
 
-    def doctor_report(self) -> dict[str, Any]:
-        payload = self.status_payload()
+    def _doctor_controller(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "url": f"http://{self.configuration.host}:{self.configuration.port}",
+            "reachable": True,
+            "profiles": len(payload["statuses"]),
+            "integrations": 0,
+        }
+
+    def _doctor_launch_agent(self) -> dict[str, Any]:
         unit = self.configuration.systemd_unit_path
         return {
-            "controller": {
-                "url": f"http://{self.configuration.host}:{self.configuration.port}",
-                "reachable": True,
-                "profiles": len(payload["statuses"]),
-                "integrations": 0,
-            },
-            "launch_agent": {
-                "plist_path": str(unit),
-                "installed": path_is_regular_file(unit),
-                "running": path_is_regular_file(unit),
-            },
+            "plist_path": str(unit),
+            "installed": path_is_regular_file(unit),
+            "running": path_is_regular_file(unit),
+        }
+
+    def doctor_report(self) -> dict[str, Any]:
+        payload = self.status_payload()
+        return {
+            "controller": self._doctor_controller(payload),
+            "launch_agent": self._doctor_launch_agent(),
             "integrations": [],
             "profiles_dir": payload["profiles_dir"],
             "controller_root": payload["controller_root"],
@@ -1808,6 +2844,57 @@ class AgentService:
 
     # -- watchdog ----------------------------------------------------------
 
+    def _watchdog_foreign_holder(self, profile: Profile) -> bool:
+        port = profile.endpoint_port
+        if not (port and port_is_listening(port)):
+            return False
+        listener = listener_pid(port)
+        return listener is None or not self._process_matches(listener, profile)
+
+    def _watchdog_restart_one(self, name: str) -> None:
+        with self._mutation_lock:
+            profile = self._watchdog_profile_to_restart(name)
+            if profile is None:
+                return
+            try:
+                self.start(name)
+            except AgentError as error:
+                sys.stderr.write(f"[watchdog] failed to restart {name}: {error}\n")
+
+    def _watchdog_profile_to_restart(self, name: str) -> Profile | None:
+        if not self._watchdog_may_restart(name):
+            return None
+        return self._watchdog_crashed_supervised(name)
+
+    def _watchdog_crashed_supervised(self, name: str) -> Profile | None:
+        profile = self._supervised_profile_or_drop(name)
+        if profile is None:
+            return None
+        if self._watchdog_still_live(profile, name):
+            return None
+        return profile
+
+    def _watchdog_may_restart(self, name: str) -> bool:
+        if time.monotonic() < self._watchdog_suppressed_until:
+            return False
+        return name in self._supervised
+
+    def _supervised_profile_or_drop(self, name: str) -> Profile | None:
+        try:
+            return self.resolve_profile(name)
+        except AgentError:
+            self._supervised.discard(name)
+            return None
+
+    def _watchdog_still_live(self, profile: Profile, name: str) -> bool:
+        current = self.status(profile)
+        if current["ready"] or current["running"]:
+            return True
+        if self._watchdog_foreign_holder(profile):
+            self._supervised.discard(name)
+            return True
+        return False
+
     def watchdog_tick(self) -> None:
         """Restart supervised profiles that crashed mid-session only.
 
@@ -1818,33 +2905,7 @@ class AgentService:
         if time.monotonic() < self._watchdog_suppressed_until:
             return
         for name in list(self._supervised):
-            with self._mutation_lock:
-                # Re-check under the lock: a concurrent stop may have suppressed
-                # the watchdog and discarded supervision after our snapshot.
-                if time.monotonic() < self._watchdog_suppressed_until:
-                    return
-                if name not in self._supervised:
-                    continue
-                try:
-                    profile = self.resolve_profile(name)
-                except AgentError:
-                    self._supervised.discard(name)
-                    continue
-                current = self.status(profile)
-                if current["ready"] or current["running"]:
-                    continue
-                # Port held by a foreign process: drop supervision instead of
-                # re-launching into a busy endpoint every watchdog tick.
-                port = profile.endpoint_port
-                if port and port_is_listening(port):
-                    listener = listener_pid(port)
-                    if listener is None or not self._process_matches(listener, profile):
-                        self._supervised.discard(name)
-                        continue
-                try:
-                    self.start(name)
-                except AgentError as error:
-                    sys.stderr.write(f"[watchdog] failed to restart {name}: {error}\n")
+            self._watchdog_restart_one(name)
 
     def start_watchdog(self) -> None:
         def tick() -> None:
@@ -1868,78 +2929,102 @@ class AgentService:
         except (OSError, ValueError):
             return None
 
-    def _process_matches(self, pid: int, profile: Profile) -> bool:
-        # Never treat the agent process as a model server - profile PORT equal
-        # to the agent bind would otherwise match `serve --port N` and stop
-        # would SIGKILL the agent itself.
-        if pid == os.getpid():
-            return False
-        command = (process_command(pid) or "").lower()
-        if not command:
-            return False
-        markers = [
-            profile.name, profile.get("MODEL_ALIAS"), profile.request_model,
-            profile.server_model_id, profile.get("MODEL_PATH"), profile.get("MODEL_DIR"),
-            profile.get("MODEL_FILE"), profile.get("MODEL_REPO"),
-            profile.get("START_COMMAND"),
+    def _profile_command_markers(self, profile: Profile) -> list[str]:
+        return [
+            value
+            for value in (
+                profile.name,
+                profile.get("MODEL_ALIAS"),
+                profile.request_model,
+                profile.server_model_id,
+                profile.get("MODEL_PATH"),
+                profile.get("MODEL_DIR"),
+                profile.get("MODEL_FILE"),
+                profile.get("MODEL_REPO"),
+                profile.get("START_COMMAND"),
+            )
+            if value and len(value) >= 4
         ]
-        for marker in markers:
-            if marker and len(marker) >= 4 and marker.lower() in command:
-                return True
-        # Port tokens common to llama-server / vllm argv - whole tokens only so
-        # PORT=80 does not match --port 8080 / http://host:8080.
+
+    def _command_mentions_port(self, command: str, port: str) -> bool:
+        return self._argv_mentions_port(command, port) or bool(
+            re.search(rf"(?<!\d):{re.escape(port)}(?!\d)", command)
+        )
+
+    def _argv_mentions_port(self, command: str, port: str) -> bool:
+        try:
+            argv = shlex.split(command)
+        except ValueError:
+            argv = command.split()
+        return _argv_has_port_flag(argv, port)
+
+    def _command_has_profile_marker(self, command: str, profile: Profile) -> bool:
+        return any(
+            marker.lower() in command for marker in self._profile_command_markers(profile)
+        )
+
+    def _command_matches_owned(
+        self, pid: int, command: str, profile: Profile
+    ) -> bool:
+        if self._command_has_profile_marker(command, profile):
+            return True
         port = profile.endpoint_port
-        if port:
-            try:
-                argv = shlex.split(command)
-            except ValueError:
-                argv = command.split()
-            for index, token in enumerate(argv):
-                if token == f"--port={port}":
-                    return True
-                if token == "--port" and index + 1 < len(argv) and argv[index + 1] == port:
-                    return True
-            if re.search(rf"(?<!\d):{re.escape(port)}(?!\d)", command):
-                return True
+        if port and self._command_mentions_port(command, port):
+            return True
+        return self._listener_matches_model_server(pid, command, port)
+
+    def _process_matches(self, pid: int, profile: Profile) -> bool:
+        command = _foreign_process_command(pid)
+        if command is None:
+            return False
+        return self._command_matches_owned(pid, command, profile)
+
+    def _listener_matches_model_server(self, pid: int, command: str, port: str) -> bool:
         return (
             command_looks_like_model_server(command)
             and port_is_listening(port)
             and listener_pid(port) == pid
         )
 
-    def _probe_health(self, profile: Profile) -> tuple[bool, list[str]]:
-        if profile.healthcheck_mode == "disabled":
-            return False, []
-        url = profile.healthcheck_url
-        parsed = urllib.parse.urlparse(url)
-        if parsed.scheme not in ("http", "https"):
-            return False, []
-        remote_allowed = (os.environ.get("ALLOW_REMOTE_HEALTHCHECK") or "").lower() in (
+    def _remote_healthcheck_allowed(self) -> bool:
+        return (os.environ.get("ALLOW_REMOTE_HEALTHCHECK") or "").lower() in (
             "1", "true", "yes",
         )
-        if not remote_allowed and not is_loopback(parsed.hostname or ""):
-            return False, []
-        request = urllib.request.Request(url, headers={"Accept": "application/json"})
-        try:
-            with urlopen_no_redirect(request, HEALTH_TIMEOUT_SECONDS) as response:
-                body = response.read()
-        except (urllib.error.URLError, OSError, ValueError):
+
+    def _healthcheck_url_allowed(self, url: str) -> bool:
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return False
+        return self._remote_healthcheck_allowed() or is_loopback(parsed.hostname or "")
+
+    def _probe_health_body(self, profile: Profile) -> bytes | None:
+        if profile.healthcheck_mode == "disabled":
+            return None
+        url = profile.healthcheck_url
+        if not self._healthcheck_url_allowed(url):
+            return None
+        return self._healthcheck_body(url)
+
+    def _probe_health(self, profile: Profile) -> tuple[bool, list[str]]:
+        body = self._probe_health_body(profile)
+        if body is None:
             return False, []
         if profile.healthcheck_mode == "http-200":
             return True, []
+        return self._health_from_openai_models(profile, body)
+
+    def _healthcheck_body(self, url: str) -> bytes | None:
+        request = urllib.request.Request(url, headers={"Accept": "application/json"})
         try:
-            parsed_body = json.loads(body)
-            entries = parsed_body.get("data", [])
-        except (json.JSONDecodeError, AttributeError):
+            with urlopen_no_redirect(request, HEALTH_TIMEOUT_SECONDS) as response:
+                return response.read()
+        except (urllib.error.URLError, OSError, ValueError):
+            return None
+
+    def _health_from_openai_models(self, profile: Profile, body: bytes) -> tuple[bool, list[str]]:
+        ids = _openai_model_ids(body)
+        if ids is None:
             return False, []
-        ids = [
-            entry["id"]
-            for entry in entries
-            if isinstance(entry, dict) and isinstance(entry.get("id"), str) and entry["id"]
-        ]
-        # A claim with no model-name hint carries the synthetic port-N identity:
-        # there is nothing to verify against, so a non-empty served id list is
-        # the proof of readiness (the endpoint proves itself).
         if profile.healthcheck_any_id:
             return bool(ids), ids
         expected = profile.get("HEALTHCHECK_EXPECT_ID") or profile.server_model_id
@@ -1951,6 +3036,28 @@ class AgentService:
         )
         return matched, ids
 
+    def _listener_owned_by_profile(
+        self,
+        listener: int | None,
+        primary_pid: int | None,
+        self_pid: int,
+        profile: Profile,
+    ) -> bool:
+        return bool(
+            listener
+            and listener != primary_pid
+            and listener != self_pid
+            and self._process_matches(listener, profile)
+        )
+
+    def _owned_listener_pid(
+        self, profile: Profile, primary_pid: int | None, self_pid: int
+    ) -> int | None:
+        listener = listener_pid(profile.endpoint_port)
+        if self._listener_owned_by_profile(listener, primary_pid, self_pid, profile):
+            return listener
+        return None
+
     def _terminate_profile_processes(
         self,
         profile: Profile,
@@ -1959,58 +3066,60 @@ class AgentService:
         force: bool = False,
     ) -> None:
         self_pid = os.getpid()
-        if primary_pid and primary_pid != self_pid:
-            if process_is_zombie(primary_pid):
-                reap_child(primary_pid)
-            else:
-                terminate_process_tree(primary_pid, force=force)
+        self._terminate_owned_pid(primary_pid, self_pid=self_pid, force=force)
         # Always re-check the listen port: vLLM may leave EngineCore on the
         # port under a different pid after the launcher shell exits.
         # `force` only strengthens the signal - never skips ownership matching
         # (Swift terminateProfileProcesses always requires processMatches).
-        listener = listener_pid(profile.endpoint_port)
-        if (
-            listener
-            and listener != primary_pid
-            and listener != self_pid
-            and self._process_matches(listener, profile)
-        ):
-            if process_is_zombie(listener):
-                reap_child(listener)
-            else:
-                terminate_process_tree(listener, force=force)
+        listener = self._owned_listener_pid(profile, primary_pid, self_pid)
+        if listener is not None:
+            self._terminate_owned_pid(listener, self_pid=self_pid, force=force)
 
-    def _wait_until_stopped(
+    def _terminate_owned_pid(self, pid: int | None, *, self_pid: int, force: bool) -> None:
+        if not pid or pid == self_pid:
+            return
+        if process_is_zombie(pid):
+            reap_child(pid)
+            return
+        terminate_process_tree(pid, force=force)
+
+    def _wait_or_force_stop(
         self,
         profile: Profile,
         primary_pid: int | None,
-        timeout: float = STOP_WAIT_SECONDS,
+        timeout: float,
     ) -> bool:
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            if primary_pid:
-                reap_child(primary_pid)
-            if process_is_alive(primary_pid):
-                time.sleep(0.2)
-                continue
-            # Prefer connect-only checks in the hot loop; resolve ownership via
-            # the shared listening-TCP inventory (cached) instead of N× lsof.
-            if not port_is_listening(profile.endpoint_port):
-                return True
-            listeners = list_listening_tcp()
-            listener = listener_pid_from_inventory(profile.endpoint_port, listeners)
-            if listener is None:
-                return True
-            # Port held by an unrelated process - not our problem for stop.
-            if listener != primary_pid and not self._process_matches(listener, profile):
-                return True
-            if process_is_zombie(listener):
-                reap_child(listener)
-                return True
-            time.sleep(0.2)
-        # Final assessment: zombies / free ports count as stopped.
-        if process_is_alive(primary_pid):
-            return False
+        if self._wait_until_stopped(profile, primary_pid, timeout=timeout):
+            return True
+        self._terminate_profile_processes(profile, primary_pid, force=True)
+        return self._wait_until_stopped(
+            profile,
+            primary_pid,
+            timeout=FORCE_TERMINATE_TIMEOUT_SECONDS * 2,
+        )
+
+    def _ensure_stopped(
+        self,
+        profile: Profile,
+        primary_pid: int | None,
+        *,
+        force: bool,
+        name: str,
+    ) -> None:
+        timeout = FORCE_TERMINATE_TIMEOUT_SECONDS * 3 if force else STOP_WAIT_SECONDS
+        if self._wait_or_force_stop(profile, primary_pid, timeout):
+            return
+        raise OperationFailedError(
+            f"failed to stop {name}: endpoint or process is still alive"
+        )
+
+    def _endpoint_released(
+        self,
+        profile: Profile,
+        primary_pid: int | None,
+        *,
+        final: bool,
+    ) -> bool:
         if not port_is_listening(profile.endpoint_port):
             return True
         listeners = list_listening_tcp()
@@ -2020,7 +3129,45 @@ class AgentService:
         if process_is_zombie(listener):
             reap_child(listener)
             return True
-        return not self._process_matches(listener, profile)
+        return self._endpoint_foreign_or_unmatched(
+            profile, primary_pid, listener, final=final
+        )
+
+    def _endpoint_foreign_or_unmatched(
+        self,
+        profile: Profile,
+        primary_pid: int | None,
+        listener: int,
+        *,
+        final: bool,
+    ) -> bool:
+        if final:
+            return not self._process_matches(listener, profile)
+        if listener != primary_pid and not self._process_matches(listener, profile):
+            return True
+        return False
+
+    def _wait_until_stopped(
+        self,
+        profile: Profile,
+        primary_pid: int | None,
+        timeout: float = STOP_WAIT_SECONDS,
+    ) -> bool:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if self._stop_wait_tick(profile, primary_pid):
+                return True
+            time.sleep(0.2)
+        if process_is_alive(primary_pid):
+            return False
+        return self._endpoint_released(profile, primary_pid, final=True)
+
+    def _stop_wait_tick(self, profile: Profile, primary_pid: int | None) -> bool:
+        if primary_pid:
+            reap_child(primary_pid)
+        if process_is_alive(primary_pid):
+            return False
+        return self._endpoint_released(profile, primary_pid, final=False)
 
     def _suppress_watchdog(self) -> None:
         self._watchdog_suppressed_until = time.monotonic() + WATCHDOG_SUPPRESSION_SECONDS
@@ -2061,18 +3208,24 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
         supplied = self.headers.get("Authorization", "")
         return hmac.compare_digest(supplied, f"Bearer {self.auth_token}")
 
-    def _read_body(self) -> bytes | None:
-        """Read the request body; None means an error response was already sent."""
+    def _parsed_content_length(self) -> int | None:
         raw_length = self.headers.get("Content-Length")
         if raw_length is None:
-            return b""
+            return 0
         try:
             length = int(raw_length)
             if length < 0:
                 raise ValueError
+            return length
         except ValueError:
             self._send_json(*_error_body(400, "invalid_content_length", "invalid Content-Length"))
             self.close_connection = True
+            return None
+
+    def _read_body(self) -> bytes | None:
+        """Read the request body; None means an error response was already sent."""
+        length = self._parsed_content_length()
+        if length is None:
             return None
         if length > MAXIMUM_BODY_BYTES:
             self._send_json(*_error_body(413, "payload_too_large", "request body too large"))
@@ -2104,30 +3257,47 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         self._handle("POST")
 
+    def _accept_request(self, path: str) -> bool:
+        if path.startswith("/api/") and not self._authorized():
+            # The body has not been read yet; drop the connection so an
+            # unread payload cannot corrupt a kept-alive request stream.
+            self.close_connection = True
+            self._send_json(*_error_body(401, "unauthorized", "unauthorized"))
+            return False
+        return True
+
+    def _read_method_body(self, method: str) -> bytes | None:
+        if method != "POST":
+            return b""
+        return self._read_body()
+
     def _handle(self, method: str) -> None:
-        path = urllib.parse.urlparse(self.path).path or "/"
         try:
-            if path.startswith("/api/") and not self._authorized():
-                # The body has not been read yet; drop the connection so an
-                # unread payload cannot corrupt a kept-alive request stream.
-                self.close_connection = True
-                self._send_json(*_error_body(401, "unauthorized", "unauthorized"))
-                return
-            body: bytes | None = b""
-            if method == "POST":
-                body = self._read_body()
-                if body is None:
-                    return
-            handler = self._route(method, path)
-            if handler is None:
-                self._send_json(*_error_body(404, "not_found", "not found"))
-                return
-            self._send_json(200, handler(self._request_object(body or b"")))
+            self._handle_routed(method)
         except AgentError as error:
             self._send_json(*_error_body(error.http_status, error.code, error.public_message))
         except Exception:  # pragma: no cover - defensive parity with router fallback
             traceback.print_exc()
             self._send_json(*_error_body(500, "internal_error", "internal server error"))
+
+    def _dispatch_accepted(self, method: str, path: str) -> None:
+        body = self._read_method_body(method)
+        if body is None:
+            return
+        self._dispatch_routed(method, path, body)
+
+    def _handle_routed(self, method: str) -> None:
+        path = urllib.parse.urlparse(self.path).path or "/"
+        if not self._accept_request(path):
+            return
+        self._dispatch_accepted(method, path)
+
+    def _dispatch_routed(self, method: str, path: str, body: bytes) -> None:
+        handler = self._route(method, path)
+        if handler is None:
+            self._send_json(*_error_body(404, "not_found", "not found"))
+            return
+        self._send_json(200, handler(self._request_object(body or b"")))
 
     def _route(self, method: str, path: str) -> Callable[[dict[str, Any]], dict[str, Any]] | None:
         service = self.service
@@ -2203,18 +3373,8 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
         self, service: "AgentService"
     ) -> Callable[[dict[str, Any]], dict[str, Any]]:
         def handle(payload: dict[str, Any]) -> dict[str, Any]:
-            selected = payload.get("profiles")
-            if selected is not None and not isinstance(selected, list):
-                raise UsageError("profiles must be a list of strings")
-            names: list[str] | None = None
-            if selected is not None:
-                names = []
-                for item in selected:
-                    if not isinstance(item, str) or not item:
-                        raise UsageError("profiles must be a list of strings")
-                    names.append(item)
             service.start_benchmark(
-                profiles=names,
+                profiles=_optional_profile_names(payload),
                 suite=str(payload.get("suite") or "quick"),
                 allow_concurrent=bool(payload.get("allow_concurrent")),
                 keep_running=bool(payload.get("keep_running")),
@@ -2243,41 +3403,80 @@ def build_link_code(agent_port: int, direct_host: str | None = None) -> dict[str
     """Build an editable SSH or direct gateway pairing code."""
     short_host = socket.gethostname().split(".")[0] or "remote"
     if direct_host is not None:
-        link = (
-            "modelswitchboard-gateway://"
-            f"{direct_host}"
-            f"?name={urllib.parse.quote(short_host)}&agent_port={agent_port}&mode=direct"
-        )
-        return {
-            "user": "",
-            "host": direct_host,
-            "name": short_host,
-            "agent_port": str(agent_port),
-            "mode": "direct",
-            "link": link,
-        }
-    user = getpass.getuser()
+        return _gateway_link(host=direct_host, agent_port=agent_port, name=short_host, mode="direct")
+    return _gateway_link(
+        host=_ssh_link_host(),
+        agent_port=agent_port,
+        name=short_host,
+        mode="ssh",
+        user=getpass.getuser(),
+    )
+
+
+def _ssh_link_host() -> str:
     fqdn = socket.getfqdn()
-    host = fqdn if fqdn and "." in fqdn and fqdn != "localhost" else socket.gethostname()
+    if fqdn and "." in fqdn and fqdn != "localhost":
+        return fqdn
+    return socket.gethostname()
+
+
+def _gateway_link_authority(host: str, mode: str, user: str) -> str:
+    return host if mode == "direct" else f"{urllib.parse.quote(user)}@{host}"
+
+
+def _gateway_link(
+    *,
+    host: str,
+    agent_port: int,
+    name: str,
+    mode: str,
+    user: str = "",
+) -> dict[str, str]:
+    authority = _gateway_link_authority(host, mode, user)
     link = (
         "modelswitchboard-gateway://"
-        f"{urllib.parse.quote(user)}@{host}"
-        f"?name={urllib.parse.quote(short_host)}&agent_port={agent_port}&mode=ssh"
+        f"{authority}"
+        f"?name={urllib.parse.quote(name)}&agent_port={agent_port}&mode={mode}"
     )
     return {
         "user": user,
         "host": host,
-        "name": short_host,
+        "name": name,
         "agent_port": str(agent_port),
-        "mode": "ssh",
+        "mode": mode,
         "link": link,
     }
+
+_CLI_COMMANDS = [
+    "serve",
+    "status",
+    "list",
+    "start",
+    "stop",
+    "restart",
+    "switch",
+    "activate",
+    "stop-all",
+    "kill-all",
+    "link",
+    "scan-profiles",
+    "scan-ports",
+    "ports",
+]
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="model-switchboard-agent",
         description="Model Switchboard remote agent: launch and monitor model servers over the controller HTTP contract.",
     )
+    _add_parser_root_arguments(parser)
+    _add_parser_bind_arguments(parser)
+    _add_parser_cli_arguments(parser)
+    return parser
+
+
+def _add_parser_root_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--version", action="version", version=f"model-switchboard-agent {AGENT_VERSION}")
     parser.add_argument("--root", type=Path, default=None, help="agent root directory (default: ~/.local/share/model-switchboard-agent)")
     parser.add_argument(
@@ -2286,6 +3485,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="folder of model .env/.json profiles (default: ~/model-profiles, or config.json / legacy <root>/model-profiles)",
     )
+
+
+def _add_parser_bind_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--host", default="127.0.0.1", help="bind host (loopback only unless --unsafe-bind)")
     parser.add_argument("--unsafe-bind", metavar="HOST", default=None, help="bind a non-loopback host; requires --auth-token")
     parser.add_argument("--tailscale", action="store_true", help="bind this host's Tailscale address (tailnet-only; token recommended)")
@@ -2297,6 +3499,9 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="allow --tailscale without a bearer token (personal tailnet only)",
     )
+
+
+def _add_parser_cli_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--force",
         action="store_true",
@@ -2313,50 +3518,49 @@ def build_parser() -> argparse.ArgumentParser:
         "command",
         nargs="?",
         default="serve",
-        choices=[
-            "serve",
-            "status",
-            "list",
-            "start",
-            "stop",
-            "restart",
-            "switch",
-            "activate",
-            "stop-all",
-            "kill-all",
-            "link",
-            "scan-profiles",
-            "scan-ports",
-            "ports",
-        ],
+        choices=_CLI_COMMANDS,
     )
     parser.add_argument("profiles", nargs="*", help="profile names for start/stop/restart/switch")
-    return parser
+
+def _auth_token_from_args(args: argparse.Namespace) -> str:
+    token = args.auth_token
+    if args.auth_token_file is None:
+        return token
+    path = args.auth_token_file.expanduser()
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError as error:
+        raise InvalidConfigurationError(
+            f"cannot read auth token file {path}: {error}"
+        ) from error
+
+
+def _apply_unsafe_bind(args: argparse.Namespace, host: str) -> tuple[str, bool]:
+    if args.unsafe_bind is not None:
+        return args.unsafe_bind, True
+    return host, False
+
+
+def _apply_tailscale_bind(args: argparse.Namespace, host: str) -> tuple[str, bool]:
+    if not getattr(args, "tailscale", False):
+        return host, False
+    presence = tailscale_status()
+    if not presence.present:
+        raise InvalidConfigurationError(
+            "--tailscale: no Tailscale address found - is tailscaled running?"
+        )
+    return presence.ipv4 or host, True
+
+
+def _bind_from_args(args: argparse.Namespace) -> tuple[str, bool, bool]:
+    host, unsafe = _apply_unsafe_bind(args, args.host)
+    host, tailscale = _apply_tailscale_bind(args, host)
+    return host, unsafe, tailscale
+
 
 def build_configuration(args: argparse.Namespace) -> AgentConfiguration:
-    token = args.auth_token
-    if args.auth_token_file is not None:
-        path = args.auth_token_file.expanduser()
-        try:
-            token = path.read_text(encoding="utf-8").strip()
-        except OSError as error:
-            raise InvalidConfigurationError(
-                f"cannot read auth token file {path}: {error}"
-            ) from error
-    host = args.host
-    unsafe = False
-    tailscale = False
-    if args.unsafe_bind is not None:
-        host = args.unsafe_bind
-        unsafe = True
-    if getattr(args, "tailscale", False):
-        presence = tailscale_status()
-        if not presence.present:
-            raise InvalidConfigurationError(
-                "--tailscale: no Tailscale address found - is tailscaled running?"
-            )
-        host = presence.ipv4 or host
-        tailscale = True
+    token = _auth_token_from_args(args)
+    host, unsafe, tailscale = _bind_from_args(args)
     explicit_profiles = getattr(args, "profiles_dir", None)
     if explicit_profiles is not None:
         # Persist so serve (systemd) keeps using the same folder without flags.
@@ -2375,34 +3579,49 @@ def build_configuration(args: argparse.Namespace) -> AgentConfiguration:
 def _print_json(payload: dict[str, Any]) -> None:
     print(json.dumps(payload, indent=2, sort_keys=True))
 
-def _run_link(args: argparse.Namespace, configuration: AgentConfiguration) -> int:
-    interactive = (
+
+def _stdio_is_tty() -> bool:
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _link_is_interactive(args: argparse.Namespace) -> bool:
+    return (
         not args.json
         and not args.yes
         and args.profiles_dir is None
-        and sys.stdin.isatty()
-        and sys.stdout.isatty()
+        and _stdio_is_tty()
     )
-    if interactive:
+
+
+def _apply_link_profiles_dir(args: argparse.Namespace, configuration: AgentConfiguration) -> None:
+    if _link_is_interactive(args):
         print()
         configuration.profiles_dir = prompt_profiles_directory(
             configuration.root,
             current=configuration.profiles_directory,
         )
-    elif args.profiles_dir is not None:
+        return
+    if args.profiles_dir is not None:
         configuration.profiles_dir = resolve_profiles_directory(
             configuration.root, args.profiles_dir
         )
-    configuration.profiles_directory.mkdir(parents=True, exist_ok=True)
 
-    direct_host: str | None = None
-    if getattr(args, "tailscale", False):
-        presence = tailscale_status()
-        if not presence.present:
-            raise InvalidConfigurationError(
-                "--tailscale: no Tailscale address found - is tailscaled running?"
-            )
-        direct_host = presence.dns_name or presence.ipv4
+
+def _link_direct_host(args: argparse.Namespace) -> str | None:
+    if not getattr(args, "tailscale", False):
+        return None
+    presence = tailscale_status()
+    if not presence.present:
+        raise InvalidConfigurationError(
+            "--tailscale: no Tailscale address found - is tailscaled running?"
+        )
+    return presence.dns_name or presence.ipv4
+
+
+def _run_link(args: argparse.Namespace, configuration: AgentConfiguration) -> int:
+    _apply_link_profiles_dir(args, configuration)
+    configuration.profiles_directory.mkdir(parents=True, exist_ok=True)
+    direct_host = _link_direct_host(args)
     info = build_link_code(configuration.port, direct_host=direct_host)
     info["profiles_dir"] = str(configuration.profiles_directory)
     claims = scan_port_claim_directories(agent_root=configuration.root)
@@ -2411,20 +3630,256 @@ def _run_link(args: argparse.Namespace, configuration: AgentConfiguration) -> in
     if args.json:
         _print_json(info)
     else:
-        print()
-        print("Pairing code for Model Switchboard on your Mac:")
-        print()
-        print(f"  {info['link']}")
-        print()
-        print(f"Profiles folder: {configuration.profiles_directory}")
-        print("Drop one .env/.json per model there (PORT / START_COMMAND / …), then")
-        print("Settings → Remote Gateways → Add Remote Gateway → paste the link.")
-        print("Every gateway field stays editable on the Mac.")
-        print()
-        print("Discovery is host-generic: listening model ports + any numeric")
-        print("port folders (…/8080/flags.env) under $HOME or")
-        print(f"${SCAN_ROOTS_ENV}. Nothing is invented for unknown ports.")
+        _print_link_human(info, configuration)
     return 0
+
+
+def _print_link_human(info: dict[str, Any], configuration: AgentConfiguration) -> None:
+    print()
+    print("Pairing code for Model Switchboard on your Mac:")
+    print()
+    print(f"  {info['link']}")
+    print()
+    print(f"Profiles folder: {configuration.profiles_directory}")
+    print("Drop one .env/.json per model there (PORT / START_COMMAND / …), then")
+    print("Settings → Remote Gateways → Add Remote Gateway → paste the link.")
+    print("Every gateway field stays editable on the Mac.")
+    print()
+    print("Discovery is host-generic: listening model ports + any numeric")
+    print("port folders (…/8080/flags.env) under $HOME or")
+    print(f"${SCAN_ROOTS_ENV}. Nothing is invented for unknown ports.")
+
+def _cmd_serve(args: argparse.Namespace, configuration: AgentConfiguration, service: "AgentService") -> int:
+    configuration.profiles_directory.mkdir(parents=True, exist_ok=True)
+    configuration.run_directory.mkdir(parents=True, exist_ok=True)
+    server = make_server(service, verbose=args.verbose)
+    service.start_watchdog()
+    if configuration.tailscale_bind and configuration.auth_token is None:
+        sys.stderr.write(
+            "warning: serving on the tailnet without a bearer token "
+            "(--allow-unauthenticated); anyone on the tailnet can "
+            "start/stop models\n"
+        )
+    print(f"controller=http://{configuration.host}:{configuration.port}", flush=True)
+    print(f"profiles_dir={configuration.profiles_directory}", flush=True)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        server.shutdown()
+    return 0
+
+
+def _cmd_status(args: argparse.Namespace, configuration: AgentConfiguration, service: "AgentService") -> int:
+    _print_json(service.status_payload(args.profiles or None))
+    return 0
+
+
+def _cmd_list(args: argparse.Namespace, configuration: AgentConfiguration, service: "AgentService") -> int:
+    profiles = service.profiles.load()
+    _print_json({
+        "profiles": [
+            {
+                "profile": profile.name,
+                "display_name": profile.display_name,
+                "runtime": profile.runtime,
+                "request_model": profile.request_model,
+                "base_url": profile.base_url,
+            }
+            for profile in sorted(profiles.values(), key=lambda p: p.name)
+        ],
+        "profiles_dir": str(configuration.profiles_directory),
+    })
+    return 0
+
+
+def _print_scan_candidates(candidates: list[dict[str, Any]]) -> None:
+    if not candidates:
+        print("No launch-looking .env/.json folders found under $HOME.")
+        return
+    for index, candidate in enumerate(candidates, start=1):
+        print(
+            f"[{index}] {candidate['path']} "
+            f"({candidate['profile_count']}: {', '.join(candidate['files'][:6])})"
+        )
+
+
+def _print_scan_claims(claims: list[dict[str, Any]]) -> None:
+    print()
+    print("Claimed port folders (numeric dir + launch/flags markers):")
+    for claim in claims:
+        model = claim.get("model_hint") or "-"
+        print(
+            f"  :{claim['port']}  {claim['path']}  "
+            f"({claim.get('runtime_hint') or 'unknown'})  {model}"
+        )
+
+
+def _print_scan_no_claims() -> None:
+    print()
+    print(f"No claimed port folders found. Optional: export {SCAN_ROOTS_ENV}=/path/to/scan")
+
+
+def _print_scan_profiles(configuration: AgentConfiguration, candidates: list[dict[str, Any]], claims: list[dict[str, Any]]) -> None:
+    print(f"Current profiles folder: {configuration.profiles_directory}")
+    _print_scan_candidates(candidates)
+    if claims:
+        _print_scan_claims(claims)
+        return
+    _print_scan_no_claims()
+
+
+def _scan_claim_rows(claims: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "port": item["port"],
+            "path": item["path"],
+            "display_name": item.get("display_name"),
+            "model_hint": item.get("model_hint"),
+            "runtime_hint": item.get("runtime_hint"),
+        }
+        for item in claims
+    ]
+
+
+def _cmd_scan_profiles(args: argparse.Namespace, configuration: AgentConfiguration, service: "AgentService") -> int:
+    candidates = scan_profile_directories()
+    claims = scan_port_claim_directories(agent_root=configuration.root)
+    payload = {
+        "profiles_dir": str(configuration.profiles_directory),
+        "candidates": candidates,
+        "port_claims": _scan_claim_rows(claims),
+        "scan_roots_env": SCAN_ROOTS_ENV,
+    }
+    if args.json:
+        _print_json(payload)
+    else:
+        _print_scan_profiles(configuration, candidates, claims)
+    return 0
+
+
+def _port_row_flags(entry: dict[str, Any]) -> str:
+    flags = _port_row_flag_parts(entry)
+    return ",".join(flags) if flags else "-"
+
+
+def _port_row_flag_parts(entry: dict[str, Any]) -> list[str]:
+    flags: list[str] = []
+    if entry.get("looks_like_model"):
+        flags.append("model-cmd")
+    if entry.get("claimed"):
+        flags.append("claimed")
+    flags.extend(_port_row_model_flags(entry.get("model")))
+    return flags
+
+
+def _port_row_model_flags(model: Any) -> list[str]:
+    if not model:
+        return []
+    if model.get("ready"):
+        return ["ready"]
+    return ["probe-fail"]
+
+
+def _port_row_model_identity(model: Any) -> str | None:
+    if model and model.get("request_model"):
+        return str(model["request_model"])
+    return None
+
+
+def _port_row_claimed_identity(claimed: Any) -> str | None:
+    if claimed and claimed.get("model_hint"):
+        return str(claimed["model_hint"])
+    return None
+
+
+def _port_row_fallback_identity(entry: dict[str, Any]) -> str:
+    return (entry.get("command") or "")[:80] or "-"
+
+
+def _port_row_identity(entry: dict[str, Any]) -> str:
+    identity = _port_row_model_identity(entry.get("model"))
+    if identity is not None:
+        return identity
+    identity = _port_row_claimed_identity(entry.get("claimed"))
+    if identity is not None:
+        return identity
+    return _port_row_fallback_identity(entry)
+
+
+def _cmd_ports(args: argparse.Namespace, configuration: AgentConfiguration, service: "AgentService") -> int:
+    payload = service.ports_payload()
+    if args.json:
+        _print_json(payload)
+        return 0
+    print("Listening / claimed ports (Ports-style):")
+    for entry in payload["ports"]:
+        print(f"  :{entry['port']:<5}  {_port_row_flags(entry):<18}  {_port_row_identity(entry)}")
+    return 0
+
+
+def _lifecycle_target_names(
+    args: argparse.Namespace, service: "AgentService"
+) -> list[str]:
+    if not args.profiles:
+        raise UsageError("No profiles selected")
+    names = args.profiles
+    if names == ["all"]:
+        names = sorted(service.profiles.load().keys())
+    return names
+
+
+def _apply_lifecycle_command(
+    service: "AgentService", args: argparse.Namespace, name: str
+) -> None:
+    if args.command == "stop":
+        service.stop(name, force=bool(args.force))
+    else:
+        getattr(service, args.command)(name)
+
+
+def _cmd_lifecycle(args: argparse.Namespace, configuration: AgentConfiguration, service: "AgentService") -> int:
+    for name in _lifecycle_target_names(args, service):
+        _apply_lifecycle_command(service, args, name)
+    _print_json(service.action_response())
+    return 0
+
+
+def _cmd_switch(args: argparse.Namespace, configuration: AgentConfiguration, service: "AgentService") -> int:
+    if not args.profiles:
+        raise UsageError("No profile selected")
+    service.switch_profile(args.profiles[0])
+    _print_json(service.action_response())
+    return 0
+
+
+def _cmd_stop_all(args: argparse.Namespace, configuration: AgentConfiguration, service: "AgentService") -> int:
+    # kill-all is the nuclear one-liner: always force.
+    service.stop_all(force=bool(args.force) or args.command == "kill-all")
+    _print_json(service.action_response())
+    return 0
+
+
+def _cmd_link(args: argparse.Namespace, configuration: AgentConfiguration, service: "AgentService") -> int:
+    return _run_link(args, configuration)
+
+
+_COMMANDS: dict[str, Callable[[argparse.Namespace, AgentConfiguration, "AgentService"], int]] = {
+    "serve": _cmd_serve,
+    "status": _cmd_status,
+    "list": _cmd_list,
+    "scan-profiles": _cmd_scan_profiles,
+    "scan-ports": _cmd_ports,
+    "ports": _cmd_ports,
+    "start": _cmd_lifecycle,
+    "stop": _cmd_lifecycle,
+    "restart": _cmd_lifecycle,
+    "switch": _cmd_switch,
+    "activate": _cmd_switch,
+    "stop-all": _cmd_stop_all,
+    "kill-all": _cmd_stop_all,
+    "link": _cmd_link,
+}
+
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
@@ -2436,147 +3891,10 @@ def main(argv: list[str] | None = None) -> int:
 
     service = AgentService(configuration)
     try:
-        if args.command == "serve":
-            configuration.profiles_directory.mkdir(parents=True, exist_ok=True)
-            configuration.run_directory.mkdir(parents=True, exist_ok=True)
-            server = make_server(service, verbose=args.verbose)
-            service.start_watchdog()
-            if configuration.tailscale_bind and configuration.auth_token is None:
-                sys.stderr.write(
-                    "warning: serving on the tailnet without a bearer token "
-                    "(--allow-unauthenticated); anyone on the tailnet can "
-                    "start/stop models\n"
-                )
-            print(f"controller=http://{configuration.host}:{configuration.port}", flush=True)
-            print(f"profiles_dir={configuration.profiles_directory}", flush=True)
-            try:
-                server.serve_forever()
-            except KeyboardInterrupt:
-                server.shutdown()
-            return 0
-        if args.command == "status":
-            _print_json(service.status_payload(args.profiles or None))
-            return 0
-        if args.command == "list":
-            profiles = service.profiles.load()
-            _print_json({
-                "profiles": [
-                    {
-                        "profile": profile.name,
-                        "display_name": profile.display_name,
-                        "runtime": profile.runtime,
-                        "request_model": profile.request_model,
-                        "base_url": profile.base_url,
-                    }
-                    for profile in sorted(profiles.values(), key=lambda p: p.name)
-                ],
-                "profiles_dir": str(configuration.profiles_directory),
-            })
-            return 0
-        if args.command == "scan-profiles":
-            candidates = scan_profile_directories()
-            claims = scan_port_claim_directories(agent_root=configuration.root)
-            payload = {
-                "profiles_dir": str(configuration.profiles_directory),
-                "candidates": candidates,
-                "port_claims": [
-                    {
-                        "port": item["port"],
-                        "path": item["path"],
-                        "display_name": item.get("display_name"),
-                        "model_hint": item.get("model_hint"),
-                        "runtime_hint": item.get("runtime_hint"),
-                    }
-                    for item in claims
-                ],
-                "scan_roots_env": SCAN_ROOTS_ENV,
-            }
-            if args.json:
-                _print_json(payload)
-            else:
-                print(f"Current profiles folder: {configuration.profiles_directory}")
-                if not candidates:
-                    print("No launch-looking .env/.json folders found under $HOME.")
-                for index, candidate in enumerate(candidates, start=1):
-                    print(
-                        f"[{index}] {candidate['path']} "
-                        f"({candidate['profile_count']}: {', '.join(candidate['files'][:6])})"
-                    )
-                if claims:
-                    print()
-                    print("Claimed port folders (numeric dir + launch/flags markers):")
-                    for claim in claims:
-                        model = claim.get("model_hint") or "-"
-                        print(
-                            f"  :{claim['port']}  {claim['path']}  "
-                            f"({claim.get('runtime_hint') or 'unknown'})  {model}"
-                        )
-                else:
-                    print()
-                    print(
-                        "No claimed port folders found. Optional: export "
-                        f"{SCAN_ROOTS_ENV}=/path/to/scan"
-                    )
-            return 0
-        if args.command in ("scan-ports", "ports"):
-            payload = service.ports_payload()
-            if args.json:
-                _print_json(payload)
-            else:
-                print("Listening / claimed ports (Ports-style):")
-                for entry in payload["ports"]:
-                    port = entry["port"]
-                    claimed = entry.get("claimed")
-                    model = entry.get("model")
-                    cmd = (entry.get("command") or "")[:80]
-                    flags = []
-                    if entry.get("looks_like_model"):
-                        flags.append("model-cmd")
-                    if claimed:
-                        flags.append("claimed")
-                    if model and model.get("ready"):
-                        flags.append("ready")
-                    elif model:
-                        flags.append("probe-fail")
-                    flag_s = ",".join(flags) if flags else "-"
-                    identity = ""
-                    if model and model.get("request_model"):
-                        identity = str(model["request_model"])
-                    elif claimed and claimed.get("model_hint"):
-                        identity = str(claimed["model_hint"])
-                    print(f"  :{port:<5}  {flag_s:<18}  {identity or cmd or '-'}")
-            return 0
-        if args.command in ("start", "stop", "restart"):
-            if not args.profiles:
-                raise UsageError("No profiles selected")
-            names = args.profiles
-            if names == ["all"]:
-                names = sorted(service.profiles.load().keys())
-            for name in names:
-                if args.command == "stop":
-                    service.stop(name, force=bool(args.force))
-                else:
-                    getattr(service, args.command)(name)
-            _print_json(service.action_response())
-            return 0
-        if args.command in ("switch", "activate"):
-            if not args.profiles:
-                raise UsageError("No profile selected")
-            service.switch_profile(args.profiles[0])
-            _print_json(service.action_response())
-            return 0
-        if args.command in ("stop-all", "kill-all"):
-            # kill-all is the nuclear one-liner: always force.
-            force = bool(args.force) or args.command == "kill-all"
-            service.stop_all(force=force)
-            _print_json(service.action_response())
-            return 0
-        if args.command == "link":
-            return _run_link(args, configuration)
+        return _COMMANDS[args.command](args, configuration, service)
     except AgentError as error:
         sys.stderr.write(f"model-switchboard-agent: {error.message}\n")
         return 2 if isinstance(error, (UsageError, InvalidConfigurationError)) else 1
-    return 0
 
 if __name__ == "__main__":
     sys.exit(main())

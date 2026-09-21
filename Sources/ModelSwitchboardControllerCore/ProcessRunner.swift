@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import ModelSwitchboardCore
 
 public struct ProcessResult: Sendable, Equatable {
   public let status: Int32
@@ -26,56 +27,8 @@ public enum ProcessRunner {
     process.standardOutput = stdout
     process.standardError = stderr
     try process.run()
-    // Drain both pipes BEFORE waiting for exit: readDataToEndOfFile returns
-    // when the child closes its write end, so this cannot deadlock. Waiting
-    // first would hang once output exceeds the 64KB pipe buffer (the child
-    // blocks writing while we block on exit).
-    let stdoutData = stdout.fileHandleForReading.readDataToEndOfFile()
-    let stderrData = stderr.fileHandleForReading.readDataToEndOfFile()
-    process.waitUntilExit()
-    let result = ProcessResult(
-      status: process.terminationStatus,
-      stdout: String(decoding: stdoutData, as: UTF8.self),
-      stderr: String(decoding: stderrData, as: UTF8.self)
-    )
-    if check, result.status != 0 {
-      throw ControllerError.operationFailed(
-        result.stderr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-          ? "command failed with exit \(result.status): \(executable)"
-          : result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-      )
-    }
+    let result = finish(process, stdout: stdout, stderr: stderr)
+    try throwIfFailed(result, executable: executable, check: check)
     return result
-  }
-
-  public static func processIsAlive(_ pid: Int?) -> Bool {
-    guard let pid, pid > 0 else { return false }
-    return kill(pid_t(pid), 0) == 0 || errno == EPERM
-  }
-
-  public static func signalProcessTree(_ pid: Int, signal: Int32) {
-    let processGroup = getpgid(pid_t(pid))
-    if processGroup > 0, processGroup != getpgrp() {
-      _ = killpg(processGroup, signal)
-    }
-    if let children = try? run("/usr/bin/pgrep", ["-P", String(pid)], check: false) {
-      for child in children.stdout.split(whereSeparator: \.isNewline).compactMap({ Int($0) })
-        .reversed()
-      {
-        signalProcessTree(child, signal: signal)
-      }
-    }
-    _ = kill(pid_t(pid), signal)
-  }
-
-  public static func terminate(_ pid: Int, timeout: TimeInterval = 12) {
-    signalProcessTree(pid, signal: SIGTERM)
-    let deadline = Date().addingTimeInterval(timeout)
-    while Date() < deadline, processIsAlive(pid) {
-      Thread.sleep(forTimeInterval: 0.2)
-    }
-    if processIsAlive(pid) {
-      signalProcessTree(pid, signal: SIGKILL)
-    }
   }
 }
