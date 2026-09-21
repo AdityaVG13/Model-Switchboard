@@ -2,8 +2,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-DEFAULT_LOCAL_HOST="Adityas""-MacBook"
-DEFAULT_LOCAL_USER="${MSW_PRIVACY_LOCAL_USER:-aditya}"
+# Machine-local identifiers are derived at runtime so no operator's name,
+# hostname, or tailnet identity is ever hardcoded in this repo.
+DEFAULT_LOCAL_HOST="${MSW_PRIVACY_LOCAL_HOST:-$(hostname -s 2>/dev/null || hostname)}"
+DEFAULT_LOCAL_USER="${MSW_PRIVACY_LOCAL_USER:-$(id -un)}"
 PERSONAL_PATTERN="${MSW_PRIVACY_PERSONAL_PATTERN:-(/Users/${DEFAULT_LOCAL_USER}|${MSW_PRIVACY_LOCAL_HOST:-$DEFAULT_LOCAL_HOST})}"
 if [[ -n "${MSW_PRIVACY_SECRET_VALUE_PATTERN:-}" ]]; then
   SECRET_VALUE_PATTERN="$MSW_PRIVACY_SECRET_VALUE_PATTERN"
