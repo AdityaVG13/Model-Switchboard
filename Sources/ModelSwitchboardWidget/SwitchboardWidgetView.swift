@@ -5,7 +5,6 @@ import ModelSwitchboardCore
 struct SwitchboardWidgetView: View {
     @Environment(\.widgetFamily) var family
     let entry: SwitchboardWidgetEntry
-    let features = AppFeatures.current
 
     var statuses: [ModelProfileStatus] {
         (entry.payload?.statuses ?? []).boardVisible.sortedForDisplay()
@@ -41,6 +40,6 @@ struct SwitchboardWidgetView: View {
         .containerBackground(for: .widget) {
             Color.clear
         }
-        .widgetURL(URL(string: features.edition == .plus ? "modelswitchboardplus://open" : "modelswitchboard://open"))
+        .widgetURL(URL(string: "modelswitchboard://open"))
     }
 }

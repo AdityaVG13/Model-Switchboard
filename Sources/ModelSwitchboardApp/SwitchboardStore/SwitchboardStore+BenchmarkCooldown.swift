@@ -12,7 +12,7 @@ extension SwitchboardStore {
     }
 
     var canStartBenchmarkNow: Bool {
-        features.supportsBenchmarks && benchmark?.running != true && benchmarkCooldownRemaining <= 0
+        benchmark?.running != true && benchmarkCooldownRemaining <= 0
     }
 
     var benchmarkCooldownLabel: String? {

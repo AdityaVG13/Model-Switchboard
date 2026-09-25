@@ -9,7 +9,6 @@ import ModelSwitchboardTestSupport
     let config = GatewayConfig.direct(name: "Lab", baseURL: "http://lab.example:8741")
     let store = SwitchboardStore(
         controllerBaseURL: config.direct?.baseURL ?? ControllerEndpointDefaults.baseURLString,
-        features: .base,
         gateway: GatewayContext(config: config),
         autoStartRefresh: false
     )
@@ -24,7 +23,6 @@ import ModelSwitchboardTestSupport
     let config = GatewayConfig.ssh(name: "Spark", sshUser: "a", sshHost: "spark")
     let store = SwitchboardStore(
         controllerBaseURL: "http://127.0.0.1:9999",
-        features: .base,
         gateway: GatewayContext(config: config),
         autoStartRefresh: false
     )
@@ -46,7 +44,6 @@ import ModelSwitchboardTestSupport
     let config = GatewayConfig.ssh(name: "Spark", sshUser: "a", sshHost: "spark")
     let store = SwitchboardStore(
         controllerBaseURL: "http://127.0.0.1:9999",
-        features: .base,
         gateway: GatewayContext(config: config),
         autoStartRefresh: false
     )
@@ -68,7 +65,6 @@ import ModelSwitchboardTestSupport
     let config = GatewayConfig.ssh(name: "Spark", sshUser: "a", sshHost: "spark")
     let store = SwitchboardStore(
         controllerBaseURL: "http://127.0.0.1:9999",
-        features: .base,
         gateway: GatewayContext(config: config),
         autoStartRefresh: false
     )

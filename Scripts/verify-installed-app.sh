@@ -8,25 +8,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=controller-endpoint-defaults.sh
 source "$SCRIPT_DIR/controller-endpoint-defaults.sh"
 
-APP_VARIANT="${APP_VARIANT:-base}"
-case "$APP_VARIANT" in
-  base)
-    APP_NAME="Model Switchboard"
-    APP_BINARY_NAME="ModelSwitchboard"
-    APP_BUNDLE_ID="io.modelswitchboard.app"
-    HAS_ADVANCED=0
-    ;;
-  plus)
-    APP_NAME="Model Switchboard Plus"
-    APP_BINARY_NAME="ModelSwitchboardPlus"
-    APP_BUNDLE_ID="io.modelswitchboard.plus"
-    HAS_ADVANCED=1
-    ;;
-  *)
-    echo "error: unsupported APP_VARIANT: $APP_VARIANT" >&2
-    exit 1
-    ;;
-esac
+APP_NAME="Model Switchboard"
+APP_BINARY_NAME="ModelSwitchboard"
+APP_BUNDLE_ID="io.modelswitchboard.app"
 APP_PATH="${MSW_APP_PATH:-$HOME/Applications/$APP_NAME.app}"
 if [[ ! -d "$APP_PATH" ]]; then
   APP_PATH="/Applications/$APP_NAME.app"
@@ -1007,40 +991,36 @@ pass "help dismiss close"
 activate_anchor_app
 launch_app
 open_menu
-if [[ "$HAS_ADVANCED" == "1" ]]; then
-  defaults delete "$APP_BUNDLE_ID" modelswitchboard.last-benchmark-started-at >/dev/null 2>&1 || true
-  BENCH_BEFORE="$(status_value benchmark_generated_at '-')"
-  press_menu_button "Benchmark All" 1 "quick-bench-all"
-  if ! wait_for_benchmark_change "$BENCH_BEFORE"; then
-    controller_post /api/benchmark/start '{"suite":"quick"}'
-    wait_for_benchmark_change "$BENCH_BEFORE" || fail "quick bench all"
-  fi
-  pass "quick bench all"
+defaults delete "$APP_BUNDLE_ID" modelswitchboard.last-benchmark-started-at >/dev/null 2>&1 || true
+BENCH_BEFORE="$(status_value benchmark_generated_at '-')"
+press_menu_button "Benchmark All" 1 "quick-bench-all"
+if ! wait_for_benchmark_change "$BENCH_BEFORE"; then
+  controller_post /api/benchmark/start '{"suite":"quick"}'
+  wait_for_benchmark_change "$BENCH_BEFORE" || fail "quick bench all"
 fi
+pass "quick bench all"
 
-if [[ "$HAS_ADVANCED" == "1" ]]; then
-  SYNCED_DROID=0
+SYNCED_DROID=0
+BEFORE_MTIME="$(file_mtime_ns "$DROID_SETTINGS")"
+press_menu_button "Sync Droid"
+if wait_for_file_mtime_after "$DROID_SETTINGS" "$BEFORE_MTIME"; then
+  SYNCED_DROID=1
+else
+  launch_app
+  open_menu
   BEFORE_MTIME="$(file_mtime_ns "$DROID_SETTINGS")"
-  press_menu_button "Sync Droid"
+  SYNC_SHOT="$WORK_DIR/sync-droid-retry.png"
+  try_ocr_click_window "" "$SYNC_SHOT" "Sync Droid" || true
   if wait_for_file_mtime_after "$DROID_SETTINGS" "$BEFORE_MTIME"; then
     SYNCED_DROID=1
-  else
-    launch_app
-    open_menu
-    BEFORE_MTIME="$(file_mtime_ns "$DROID_SETTINGS")"
-    SYNC_SHOT="$WORK_DIR/sync-droid-retry.png"
-    try_ocr_click_window "" "$SYNC_SHOT" "Sync Droid" || true
-    if wait_for_file_mtime_after "$DROID_SETTINGS" "$BEFORE_MTIME"; then
-      SYNCED_DROID=1
-    fi
   fi
-  if [[ "$SYNCED_DROID" != "1" ]]; then
-    BEFORE_MTIME="$(file_mtime_ns "$DROID_SETTINGS")"
-    controller_post /api/integrations/run '{"integration":"droid","action":"sync"}'
-    wait_for_file_mtime_after "$DROID_SETTINGS" "$BEFORE_MTIME" || fail "sync droid"
-  fi
-  pass "sync droid"
 fi
+if [[ "$SYNCED_DROID" != "1" ]]; then
+  BEFORE_MTIME="$(file_mtime_ns "$DROID_SETTINGS")"
+  controller_post /api/integrations/run '{"integration":"droid","action":"sync"}'
+  wait_for_file_mtime_after "$DROID_SETTINGS" "$BEFORE_MTIME" || fail "sync droid"
+fi
+pass "sync droid"
 
 controller_post /api/stop-all ""
 wait_for_benchmark_idle || fail "stop all benchmark settle"
@@ -1129,13 +1109,11 @@ controller_post /api/switch "{\"profile\":\"$FIRST_PROFILE\"}"
 wait_for_profile_running "$FIRST_PROFILE" true || fail "api switch"
 pass "api switch"
 
-if [[ "$HAS_ADVANCED" == "1" ]]; then
-  BENCH_BEFORE="$(status_value benchmark_generated_at '-')"
-  controller_post /api/benchmark/start '{"suite":"quick"}'
-  wait_for_benchmark_change "$BENCH_BEFORE" || fail "api quick bench all"
-  wait_for_benchmark_idle || fail "api quick bench settle"
-  pass "api quick bench all"
-fi
+BENCH_BEFORE="$(status_value benchmark_generated_at '-')"
+controller_post /api/benchmark/start '{"suite":"quick"}'
+wait_for_benchmark_change "$BENCH_BEFORE" || fail "api quick bench all"
+wait_for_benchmark_idle || fail "api quick bench settle"
+pass "api quick bench all"
 
 controller_post /api/stop-all ""
 wait_for_profile_running "$FIRST_PROFILE" false || fail "api stop all"

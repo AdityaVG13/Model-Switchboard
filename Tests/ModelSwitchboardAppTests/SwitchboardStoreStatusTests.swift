@@ -10,7 +10,6 @@ private func makeStore(
 ) -> SwitchboardStore {
     SwitchboardStore(
         controllerBaseURL: "http://127.0.0.1:8877",
-        features: .base,
         autoStartRefresh: false,
         loopbackEndpointProbe: loopbackEndpointProbe
     )
@@ -20,7 +19,6 @@ private func makeStore(
 @Test func bootstrapDiagnosticSurvivesFailedRefresh() async {
     let store = SwitchboardStore(
         controllerBaseURL: ControllerEndpointDefaults.baseURLString,
-        features: .base,
         autoStartRefresh: false,
         controllerClientFactory: { _, _ in
             struct Boom: Error {}
@@ -41,7 +39,6 @@ private func makeStore(
 @Test func unreachableRefreshUsesRecoveringCadenceInsteadOfIdle() async {
     let store = SwitchboardStore(
         controllerBaseURL: ControllerEndpointDefaults.baseURLString,
-        features: .base,
         autoStartRefresh: false,
         controllerClientFactory: { _, _ in
             throw URLError(.cannotFindHost)
@@ -82,7 +79,6 @@ private func makeStore(
 @Test func timeoutRefreshKeepsRecentCountsAndSkipsRecoveringCadence() async {
     let store = SwitchboardStore(
         controllerBaseURL: "http://spark.tail.ts.net:8877",
-        features: .base,
         gateway: GatewayContext(id: "spark", name: "Spark"),
         autoStartRefresh: false,
         controllerClientFactory: { _, _ in
@@ -107,7 +103,6 @@ private func makeStore(
 @Test func unreachableRemoteRefreshMentionsTailscale() async {
     let store = SwitchboardStore(
         controllerBaseURL: "http://spark.tail.ts.net:8877",
-        features: .base,
         gateway: GatewayContext(id: "spark", name: "Spark"),
         autoStartRefresh: false,
         controllerClientFactory: { _, _ in
@@ -189,7 +184,6 @@ private func makeStore(
 
     let store = SwitchboardStore(
         controllerBaseURL: "http://127.0.0.1:8877",
-        features: .plus,
         gateway: GatewayContext(id: "last-active-test", name: "Spark"),
         autoStartRefresh: false
     )
@@ -240,7 +234,6 @@ private func makeStore(
 
     let store = SwitchboardStore(
         controllerBaseURL: "http://127.0.0.1:8877",
-        features: .plus,
         gateway: GatewayContext(id: "auto-bench-test", name: "Spark"),
         autoStartRefresh: false
     )

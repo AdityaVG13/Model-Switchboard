@@ -6,7 +6,6 @@ struct HelpView: View {
     let openExampleProfilesDirectory: () -> Void
     let theme: DashboardTheme
     let accent: Color
-    let features = AppFeatures.current
     let scrollContentTrailingPadding: CGFloat = 22
 
     var body: some View {

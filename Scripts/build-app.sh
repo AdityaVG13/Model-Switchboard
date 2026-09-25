@@ -3,22 +3,9 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 CONFIGURATION="${CONFIGURATION:-Release}"
-APP_VARIANT="${APP_VARIANT:-base}"
 DIST_DIR="$ROOT_DIR/dist"
-case "$APP_VARIANT" in
-  base)
-    APP_NAME="Model Switchboard.app"
-    PRODUCT_NAME="ModelSwitchboard.app"
-    ;;
-  plus)
-    APP_NAME="Model Switchboard Plus.app"
-    PRODUCT_NAME="ModelSwitchboardPlus.app"
-    ;;
-  *)
-    echo "Unsupported APP_VARIANT: $APP_VARIANT" >&2
-    exit 1
-    ;;
-esac
+APP_NAME="Model Switchboard.app"
+PRODUCT_NAME="ModelSwitchboard.app"
 SOURCE_APP="$ROOT_DIR/.xcodebuild/Build/Products/$CONFIGURATION/$PRODUCT_NAME"
 TARGET_APP="$DIST_DIR/$APP_NAME"
 
@@ -37,7 +24,7 @@ strip_macho_binaries() {
 
 cd "$ROOT_DIR"
 # Skip nested embed; build-app embeds once into SOURCE_APP then copies to dist.
-SKIP_CONTROLLER_EMBED=1 APP_VARIANT="$APP_VARIANT" CONFIGURATION="$CONFIGURATION" \
+SKIP_CONTROLLER_EMBED=1 CONFIGURATION="$CONFIGURATION" \
   "$ROOT_DIR/Scripts/build-xcode-app.sh" >/dev/null
 "$ROOT_DIR/Scripts/embed-controller.sh" "$SOURCE_APP" >/dev/null
 

@@ -33,7 +33,7 @@
   <img src="Resources/Brand/terminal-demo.gif" alt="Terminal demo: model-switchboardctl summary, inventory, and profile directory" width="560"/>
 </td>
 <td align="center" width="42%" valign="middle">
-  <img src="Resources/Brand/panel-plus-dark.png" alt="Model Switchboard Plus menu bar panel: ready count, CPU/RAM/GPU sparklines, runtime filter, active-model hero card with live tok/s, and a dense standby model list" width="360"/>
+  <img src="Resources/Brand/panel-plus-dark.png" alt="Model Switchboard menu bar panel: ready count, CPU/RAM/GPU sparklines, runtime filter, active-model hero card with live tok/s, and a dense standby model list" width="360"/>
 </td>
 </tr>
 </table>
@@ -73,15 +73,11 @@ Click **Activate**. Every other model stops. The one you picked comes up at an O
 
 <table>
 <tr>
-<td align="center" width="33%" valign="top">
-  <img src="Resources/Brand/panel-base-dark.png" alt="Base edition panel: ready count, runtime filter, active-model hero card, and the standby model list with activate/stop and overflow actions" width="320"/>
-  <p><strong>Base</strong><br/>One-tap <code>Activate</code> / <code>Stop</code> per model, hero card for the live model, additive <code>Start</code>, <code>Restart</code>, and <code>Copy Endpoint URL</code> in the overflow menu.</p>
+<td align="center" width="50%" valign="top">
+  <img src="Resources/Brand/panel-plus-dark.png" alt="Model Switchboard menu bar panel: ready count, CPU/RAM/GPU sparklines, runtime filter, active-model hero card with live tok/s, and the standby model list" width="320"/>
+  <p><strong>Panel</strong><br/>One-tap <code>Activate</code> / <code>Stop</code> per model, hero card for the live model, live CPU / RAM / GPU sparklines, benchmark tok/s inline, <code>Sync Droid</code>, and the Benchmarks side panel.</p>
 </td>
-<td align="center" width="33%" valign="top">
-  <img src="Resources/Brand/panel-plus-dark.png" alt="Plus edition with CPU/RAM/GPU sparklines, live tok/s on the hero card, Benchmarks, and Sync Droid" width="320"/>
-  <p><strong>Plus</strong><br/>Adds live CPU / RAM / GPU sparklines, benchmark tok/s inline, <code>Sync Droid</code>, and the Benchmarks side panel.</p>
-</td>
-<td align="center" width="33%" valign="top">
+<td align="center" width="50%" valign="top">
   <img src="Resources/Brand/panel-benchmarks.png" alt="In-app Benchmarks panel: latest-run summary, prefill scaling (TTFT by context), and ranked best-decode bars per model" width="320"/>
   <p><strong>Benchmarks panel</strong><br/>Latest-run summary, <em>prefill scaling</em> (TTFT at 1k/4k/8k context), and ranked decode bars. <code>Export CSV</code>; every run lands as JSON + Markdown under <code>Controller/benchmark-results/</code>.</p>
 </td>
@@ -121,27 +117,11 @@ discovery/API routes, and troubleshooting; also see [SETUP.md](SETUP.md#remote-g
 
 ---
 
-## Base or Plus
+## One app
 
-*Same codebase, two apps.* Pick at install time. They live side by side as **Model Switchboard.app** and **Model Switchboard Plus.app** under `~/Applications/`.
+There is a single **Model Switchboard.app** under `~/Applications/` with everything in it: profile switching, live utilization badges, benchmarks, reopen-last, and integrations.
 
-Both editions share the controller contract, profile discovery, runtime tags, and launcher support. Plus adds operator UI on top: live utilization badges, benchmarks, reopen-last, and integrations.
-
-<div align="center">
-
-| | Base | Plus |
-|---|:---:|:---:|
-| Profile list with live status | ✓ | ✓ |
-| `Activate` / `Start` / `Stop` / `Restart` | ✓ | ✓ |
-| `Refresh` / `Stop All` | ✓ | ✓ |
-| `Launch At Login` + attached Settings / Help | ✓ | ✓ |
-| CPU / RAM / GPU utilization badges | - | ✓ |
-| `Benchmark All` + per-profile `Benchmark` | - | ✓ |
-| In-app Benchmarks panel + CSV export | - | ✓ |
-| `Reopen Last` | - | ✓ |
-| `Sync Droid` and future integration adapters | - | ✓ |
-
-</div>
+Previously there were Base and Plus editions. Base installs update in place and gain every feature automatically. If you ran Plus, install the unified app once: profiles, benchmarks, and controller data carry over, and remote gateways import on first launch. You can then delete the old `Model Switchboard Plus.app` (source installs remove it automatically).
 
 ---
 
@@ -157,8 +137,7 @@ Both editions share the controller contract, profile discovery, runtime tags, an
 
 **Signed DMG (recommended).** Grab the latest from **[Releases](https://github.com/AdityaVG13/Model-Switchboard/releases/latest)**:
 
-- `Model-Switchboard-<version>.dmg` (Base)
-- `Model-Switchboard-Plus-<version>.dmg` (Plus)
+- `Model-Switchboard-<version>.dmg`
 
 Open, drag to `Applications`, launch.
 
@@ -167,8 +146,7 @@ Open, drag to `Applications`, launch.
 ```bash
 git clone https://github.com/AdityaVG13/Model-Switchboard.git
 cd Model-Switchboard
-./Scripts/install.sh                   # Base
-./Scripts/install.sh --variant plus    # Plus
+./Scripts/install.sh
 ```
 
 The installer places a fresh build under `~/Applications/` and installs `model-switchboardctl` to `~/.local/bin`. It writes bash/zsh/fish completions and registers the app with Launch Services. It also forces a Spotlight import so Raycast and Alfred pick it up. Use `./Scripts/install.sh --help` for quiet mode, custom install paths, `--verify`, and `--skip-open`.
@@ -254,7 +232,7 @@ If something looks off, these labels tell you what the app is seeing right now:
 | `STALE` | Footer chip near the clock | Last successful status refresh is older than ~45 seconds. |
 | `CACHED` | Footer chip near the clock | Controller was temporarily unavailable and the app is showing last cached status. |
 | `ERROR` | Footer chip near the clock | Latest refresh or action returned an error. |
-| `RUNNING` / `READY` | Plus Benchmarks panel | Benchmark job is active / no benchmark currently running. |
+| `RUNNING` / `READY` | Benchmarks panel | Benchmark job is active / no benchmark currently running. |
 
 ---
 
@@ -268,7 +246,7 @@ See **[CHANGELOG.md](CHANGELOG.md)** for release-by-release detail and **[Releas
 
 - **Raycast**: extension scripts under [`Integrations/Raycast/`](Integrations/Raycast/) call the same controller API the menu bar uses.
 - **SwiftBar**: drop-in plugin at [`Controller/swiftbar/local-models.15s.sh`](Controller/swiftbar/local-models.15s.sh). It renders the same status, start, stop, and restart actions in any SwiftBar-friendly menu.
-- **Factory Droid**: `Sync Droid` (Plus only) pushes managed profiles into Droid's custom-model settings. First of several planned sync adapters.
+- **Factory Droid**: `Sync Droid` pushes managed profiles into Droid's custom-model settings.
 
 ---
 
@@ -295,7 +273,7 @@ PRs, issues, and profile recipes are welcome. A few ground rules that keep the p
 
 **`Sync Droid` is currently Factory-Droid-specific** because that's the agent I run. The integration slot is generic; the adapter is not. **PRs that add sync adapters for other local-model terminals or agentic tools are welcome** -- for example **Cursor**, **Windsurf**, **OpenAI Codex CLI**, **Zed**, **Continue**, **Aider**, **LM Studio**, **Ollama chat frontends**, or any **OpenAI-compatible consumer**.
 
-If you build one, implement the adapter in `ModelSwitchboardControllerCore` and register it with the native integration service. It then appears in the Plus menu automatically. Full contributor guidance lives in [SETUP.md](SETUP.md).
+If you build one, implement the adapter in `ModelSwitchboardControllerCore` and register it with the native integration service. It then appears in the menu automatically. Full contributor guidance lives in [SETUP.md](SETUP.md).
 
 Before opening a PR:
 

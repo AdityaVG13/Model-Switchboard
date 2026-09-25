@@ -3,8 +3,7 @@ import ModelSwitchboardCore
 
 extension ActiveProfileHeroView {
     var canBenchmark: Bool {
-        store.features.supportsBenchmarks
-            && profile.ready
+        profile.ready
             && store.canStartBenchmarkNow
             && !store.isBenchmarkInFlight(for: profile.profile)
     }

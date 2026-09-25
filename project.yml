@@ -32,7 +32,6 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: Resources/App/Info.plist
         MSW_DISPLAY_NAME: Model Switchboard
-        MSW_EDITION: base
         MSW_URL_NAME: io.modelswitchboard.app
         MSW_URL_SCHEME: modelswitchboard
         CODE_SIGN_ENTITLEMENTS: Resources/App/ModelSwitchboard.entitlements
@@ -42,38 +41,6 @@ targets:
       - package: MenuBarExtraAccess
         product: MenuBarExtraAccess
       - target: ModelSwitchboardWidget
-        embed: true
-        codeSign: true
-        copy:
-          destination: plugins
-    scheme:
-      testTargets:
-        - ModelSwitchboardTests
-
-  ModelSwitchboardPlus:
-    type: application
-    platform: macOS
-    sources:
-      - Sources/ModelSwitchboardApp
-      - path: Resources/App/ModelSwitchboard.icns
-        buildPhase: resources
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: io.modelswitchboard.plus
-        PRODUCT_NAME: ModelSwitchboardPlus
-        GENERATE_INFOPLIST_FILE: NO
-        INFOPLIST_FILE: Resources/App/Info.plist
-        MSW_DISPLAY_NAME: Model Switchboard Plus
-        MSW_EDITION: plus
-        MSW_URL_NAME: io.modelswitchboard.plus
-        MSW_URL_SCHEME: modelswitchboardplus
-        CODE_SIGN_ENTITLEMENTS: Resources/App/ModelSwitchboard.entitlements
-    dependencies:
-      - package: ModelSwitchboardPackage
-        product: ModelSwitchboardCore
-      - package: MenuBarExtraAccess
-        product: MenuBarExtraAccess
-      - target: ModelSwitchboardPlusWidget
         embed: true
         codeSign: true
         copy:
@@ -95,26 +62,6 @@ targets:
         INFOPLIST_FILE: Resources/Widget/Info.plist
         APPLICATION_EXTENSION_API_ONLY: YES
         MSW_WIDGET_DISPLAY_NAME: Model Switchboard Widget
-        MSW_EDITION: base
-        CODE_SIGN_ENTITLEMENTS: Resources/Widget/ModelSwitchboardWidget.entitlements
-    dependencies:
-      - package: ModelSwitchboardPackage
-        product: ModelSwitchboardCore
-
-  ModelSwitchboardPlusWidget:
-    type: app-extension
-    platform: macOS
-    sources:
-      - Sources/ModelSwitchboardWidget
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: io.modelswitchboard.plus.widget
-        PRODUCT_NAME: ModelSwitchboardPlusWidget
-        GENERATE_INFOPLIST_FILE: NO
-        INFOPLIST_FILE: Resources/Widget/Info.plist
-        APPLICATION_EXTENSION_API_ONLY: YES
-        MSW_WIDGET_DISPLAY_NAME: Model Switchboard Plus Widget
-        MSW_EDITION: plus
         CODE_SIGN_ENTITLEMENTS: Resources/Widget/ModelSwitchboardWidget.entitlements
     dependencies:
       - package: ModelSwitchboardPackage

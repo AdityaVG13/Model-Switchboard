@@ -4,7 +4,7 @@ import ModelSwitchboardCore
 extension HelpView {
     var quickStartBullets: [String] {
         [
-            "\(features.appDisplayName) already embeds the local controller. The first launch registers it; if macOS asks, allow it in System Settings → General → Login Items & Extensions.",
+            "Model Switchboard already embeds the local controller. The first launch registers it; if macOS asks, allow it in System Settings → General → Login Items & Extensions.",
             "The board starts empty. Open Settings → Open Profiles Folder, copy a file from `examples/` into that folder, fill in your model path (not a placeholder), then Refresh.",
             "Use `Start` to spawn a model, `Activate` to switch your primary endpoint (stopping others), and hold `Stop All` / `Stop Everything` to shut down running models before closing the lid or leaving the machine on battery."
         ]

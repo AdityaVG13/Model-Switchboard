@@ -3,11 +3,7 @@ import ModelSwitchboardCore
 
 extension MenuBarContentView {
     func startAttachedMonitors() {
-        if features.supportsBenchmarks {
-            systemMetrics.start()
-        } else {
-            systemMetrics.stop()
-        }
+        systemMetrics.start()
         syncHostMetricsMonitor(hasRemotes: hub.hasRemoteGateways)
     }
 

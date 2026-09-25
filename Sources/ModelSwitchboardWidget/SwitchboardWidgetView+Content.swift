@@ -6,7 +6,7 @@ extension SwitchboardWidgetView {
     var header: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(features.appDisplayName)
+                Text("Model Switchboard")
                     .font(.system(size: family == .systemSmall ? 13 : 15, weight: .bold, design: .rounded))
                 Text(modeTitle)
                     .font(.caption2)

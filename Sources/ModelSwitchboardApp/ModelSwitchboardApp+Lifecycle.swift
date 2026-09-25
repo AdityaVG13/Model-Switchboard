@@ -5,7 +5,7 @@ import ModelSwitchboardCore
 extension ModelSwitchboardApp {
     static func loadAndMigrateAuthToken() -> String {
         let defaults = UserDefaults.standard
-        let legacyKey = "controllerAuthToken"
+        let legacyKey = GatewayPlusMigration.legacyAuthTokenDefaultsKey
         let keychain = KeychainTokenStorage.shared.load() ?? ""
         if let oldToken = defaults.string(forKey: legacyKey), !oldToken.isEmpty {
             defaults.removeObject(forKey: legacyKey)

@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Weekly GitHub release check: when a newer tag exists, the panel header swaps the version label for an "Update x.y.z" link to the release download. Advisory only - offline, rate-limited, and dev builds stay silent.
+
+### Changed
+
+- **One unified app.** The Base/Plus split is gone: a single Model Switchboard ships benchmarks, integrations, utilization badges, and reopen-last to everyone. Base installs update in place and gain every feature; Plus users install once and their remote gateways plus any custom controller endpoint import on first launch (profiles, benchmarks, controller data, and keychain tokens already live in shared locations). One DMG, one widget, no `APP_VARIANT`. Note: Plus widgets must be re-added - the widget kind and extension ID changed.
+
 ### Fixed
 
 - Remote gateway Retry no longer blanks the dashboard or tears down a live SSH tunnel, and failed refreshes keep the last error and ready-count on screen instead of flashing the menu bar every poll.
@@ -40,7 +48,7 @@ All notable changes to this project are documented in this file.
 - Remote `start`/`restart`/`activate` of a `discovered-N` name no longer aliases onto a port-N launch claim; SwiftBar and Stop Everything ignore the same hidden discovery rows; Settings/Update no longer dump raw `localizedDescription` for non-deploy errors; LaunchAgent profile migration treats an unlistable folder as empty.
 - First-run empty board no longer says "check the controller connection" when the embedded controller is up and there are simply no profiles yet; Open Profiles Folder falls back to the Application Support path instead of doing nothing before the first status payload; Help and Settings use that path instead of a remote `~/model-profiles` placeholder.
 - Open Controller Root and Open Example Profiles no longer no-op before the controller folder exists; Open Profiles Folder seeds bundled `examples/` when bootstrap has not copied them yet; Help always offers Open Example Profiles instead of "controller root is not available yet".
-- `model-switchboardctl` finds the controller in `/Applications` as well as `~/Applications`, prefers Plus when both editions are installed, opens Plus (falling back to Base), and `profiles-dir` / `open-profiles` / `controller-root` fall back to Application Support when the controller is not answering yet. `capabilities` lists `open-app`, `open-profiles`, and `robot-docs`. The native controller `capabilities` contract matches the commands it actually accepts.
+- `model-switchboardctl` finds the controller in `/Applications` as well as `~/Applications`, prefers the unified app when a legacy Plus copy is also installed, opens the unified app (falling back to Plus), and `profiles-dir` / `open-profiles` / `controller-root` fall back to Application Support when the controller is not answering yet. `capabilities` lists `open-app`, `open-profiles`, and `robot-docs`. The native controller `capabilities` contract matches the commands it actually accepts.
 - LaunchAgent registration is no longer one-shot per process: after Login Items approval, opening the menu (or a recovering refresh) re-checks the agent, waits if macOS has enabled it, and drops the sticky diagnostic instead of requiring Quit and reopen. Registration and Login Items failures use a stable Settings sentence instead of Apple's `localizedDescription`.
 - After a Mac crash/reboot, DIRECT Tailscale gateways and the local controller no longer sit on `DIRECT · ERROR` / connection-refused until Force Update: DNS and connection-refused failures retry every 3s (not the idle 10 minutes), MagicDNS copy mentions Tailscale, local refused copy no longer blames a remote agent, and the local store refreshes again once the LaunchAgent is registered.
 - Discovered (unmanaged) listeners no longer render as ACTIVE while the ready count only includes file-backed profiles. Reopen Last Active and SSH port forwards ignore those hidden rows too.

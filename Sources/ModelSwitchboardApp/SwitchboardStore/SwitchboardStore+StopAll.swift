@@ -17,7 +17,6 @@ extension SwitchboardStore {
     }
 
     var canStartQuickBenchmark: Bool {
-        if !features.supportsBenchmarks { return false }
         if benchmark?.running == true { return false }
         if benchmarkCooldownRemaining > 0 { return false }
         return true

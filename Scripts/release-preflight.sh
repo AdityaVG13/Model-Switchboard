@@ -97,15 +97,10 @@ else
 fi
 
 if [[ "${MSW_PREFLIGHT_SKIP_BUILDS:-0}" != "1" ]]; then
-  note "building base app"
+  note "building app"
   ./Scripts/build-app.sh
   ./Scripts/verify-distribution.sh
-  pass "base app build"
-
-  note "building plus app"
-  APP_VARIANT=plus ./Scripts/build-app.sh
-  APP_VARIANT=plus ./Scripts/verify-distribution.sh
-  pass "plus app build"
+  pass "app build"
 else
   note "skipping app builds (MSW_PREFLIGHT_SKIP_BUILDS=1)"
 fi

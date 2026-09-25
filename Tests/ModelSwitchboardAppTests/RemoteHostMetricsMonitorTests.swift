@@ -97,7 +97,6 @@ private func withMetricsHub(
     let hub = GatewayHub(
         localStore: SwitchboardStore(
             controllerBaseURL: ControllerEndpointDefaults.baseURLString,
-            features: .base,
             autoStartRefresh: false,
             controllerClientFactory: { _, _ in throw URLError(.cannotConnectToHost) }
         ),
@@ -106,7 +105,6 @@ private func withMetricsHub(
             SwitchboardStore(
                 controllerBaseURL: baseURL,
                 controllerAuthToken: token,
-                features: .base,
                 gateway: GatewayContext(config: config),
                 autoStartRefresh: false,
                 controllerClientFactory: { base, auth in

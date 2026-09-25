@@ -7,7 +7,15 @@ extension LaunchAtLoginManager {
     func applyLoginItem(_ enabled: Bool) {
         do {
             if enabled {
-                try unregisterCompanionEditionLoginItem()
+                // Best-effort: legacy cleanup must never block enabling
+                // this app's own login item.
+                do {
+                    try unregisterLegacyPlusLoginItem()
+                } catch {
+                    Self.logger.error(
+                        "Legacy Plus login item cleanup failed: \(error.localizedDescription, privacy: .public)"
+                    )
+                }
                 try SMAppService.mainApp.register()
             } else {
                 try SMAppService.mainApp.unregister()

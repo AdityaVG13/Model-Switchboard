@@ -114,7 +114,6 @@ import ModelSwitchboardTestSupport
 @Test func staleRunningStateIsNotTreatedAsDisplayedRunning() {
     let store = SwitchboardStore(
         controllerBaseURL: "http://127.0.0.1:8877",
-        features: .base,
         autoStartRefresh: false
     )
     let now = Date(timeIntervalSince1970: 200)
@@ -175,7 +174,6 @@ import ModelSwitchboardTestSupport
 @Test func openProfilesFolderFallsBackToCanonicalPathBeforeFirstStatus() {
     let store = SwitchboardStore(
         controllerBaseURL: "http://127.0.0.1:8877",
-        features: .base,
         autoStartRefresh: false,
         cachedStateLoader: { nil }
     )
@@ -193,7 +191,6 @@ import ModelSwitchboardTestSupport
 @Test func openControllerRootAndExamplesFallBackBeforeFirstStatus() {
     let store = SwitchboardStore(
         controllerBaseURL: "http://127.0.0.1:8877",
-        features: .base,
         autoStartRefresh: false,
         cachedStateLoader: { nil }
     )

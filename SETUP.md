@@ -279,15 +279,15 @@ The app expects a controller base URL, defaulting to `http://127.0.0.1:8877`.
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/api/status` | Profile + readiness snapshot |
-| `GET` | `/api/integrations` | Optional integration manifest (Plus) |
-| `GET` | `/api/benchmark/status` | Current benchmark run state (Plus) |
+| `GET` | `/api/integrations` | Optional integration manifest |
+| `GET` | `/api/benchmark/status` | Current benchmark run state |
 | `POST` | `/api/start` | Start a profile |
 | `POST` | `/api/stop` | Stop a profile |
 | `POST` | `/api/restart` | Restart a profile |
 | `POST` | `/api/switch` | Stop others, start target (the `Activate` path) |
 | `POST` | `/api/stop-all` | Stop every managed profile |
-| `POST` | `/api/integrations/run` | Trigger an optional integration (Plus) |
-| `POST` | `/api/benchmark/start` | Run benchmark(s) (Plus) |
+| `POST` | `/api/integrations/run` | Trigger an optional integration |
+| `POST` | `/api/benchmark/start` | Run benchmark(s) |
 
 Any backend that returns the same profile-status JSON shape and supports these lifecycle actions is compatible. Exact contracts live in `Sources/ModelSwitchboardCore/Models/` and `Sources/ModelSwitchboardControllerCore/ControllerRouter.swift`.
 
@@ -323,7 +323,7 @@ Each completed run produces:
 - `latest.json`
 - `latest.md`
 
-The Plus panel reads `latest.json`. **Export CSV** writes a portable report from the current latest run.
+The Benchmarks panel reads `latest.json`. **Export CSV** writes a portable report from the current latest run.
 
 ---
 
@@ -338,11 +338,9 @@ swift test
 
 # Release build (produces dist/Model Switchboard.app)
 ./Scripts/build-app.sh
-APP_VARIANT=plus ./Scripts/build-app.sh   # Plus edition
 
 # DMG (produces dist/Model-Switchboard-<version>.dmg)
 ./Scripts/build-dmg.sh
-APP_VARIANT=plus ./Scripts/build-dmg.sh   # Plus DMG
 
 # Verify an installed copy
 ./Scripts/verify-installed-app.sh
@@ -351,8 +349,8 @@ APP_VARIANT=plus ./Scripts/build-dmg.sh   # Plus DMG
 Source installs use the hardened installer:
 
 ```bash
-./Scripts/install.sh --variant base
-./Scripts/install.sh --variant plus --skip-open
+./Scripts/install.sh
+./Scripts/install.sh --skip-open
 ./Scripts/install.sh --verify
 ```
 
@@ -424,10 +422,9 @@ Recommended local preflight before push/tag:
 
 Manual release checklist:
 
-- install the built Base and Plus apps side by side
-- toggle `Launch At Login` in one edition and confirm only that edition remains in macOS Login Items
-- run `APP_VARIANT=base ./Scripts/verify-installed-app.sh`
-- run `APP_VARIANT=plus ./Scripts/verify-installed-app.sh`
+- install the built app
+- toggle `Launch At Login` and confirm the app remains in macOS Login Items
+- run `./Scripts/verify-installed-app.sh`
 
 ---
 
@@ -441,7 +438,7 @@ Raycast users have two paths:
 This repo supports both:
 
 - `Scripts/install.sh` explicitly registers the app with Launch Services and forces a Spotlight import so Raycast can discover it faster.
-- `Scripts/model-switchboardctl` is a tiny controller CLI. Pick an edition with `MODEL_SWITCHBOARD_VARIANT=base|plus`. Agents can start with `model-switchboardctl capabilities`, `model-switchboardctl robot-docs guide`, `model-switchboardctl triage`, or `model-switchboardctl doctor --json`. Mutating commands support `--dry-run`/`--plan` and structured `--json` envelopes.
+- `Scripts/model-switchboardctl` is a tiny controller CLI. Agents can start with `model-switchboardctl capabilities`, `model-switchboardctl robot-docs guide`, `model-switchboardctl triage`, or `model-switchboardctl doctor --json`. Mutating commands support `--dry-run`/`--plan` and structured `--json` envelopes.
 - `Integrations/Raycast/Script Commands/` has Script Commands for status, opening the profiles folder, stopping all models, and running quick benchmarks.
 
 If Finder shows `.app` extensions, that is the macOS `AppleShowAllExtensions` Finder preference, not a bundle naming issue.
@@ -463,7 +460,7 @@ Each runtime is tracked by a managed PID file. If you started the process outsid
 See [Known limitations](#known-limitations); the widget extension is bundled correctly but only registers reliably with a Developer-ID-signed build.
 
 **Benchmarks panel is empty or cooldown won't clear.**
-The Plus panel reads `Controller/benchmark-results/latest.json`. Delete it to reset the panel, or run `Benchmark All` once to regenerate.
+The Benchmarks panel reads `Controller/benchmark-results/latest.json`. Delete it to reset the panel, or run `Benchmark All` once to regenerate.
 
 **Controller port `8877` is already in use.**
 The default can be overridden when the controller starts. If you changed it, also update the controller URL in the app's `Settings` panel.
@@ -482,10 +479,10 @@ The widget target (`ModelSwitchboardWidget`) is real. It is embedded at `Content
 APP="${MSW_APP_PATH:-}"
 if [ -z "$APP" ]; then
   for candidate in \
-    "/Applications/Model Switchboard Plus.app" \
     "/Applications/Model Switchboard.app" \
-    "$HOME/Applications/Model Switchboard Plus.app" \
-    "$HOME/Applications/Model Switchboard.app"
+    "$HOME/Applications/Model Switchboard.app" \
+    "/Applications/Model Switchboard Plus.app" \
+    "$HOME/Applications/Model Switchboard Plus.app"
   do
     [ -d "$candidate" ] && APP="$candidate" && break
   done

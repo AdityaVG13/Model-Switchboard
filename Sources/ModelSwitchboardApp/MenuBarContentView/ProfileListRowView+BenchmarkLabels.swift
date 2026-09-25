@@ -3,8 +3,7 @@ import ModelSwitchboardCore
 
 extension ProfileListRowView {
     var canBenchmark: Bool {
-        store.features.supportsBenchmarks
-            && profile.ready
+        profile.ready
             && store.canStartBenchmarkNow
             && !store.isBenchmarkInFlight(for: profile.profile)
     }

@@ -3,21 +3,15 @@ import WidgetKit
 import ModelSwitchboardCore
 
 struct ModelSwitchboardStatusWidget: Widget {
-    private let features = AppFeatures.current
     var kind: String {
-        switch features.edition {
-        case .base:
-            return "ModelSwitchboardStatusWidget"
-        case .plus:
-            return "ModelSwitchboardPlusStatusWidget"
-        }
+        "ModelSwitchboardStatusWidget"
     }
 
     var body: some WidgetConfiguration {
         AppIntentConfiguration(kind: kind, intent: SwitchboardWidgetConfigurationIntent.self, provider: SwitchboardTimelineProvider()) { entry in
             SwitchboardWidgetView(entry: entry)
         }
-        .configurationDisplayName(features.appDisplayName)
+        .configurationDisplayName("Model Switchboard")
         .description("Shows local model readiness and quick runtime context.")
         .supportedFamilies([.systemSmall, .systemMedium])
     }

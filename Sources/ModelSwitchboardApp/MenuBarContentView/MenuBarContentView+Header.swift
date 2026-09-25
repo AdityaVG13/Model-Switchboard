@@ -9,18 +9,25 @@ extension MenuBarContentView {
                 Spacer()
                 HStack(spacing: 8) {
                     headerRefreshControl
-                    Text("v\(Self.appVersion)")
-                        .font(.system(size: 10, weight: .medium).monospacedDigit())
-                        .foregroundStyle(theme.faint)
-                        .accessibilityLabel("Version \(Self.appVersion)")
+                    if let release = updateStatus.available {
+                        Link("Update \(release.version)", destination: release.url)
+                            .font(.system(size: 10, weight: .medium).monospacedDigit())
+                            .accessibilityLabel("Download update \(release.version)")
+                    } else {
+                        Text("v\(Self.appVersion)")
+                            .font(.system(size: 10, weight: .medium).monospacedDigit())
+                            .foregroundStyle(theme.faint)
+                            .accessibilityLabel("Version \(Self.appVersion)")
+                    }
+                }
+                .task {
+                    await updateStatus.checkIfDue()
                 }
             }
 
-            if features.supportsBenchmarks {
-                // Always keep This Mac utilization visible; remote host metrics
-                // live in gateway section chips / Remote Hosts, not here.
-                utilizationGrid
-            }
+            // Always keep This Mac utilization visible; remote host metrics
+            // live in gateway section chips / Remote Hosts, not here.
+            utilizationGrid
 
             headerFilterTabs
         }

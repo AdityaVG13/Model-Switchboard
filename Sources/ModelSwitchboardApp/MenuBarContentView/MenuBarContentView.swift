@@ -8,7 +8,6 @@ struct MenuBarContentView: View {
 
     @Bindable var store: SwitchboardStore
     @Bindable var hub: GatewayHub
-    let features: AppFeatures
     @ObservedObject var launchAtLoginManager: LaunchAtLoginManager
     @Binding var controllerBaseURL: String
     @Binding var controllerAuthToken: String
@@ -21,7 +20,6 @@ struct MenuBarContentView: View {
     init(
         store: SwitchboardStore,
         hub: GatewayHub? = nil,
-        features: AppFeatures,
         launchAtLoginManager: LaunchAtLoginManager,
         controllerBaseURL: Binding<String>,
         controllerAuthToken: Binding<String>,
@@ -32,7 +30,6 @@ struct MenuBarContentView: View {
     ) {
         self.store = store
         self.hub = hub ?? GatewayHub(localStore: store)
-        self.features = features
         self.launchAtLoginManager = launchAtLoginManager
         self._controllerBaseURL = controllerBaseURL
         self._controllerAuthToken = controllerAuthToken
@@ -69,4 +66,5 @@ struct MenuBarContentView: View {
     @StateObject var systemMetrics: SystemMetricsMonitor
     @State var hostMetricsMonitor = RemoteHostMetricsMonitor()
     @State var activeResizeStartFrame: NSRect?
+    @State var updateStatus = AppUpdateStatus(currentVersion: MenuBarContentView.appVersion)
 }

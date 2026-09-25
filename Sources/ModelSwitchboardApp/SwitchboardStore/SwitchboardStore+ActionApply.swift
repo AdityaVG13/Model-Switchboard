@@ -25,11 +25,11 @@ extension SwitchboardStore {
     func apply(payload: ControllerStatusPayload, considerAutoBenchmark: Bool = true) {
         statuses = payload.statuses
         rememberLastActiveProfiles(from: payload.statuses)
-        benchmark = features.supportsBenchmarks ? payload.benchmark : nil
+        benchmark = payload.benchmark
         if benchmark?.running == false {
             activeBenchmarkProfiles = []
         }
-        integrations = features.supportsIntegrations ? payload.integrations : []
+        integrations = payload.integrations
         profilesDirectory = payload.profilesDirectory
         controllerRoot = payload.controllerRoot
         if considerAutoBenchmark {

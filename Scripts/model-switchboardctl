@@ -18,10 +18,10 @@ CONTROLLER_BIN="${MODEL_SWITCHBOARD_CONTROLLER_BIN:-}"
 if [ -z "$CONTROLLER_BIN" ]; then
   for candidate in \
     "$SCRIPT_DIR/../Controller/bin/ModelSwitchboardController" \
-    "/Applications/Model Switchboard Plus.app/Contents/Resources/ModelSwitchboardController" \
     "/Applications/Model Switchboard.app/Contents/Resources/ModelSwitchboardController" \
-    "$HOME/Applications/Model Switchboard Plus.app/Contents/Resources/ModelSwitchboardController" \
-    "$HOME/Applications/Model Switchboard.app/Contents/Resources/ModelSwitchboardController"
+    "$HOME/Applications/Model Switchboard.app/Contents/Resources/ModelSwitchboardController" \
+    "/Applications/Model Switchboard Plus.app/Contents/Resources/ModelSwitchboardController" \
+    "$HOME/Applications/Model Switchboard Plus.app/Contents/Resources/ModelSwitchboardController"
   do
     if [ -x "$candidate" ]; then CONTROLLER_BIN="$candidate"; break; fi
   done
@@ -186,7 +186,7 @@ case "$command" in
     ;;
   bench-all) json_action '/api/benchmark/start' '{"suite":"quick"}' ;;
   open-app)
-    open -a 'Model Switchboard Plus' 2>/dev/null || open -a 'Model Switchboard'
+    open -a 'Model Switchboard' 2>/dev/null || open -a 'Model Switchboard Plus'
     ;;
   open-profiles)
     dir="$(extract_path profiles_dir 2>/dev/null || true)"

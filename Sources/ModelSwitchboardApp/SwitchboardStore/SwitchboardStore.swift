@@ -14,7 +14,6 @@ final class SwitchboardStore {
 
     var controllerBaseURL: String
     var controllerAuthToken: String
-    let features: AppFeatures
     /// Which gateway this store fronts. Remote stores skip local-only behavior:
     /// the loopback endpoint probe (remote profiles report loopback URLs that
     /// are only loopback *on the remote host*) and the shared status cache.
@@ -64,7 +63,6 @@ final class SwitchboardStore {
     init(
         controllerBaseURL: String,
         controllerAuthToken: String = "",
-        features: AppFeatures = .current,
         gateway: GatewayContext = .local,
         autoStartRefresh: Bool = true,
         loopbackEndpointProbe: LoopbackEndpointProbe? = nil,
@@ -74,7 +72,6 @@ final class SwitchboardStore {
     ) {
         self.controllerBaseURL = controllerBaseURL
         self.controllerAuthToken = controllerAuthToken
-        self.features = features
         self.gateway = gateway
         self.loopbackEndpointProbeFastUntil = Date().addingTimeInterval(Constants.loopbackEndpointProbeFastWindowSeconds)
         self.usesCustomLoopbackEndpointProbe = loopbackEndpointProbe != nil

@@ -34,7 +34,7 @@ extension ModelSwitchboardApp {
         item.button?.toolTip = hub.menuBarHelp
         // Let SwiftUI own button contents; clearing title / forcing imageOnly
         // clips the ready-count onto neighboring menu bar items.
-        item.button?.setAccessibilityLabel(features.appDisplayName)
+        item.button?.setAccessibilityLabel("Model Switchboard")
         // Rate-limit spam clicks on the menu bar icon (black-flash thrash).
         statusItemClickGate.attach(to: item)
     }

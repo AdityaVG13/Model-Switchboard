@@ -8,7 +8,6 @@ shopt -s lastpipe 2>/dev/null || true
 umask 022
 
 REPO_URL="${REPO_URL:-https://github.com/AdityaVG13/Model-Switchboard.git}"
-APP_VARIANT="${APP_VARIANT:-base}"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/Applications}"
 BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
 SYSTEM_APPLICATIONS_DIR="${SYSTEM_APPLICATIONS_DIR:-/Applications}"
@@ -37,7 +36,6 @@ Usage: install.sh [options]
 Build and install Model Switchboard from source.
 
 Options:
-  --variant base|plus        Install Base or Plus (default: APP_VARIANT or base)
   --install-dir PATH         App install directory (default: ~/Applications)
   --bin-dir PATH             CLI install directory (default: ~/.local/bin)
   --configuration NAME       Xcode configuration (default: Release)
@@ -52,7 +50,7 @@ Options:
   -h, --help                 Show this help
 
 Environment:
-  APP_VARIANT, INSTALL_DIR, BIN_DIR, CONFIGURATION, REPO_URL,
+  INSTALL_DIR, BIN_DIR, CONFIGURATION, REPO_URL,
   HTTP_PROXY, HTTPS_PROXY
 USAGE
 }
@@ -155,8 +153,10 @@ parse_args() {
     case "$1" in
       --variant)
         shift
-        [ "$#" -gt 0 ] || die "--variant requires base or plus"
-        APP_VARIANT="$1"
+        # Removed: one unified app. Accept-and-ignore so old copy-pasted
+        # install commands keep working.
+        [ "$#" -gt 0 ] || die "--variant requires a value"
+        warn "--variant is deprecated and ignored; one Model Switchboard app is installed"
         ;;
       --install-dir)
         shift
@@ -247,19 +247,8 @@ resolve_root() {
 }
 
 setup_app_names() {
-  case "$APP_VARIANT" in
-    base)
-      APP_NAME="Model Switchboard.app"
-      LEGACY_APP_NAME="ModelSwitchboard.app"
-      ;;
-    plus)
-      APP_NAME="Model Switchboard Plus.app"
-      LEGACY_APP_NAME=""
-      ;;
-    *)
-      die "unsupported APP_VARIANT: $APP_VARIANT"
-      ;;
-  esac
+  APP_NAME="Model Switchboard.app"
+  LEGACY_APP_NAME="ModelSwitchboard.app"
   DIST_APP="$ROOT_DIR/dist/$APP_NAME"
   LEGACY_DIST_APP="${LEGACY_APP_NAME:+$ROOT_DIR/dist/$LEGACY_APP_NAME}"
   INSTALL_APP="$INSTALL_DIR/$APP_NAME"
@@ -358,11 +347,18 @@ install_app_bundle() {
     pkill -f 'Model ?Switchboard( Plus)?\.app/Contents' || true
   sleep 1 || true
   run_with_spinner "Building $APP_NAME" \
-    env APP_VARIANT="$APP_VARIANT" CONFIGURATION="$CONFIGURATION" "$ROOT_DIR/Scripts/build-app.sh"
+    env CONFIGURATION="$CONFIGURATION" "$ROOT_DIR/Scripts/build-app.sh"
   [ -d "$DIST_APP" ] || die "build did not produce app: $DIST_APP"
   rm -rf "$INSTALL_APP"
   if [ -n "$LEGACY_DIST_APP" ]; then
     rm -rf "$LEGACY_DIST_APP" "$LEGACY_INSTALL_APP"
+  fi
+  # One-way upgrade: a legacy Plus install must not survive alongside the
+  # unified app (two menu bar icons, two controllers fighting over :8877).
+  # Plus prefs stay on disk so first launch can import gateways/endpoints.
+  if [ -d "$INSTALL_DIR/Model Switchboard Plus.app" ]; then
+    info "Removing legacy Model Switchboard Plus.app (superseded by $APP_NAME)"
+    rm -rf "$INSTALL_DIR/Model Switchboard Plus.app"
   fi
   run_with_spinner "Installing $APP_NAME" ditto "$DIST_APP" "$INSTALL_APP"
   if [ -w "$SYSTEM_APPLICATIONS_DIR" ]; then
@@ -370,6 +366,7 @@ install_app_bundle() {
     if [ -n "$LEGACY_SYSTEM_INSTALL_APP" ]; then
       rm -rf "$LEGACY_SYSTEM_INSTALL_APP"
     fi
+    rm -rf "$SYSTEM_APPLICATIONS_DIR/Model Switchboard Plus.app"
   fi
   xattr -dr com.apple.quarantine "$DIST_APP" >/dev/null 2>&1 || true
   xattr -dr com.apple.quarantine "$INSTALL_APP" >/dev/null 2>&1 || true
@@ -455,11 +452,9 @@ print_header() {
   [ "$QUIET" -eq 1 ] && return 0
   if [ "$HAS_GUM" -eq 1 ] && [ "$NO_GUM" -eq 0 ]; then
     gum style \
-      "$(gum style --foreground 42 --bold 'Model Switchboard installer')" \
-      "$(gum style --foreground 245 "Variant: $APP_VARIANT")"
+      "$(gum style --foreground 42 --bold 'Model Switchboard installer')"
   else
     printf '\033[1;32mModel Switchboard installer\033[0m\n'
-    printf '\033[0;90mVariant: %s\033[0m\n' "$APP_VARIANT"
   fi
 }
 

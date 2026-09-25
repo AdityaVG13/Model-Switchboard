@@ -10,7 +10,6 @@ extension ModelSwitchboardApp {
                 MenuBarContentView(
                     store: store,
                     hub: hub,
-                    features: features,
                     launchAtLoginManager: launchAtLoginManager,
                     controllerBaseURL: $controllerBaseURL,
                     controllerAuthToken: $controllerAuthToken,

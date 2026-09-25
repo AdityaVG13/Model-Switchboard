@@ -17,13 +17,11 @@ extension ActiveProfileHeroView {
             actionButton("Restart", disabled: isBusy) {
                 Task { await store.restart(profile.profile) }
             }
-            if store.features.supportsBenchmarks {
-                actionButton("Benchmark", disabled: isBusy || !canBenchmark) {
-                    onOpenBenchmarks?()
-                    Task { await store.quickBenchmark([profile.profile]) }
-                }
-                .help(benchmarkHelp)
+            actionButton("Benchmark", disabled: isBusy || !canBenchmark) {
+                onOpenBenchmarks?()
+                Task { await store.quickBenchmark([profile.profile]) }
             }
+            .help(benchmarkHelp)
         }
     }
 }

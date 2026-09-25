@@ -10,7 +10,6 @@ private struct TestBoom: Error {}
 private func makeLocalStore() -> SwitchboardStore {
     SwitchboardStore(
         controllerBaseURL: ControllerEndpointDefaults.baseURLString,
-        features: .base,
         autoStartRefresh: false,
         controllerClientFactory: { _, _ in throw TestBoom() }
     )
@@ -29,7 +28,6 @@ private func makeHub(
             SwitchboardStore(
                 controllerBaseURL: baseURL,
                 controllerAuthToken: token,
-                features: .base,
                 gateway: GatewayContext(config: config),
                 autoStartRefresh: autoStartRemoteRefresh,
                 controllerClientFactory: { _, _ in throw TestBoom() }
@@ -229,7 +227,6 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
     let sshConfig = GatewayConfig.ssh(name: "Spark", sshUser: "a", sshHost: "spark")
     let sshStore = SwitchboardStore(
         controllerBaseURL: "http://127.0.0.1:9999",
-        features: .base,
         gateway: GatewayContext(config: sshConfig),
         autoStartRefresh: false
     )
@@ -323,7 +320,6 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
                 SwitchboardStore(
                     controllerBaseURL: baseURL,
                     controllerAuthToken: token,
-                    features: .base,
                     gateway: GatewayContext(config: config),
                     autoStartRefresh: false,
                     controllerClientFactory: { _, _ in throw TestBoom() }
@@ -373,7 +369,6 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
                 SwitchboardStore(
                     controllerBaseURL: baseURL,
                     controllerAuthToken: token,
-                    features: .base,
                     gateway: GatewayContext(config: config),
                     autoStartRefresh: false,
                     controllerClientFactory: { _, _ in throw TestBoom() }
@@ -426,7 +421,6 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
                 let store = SwitchboardStore(
                     controllerBaseURL: baseURL,
                     controllerAuthToken: token,
-                    features: .base,
                     gateway: GatewayContext(config: config),
                     autoStartRefresh: false,
                     controllerClientFactory: { _, _ in throw TestBoom() }
@@ -468,7 +462,6 @@ private func withTestDefaults(_ body: @MainActor (UserDefaults, String) throws -
                 SwitchboardStore(
                     controllerBaseURL: baseURL,
                     controllerAuthToken: token,
-                    features: .base,
                     gateway: GatewayContext(config: config),
                     autoStartRefresh: false,
                     controllerClientFactory: { _, _ in throw TestBoom() }
@@ -530,4 +523,69 @@ private func withTestDefaultsAsync(
     defer { defaults.removePersistentDomain(forName: suiteName) }
     let service = "io.modelswitchboard.tests.\(UUID().uuidString)"
     try await body(defaults, service)
+}
+
+@MainActor
+@Test func plusGatewaysMigrateOnFirstLaunch() throws {
+    try withTestDefaults { defaults, service in
+        let legacy = [GatewayConfig.direct(name: "Lab", baseURL: "http://10.0.0.9:8877")]
+        let legacyData = try JSONEncoder().encode(legacy)
+        GatewayPlusMigration.importIfNeeded(to: defaults, readLegacyValue: { _, _ in legacyData })
+        #expect(GatewayConfigStore.load(from: defaults).count == 1)
+        let hub = makeHub(defaults: defaults, keychainService: service)
+        #expect(hub.remoteRuntimes.count == 1)
+    }
+}
+
+@MainActor
+@Test func plusMigrationNeverClobbersOwnGateways() throws {
+    try withTestDefaults { defaults, service in
+        let own = [GatewayConfig.direct(name: "Mine", baseURL: "http://127.0.0.1:9999")]
+        GatewayConfigStore.save(own, to: defaults)
+        let legacy = [GatewayConfig.direct(name: "Lab", baseURL: "http://10.0.0.9:8877")]
+        let legacyData = try JSONEncoder().encode(legacy)
+        GatewayPlusMigration.importIfNeeded(to: defaults, readLegacyValue: { _, _ in legacyData })
+        let hub = makeHub(defaults: defaults, keychainService: service)
+        #expect(hub.remoteRuntimes.count == 1)
+        #expect(hub.remoteRuntimes.first?.config.name == "Mine")
+        #expect(GatewayConfigStore.load(from: defaults).map(\.name) == ["Mine"])
+    }
+}
+
+@MainActor
+@Test func plusMigrationImportsCustomEndpoint() throws {
+    try withTestDefaults { defaults, _ in
+        GatewayPlusMigration.importIfNeeded(
+            to: defaults,
+            readLegacyValue: { _, _ in nil },
+            readLegacyString: { key, _ in
+                key == ControllerEndpointDefaults.baseURLUserDefaultsKey ? "http://10.0.0.9:9999" : nil
+            })
+        #expect(
+            defaults.string(forKey: ControllerEndpointDefaults.baseURLUserDefaultsKey)
+                == "http://10.0.0.9:9999")
+    }
+    // An endpoint the user already set wins over the legacy one.
+    try withTestDefaults { defaults, _ in
+        defaults.set("http://127.0.0.1:1111", forKey: ControllerEndpointDefaults.baseURLUserDefaultsKey)
+        GatewayPlusMigration.importIfNeeded(
+            to: defaults,
+            readLegacyValue: { _, _ in nil },
+            readLegacyString: { _, _ in "http://10.0.0.9:9999" })
+        #expect(
+            defaults.string(forKey: ControllerEndpointDefaults.baseURLUserDefaultsKey)
+                == "http://127.0.0.1:1111")
+    }
+}
+
+@MainActor
+@Test func plusMigrationSkipsCorruptLegacyData() throws {
+    try withTestDefaults { defaults, service in
+        GatewayPlusMigration.importIfNeeded(
+            to: defaults, readLegacyValue: { _, _ in Data("not-json".utf8) })
+        #expect(GatewayConfigStore.load(from: defaults).isEmpty)
+        #expect(defaults.data(forKey: GatewayConfigStore.defaultsKey) == nil)
+        let hub = makeHub(defaults: defaults, keychainService: service)
+        #expect(hub.remoteRuntimes.isEmpty)
+    }
 }

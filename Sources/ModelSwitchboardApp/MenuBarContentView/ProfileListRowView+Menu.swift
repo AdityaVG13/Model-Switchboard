@@ -13,10 +13,8 @@ extension ProfileListRowView {
                 Task { await store.restart(profile.profile) }
             }
             .disabled(isBusy)
-            if store.features.supportsBenchmarks {
-                Divider()
-                benchmarkMenuItems
-            }
+            Divider()
+            benchmarkMenuItems
             Divider()
             copyEndpointButton
         } label: {

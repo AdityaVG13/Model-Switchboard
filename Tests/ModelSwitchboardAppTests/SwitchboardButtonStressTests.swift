@@ -26,7 +26,6 @@ import ModelSwitchboardTestSupport
 
     let store = SwitchboardStore(
         controllerBaseURL: StressTestConfig.baseURL,
-        features: .plus,
         autoStartRefresh: false,
         loopbackEndpointProbe: { _ in [] },
         controllerClientFactory: { try ControllerClient(baseURLString: $0, authToken: $1, session: session) },
@@ -249,7 +248,6 @@ import ModelSwitchboardTestSupport
 
     let store = SwitchboardStore(
         controllerBaseURL: StressTestConfig.baseURL,
-        features: .plus,
         autoStartRefresh: false,
         controllerClientFactory: { _, _ in throw URLError(.cannotConnectToHost) },
         cachePayloadWriter: { _, _ in }

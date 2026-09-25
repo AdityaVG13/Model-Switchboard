@@ -3,21 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION="$(tr -d '[:space:]' < "$ROOT_DIR/VERSION")"
-APP_VARIANT="${APP_VARIANT:-base}"
-case "$APP_VARIANT" in
-  base)
-    APP_NAME="Model Switchboard.app"
-    DMG_NAME="Model-Switchboard-$VERSION.dmg"
-    ;;
-  plus)
-    APP_NAME="Model Switchboard Plus.app"
-    DMG_NAME="Model-Switchboard-Plus-$VERSION.dmg"
-    ;;
-  *)
-    echo "Unsupported APP_VARIANT: $APP_VARIANT" >&2
-    exit 1
-    ;;
-esac
+APP_NAME="Model Switchboard.app"
+DMG_NAME="Model-Switchboard-$VERSION.dmg"
 APP_PATH="$ROOT_DIR/dist/$APP_NAME"
 DMG_PATH="$ROOT_DIR/dist/$DMG_NAME"
 IDENTITY="${APPLE_DEVELOPER_IDENTITY:?set APPLE_DEVELOPER_IDENTITY}"
@@ -28,7 +15,7 @@ API_ISSUER_ID="${APPLE_NOTARY_API_ISSUER_ID:-}"
 
 cd "$ROOT_DIR"
 
-APP_VARIANT="$APP_VARIANT" "$ROOT_DIR/Scripts/build-app.sh" >/dev/null
+"$ROOT_DIR/Scripts/build-app.sh" >/dev/null
 
 # Sign the embedded controller binary individually before the outer app. The
 # SwiftPM-built controller is an unsigned Mach-O copied into Contents/Resources/
@@ -56,7 +43,7 @@ codesign \
   "$APP_PATH"
 "$ROOT_DIR/Scripts/verify-privacy.sh" "$APP_PATH"
 
-APP_VARIANT="$APP_VARIANT" SKIP_BUILD=1 "$ROOT_DIR/Scripts/build-dmg.sh" >/dev/null
+SKIP_BUILD=1 "$ROOT_DIR/Scripts/build-dmg.sh" >/dev/null
 
 if [ -n "$NOTARY_PROFILE" ]; then
   xcrun notarytool submit "$DMG_PATH" --keychain-profile "$NOTARY_PROFILE" --wait

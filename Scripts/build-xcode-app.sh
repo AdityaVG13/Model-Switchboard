@@ -6,22 +6,8 @@ CONFIGURATION="${CONFIGURATION:-Debug}"
 PROJECT_FILE="$ROOT_DIR/ModelSwitchboard.xcodeproj"
 VERSION="$(tr -d '[:space:]' < "$ROOT_DIR/VERSION")"
 BUILD_NUMBER="${BUILD_NUMBER:-$VERSION}"
-APP_VARIANT="${APP_VARIANT:-base}"
-
-case "$APP_VARIANT" in
-  base)
-    SCHEME_NAME="ModelSwitchboard"
-    PRODUCT_NAME="ModelSwitchboard"
-    ;;
-  plus)
-    SCHEME_NAME="ModelSwitchboardPlus"
-    PRODUCT_NAME="ModelSwitchboardPlus"
-    ;;
-  *)
-    echo "Unsupported APP_VARIANT: $APP_VARIANT" >&2
-    exit 1
-    ;;
-esac
+SCHEME_NAME="ModelSwitchboard"
+PRODUCT_NAME="ModelSwitchboard"
 
 cd "$ROOT_DIR"
 

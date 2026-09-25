@@ -13,7 +13,6 @@ private func makeRemoteStore(
 ) -> SwitchboardStore {
     SwitchboardStore(
         controllerBaseURL: "http://127.0.0.1:9911",
-        features: .base,
         gateway: remoteContext,
         autoStartRefresh: false,
         loopbackEndpointProbe: loopbackEndpointProbe,
@@ -90,7 +89,6 @@ private func makeRemoteStore(
 @Test func localStoreKeepsLegacyDefaultsKeys() {
     let store = SwitchboardStore(
         controllerBaseURL: ControllerEndpointDefaults.baseURLString,
-        features: .base,
         autoStartRefresh: false
     )
     #expect(store.gateway == .local)

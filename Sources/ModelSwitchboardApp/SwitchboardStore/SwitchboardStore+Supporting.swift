@@ -12,7 +12,6 @@ extension SwitchboardStore {
     }
 
     var canReopenLastActive: Bool {
-        features.supportsBenchmarks &&
         !reopenableLastActiveProfiles.isEmpty &&
         !pendingGlobalActions.contains(.reopenLastActive) &&
         !sortedStatuses.contains(where: \.running) &&
