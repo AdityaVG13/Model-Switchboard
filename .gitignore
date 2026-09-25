@@ -96,3 +96,5 @@ tests/artifacts/
 
 # module-coupling-topology skill books (machine-local, never ship)
 .module-coupling-topology/
+AGENTS.md
+CLAUDE.md
