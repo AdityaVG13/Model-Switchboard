@@ -157,7 +157,7 @@ import Testing
     #expect(!GatewayConfig.isTailscaleCGNATAddress("spark.tail1234.ts.net"))
 }
 
-@Test func linkCodeRejectsOutOfRangePorts() {
+@Test func linkCodeRejectsInvalidPorts() {
     #expect(GatewayLinkCode.parse(
         "modelswitchboard-gateway://spark.local?agent_port=0"
     ) == nil)
@@ -166,6 +166,24 @@ import Testing
     ) == nil)
     #expect(GatewayLinkCode.parse(
         "modelswitchboard-gateway://spark.local:70000?agent_port=8877"
+    ) == nil)
+    // Present-but-malformed must refuse, not silently default to 8877.
+    #expect(GatewayLinkCode.parse(
+        "modelswitchboard-gateway://spark.local?agent_port=eighty"
+    ) == nil)
+    #expect(GatewayLinkCode.parse(
+        "modelswitchboard-gateway://spark.local?agent_port="
+    ) == nil)
+    #expect(GatewayLinkCode.parse(
+        "modelswitchboard-gateway://spark.local?agent_port=88.5"
+    ) == nil)
+    // Same class for the SSH port: URLComponents drops a malformed port to
+    // nil, which must not silently become 22.
+    #expect(GatewayLinkCode.parse(
+        "modelswitchboard-gateway://spark.local:ssh"
+    ) == nil)
+    #expect(GatewayLinkCode.parse(
+        "modelswitchboard-gateway://spark.local:"
     ) == nil)
     #expect(GatewayLinkCode.parse(
         "modelswitchboard-gateway://spark.local?agent_port=8877"
