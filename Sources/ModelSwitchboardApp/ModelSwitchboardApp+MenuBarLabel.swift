@@ -17,8 +17,9 @@ extension ModelSwitchboardApp {
                 // baselineOffset is dropped), so the fraction must be one
                 // string. U+2215 DIVISION SLASH stays inside the digit band
                 // (measured: vertically centered @2x), unlike "/" which sags
-                // ~5px below the digits.
-                Text("\(hub.displayedReadyProfiles)\u{2215}\(hub.totalProfiles)")
+                // ~5px below the digits; hair spaces restore the air its
+                // narrow bearings remove.
+                Text("\(hub.displayedReadyProfiles)\u{200A}\u{2215}\u{200A}\(hub.totalProfiles)")
                     .font(.system(size: 12, weight: .semibold).monospacedDigit())
             }
         }
