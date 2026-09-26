@@ -17,7 +17,7 @@
 </p>
 
 <p>
-  <a href="VERSION"><img alt="Version" src="https://img.shields.io/badge/version-2.0.0-blue?style=flat-square"></a>
+  <a href="VERSION"><img alt="Version" src="https://img.shields.io/badge/version-2.1.0-blue?style=flat-square"></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green?style=flat-square"></a>
   <a href="#requirements"><img alt="Platform" src="https://img.shields.io/badge/macOS-14%2B-lightgrey?style=flat-square&logo=apple&logoColor=white"></a>
   <a href="Package.swift"><img alt="Swift" src="https://img.shields.io/badge/swift-6.0-orange?style=flat-square&logo=swift&logoColor=white"></a>
@@ -238,7 +238,7 @@ If something looks off, these labels tell you what the app is seeing right now:
 
 ## What's new
 
-See **[CHANGELOG.md](CHANGELOG.md)** for release-by-release detail and **[Releases](https://github.com/AdityaVG13/Model-Switchboard/releases)** for signed DMG downloads. Current version: **2.0.0**.
+See **[CHANGELOG.md](CHANGELOG.md)** for release-by-release detail and **[Releases](https://github.com/AdityaVG13/Model-Switchboard/releases)** for signed DMG downloads. Current version: **2.1.0**.
 
 ---
 

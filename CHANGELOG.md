@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-09-26
+
 ### Added
 
 - Weekly GitHub release check: when a newer tag exists, the panel header swaps the version label for an "Update x.y.z" link to the release download. Advisory only - offline, rate-limited, and dev builds stay silent.
@@ -15,6 +17,7 @@ All notable changes to this project are documented in this file.
 ### Fixed
 
 - Remote gateway Retry no longer blanks the dashboard or tears down a live SSH tunnel, and failed refreshes keep the last error and ready-count on screen instead of flashing the menu bar every poll.
+- Ready/total fraction slashes (menu bar label, panel header, gateway chips, widget) no longer sag below the digit baseline; each is centered on the digit ink.
 
 ## [2.0.0] - 2026-09-16
 
