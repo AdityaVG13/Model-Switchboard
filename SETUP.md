@@ -393,7 +393,7 @@ Included:
 - `Scripts/sign-and-notarize-dmg.sh`
 - `.github/workflows/release.yml`
 
-The release workflow signs, notarizes, verifies, and uploads both editions when either:
+The release workflow signs, notarizes, verifies, and uploads the single unified-app DMG when either:
 
 - a `v*` tag is pushed
 - a commit on `main` changes `VERSION`
