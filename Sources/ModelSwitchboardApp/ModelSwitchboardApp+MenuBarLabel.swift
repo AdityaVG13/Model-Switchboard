@@ -12,7 +12,13 @@ extension ModelSwitchboardApp {
                 size: 18
             )
             if menuBarShowsReadyCount {
-                Text("\(hub.displayedReadyProfiles)/\(hub.totalProfiles)")
+                // MenuBarExtra maps the label to a status-item title: only the
+                // first Text survives (verified: trailing segments vanish, and
+                // baselineOffset is dropped), so the fraction must be one
+                // string. U+2215 DIVISION SLASH stays inside the digit band
+                // (measured: vertically centered @2x), unlike "/" which sags
+                // ~5px below the digits.
+                Text("\(hub.displayedReadyProfiles)\u{2215}\(hub.totalProfiles)")
                     .font(.system(size: 12, weight: .semibold).monospacedDigit())
             }
         }

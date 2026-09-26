@@ -6,7 +6,8 @@ extension SwitchboardWidgetView {
     var summaryContent: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                metric(title: "Ready", value: "\(summary.readyProfiles)/\(summary.totalProfiles)")
+                // U+2215 DIVISION SLASH: stays in the digit band, unlike "/".
+                metric(title: "Ready", value: "\(summary.readyProfiles)\u{2215}\(summary.totalProfiles)")
                 metric(title: "Running", value: "\(summary.runningProfiles)")
             }
             if let first = statuses.first {

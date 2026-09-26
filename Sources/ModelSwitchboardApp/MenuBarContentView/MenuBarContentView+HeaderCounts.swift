@@ -8,7 +8,13 @@ extension MenuBarContentView {
                 Text("\(hub.displayedReadyProfiles)")
                     .fontWeight(.bold)
                     .foregroundStyle(theme.label)
-                + Text("/\(hub.totalProfiles)")
+                // U+2215 DIVISION SLASH stays inside the digit band (measured:
+                // vertically centered @2x), unlike "/" which sags ~6px below
+                // the digits here. No baseline lift needed.
+                + Text("\u{2215}")
+                    .fontWeight(.medium)
+                    .foregroundStyle(theme.faint)
+                + Text("\(hub.totalProfiles)")
                     .fontWeight(.medium)
                     .foregroundStyle(theme.faint)
             )

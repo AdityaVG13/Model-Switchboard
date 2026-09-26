@@ -9,7 +9,8 @@ extension RemoteGatewaySectionView {
                     .fill(statusColor)
                     .frame(width: 6, height: 6)
                 DashboardSectionLabel(
-                    text: "\(runtime.name.uppercased()) · \(store.displayedReadyProfiles)/\(store.summary.totalProfiles) READY",
+                    // U+2215 DIVISION SLASH: stays in the digit band, unlike "/".
+                    text: "\(runtime.name.uppercased()) · \(store.displayedReadyProfiles)\u{2215}\(store.summary.totalProfiles) READY",
                     theme: theme
                 )
                 Spacer(minLength: 0)
